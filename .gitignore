@@ -1,0 +1,34 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets. Nothing here may ever be committed.
+# The bot token, the Telegram webhook secret, the Google service-account key and
+# the backup encryption passphrase all live in environment variables — see
+# .env.example for the full list and deploy/README.md for how they are set on the
+# server. A leaked bot token lets anyone impersonate the bot to 1,800 teachers.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+gcp-credentials*.json
+
+# Local runtime state
+postgres-data/
+uploads/
+backups/
+*.log
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test and coverage output
+coverage/
+.vitest/
