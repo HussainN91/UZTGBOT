@@ -24,6 +24,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 
+# The generated migration SQL. dist/db/migrate.js resolves this at ../../drizzle,
+# so without it the container starts but cannot create or update the schema.
+COPY drizzle ./drizzle
+
 # Never run as root. node:alpine ships an unprivileged "node" user.
 USER node
 

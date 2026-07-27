@@ -61,6 +61,19 @@ chmod 600 .env
 
 ```bash
 docker compose up -d --build
+```
+
+Create the schema before the processes do any real work. Safe to re-run — applied
+migrations are recorded and skipped, and each runs in a transaction, so a failure
+leaves the schema exactly as it was:
+
+```bash
+docker compose exec web node dist/db/migrate.js
+```
+
+Then watch it come up:
+
+```bash
 docker compose logs -f web
 ```
 
@@ -99,6 +112,35 @@ where it leaked into every proxy and access log in the path.
 
 Message the bot `/start` from any Telegram account. It should reply that the bot
 is running.
+
+## 6. Load the FAQ and the roster
+
+The worker syncs both every ten minutes on its own. Run it once by hand first, so
+any problem surfaces now rather than silently at 03:00:
+
+```bash
+docker compose exec worker node dist/scripts/sync-sheets.js
+```
+
+Read the output. It reports, per tab, how many rows were written, how many were
+deactivated, and every row it rejected with the row number and the reason —
+usually a topic name that does not match the FAQ taxonomy. Fix those in the
+sheet; the next sync picks them up.
+
+Exit code 0 means applied, 2 means refused by the damage limit, 1 means failed.
+
+**If it reports "Refusing to sync"**, that is the guard working. A sync that
+would switch off more than a fifth of the active rows stops and changes nothing,
+because somebody clearing the roster tab by accident must not mean 1,800 teachers
+cannot sign in. Check the sheet — a filter left applied and a partial paste both
+look like this. Once it looks right, the next sync recovers on its own. If the
+removal really is genuine:
+
+```bash
+docker compose exec worker node dist/scripts/sync-sheets.js --force
+```
+
+The override is recorded on the sync run, so it cannot pass unnoticed.
 
 ---
 

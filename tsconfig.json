@@ -4,10 +4,13 @@
     "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "rootDir": "src",
     "outDir": "dist",
     "sourceMap": true,
     "declaration": false,
+    /* This config is for the editor, vitest and typechecking — it covers the
+       root-level config files too, which are not part of the shipped build.
+       tsconfig.build.json turns emit back on for src/ alone. */
+    "noEmit": true,
 
     /* Strictness. The point of TypeScript here is that a spreadsheet column
        rename, a missing case field or an unhandled Telegram failure stops the
@@ -27,6 +30,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "*.config.ts", "drizzle.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

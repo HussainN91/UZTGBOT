@@ -1,0 +1,18 @@
+{
+  /**
+   * The build. Compiles src/ only, so dist/ mirrors src/ exactly and the paths
+   * in package.json and the Dockerfile stay predictable.
+   *
+   * tsconfig.json is the wider one the editor and vitest use: it also covers the
+   * root-level config files, which must be type-checked but must never be
+   * emitted into dist/.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}

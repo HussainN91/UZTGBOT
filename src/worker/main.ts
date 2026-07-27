@@ -14,6 +14,7 @@ import { run, type RunnerOptions, type Task } from 'graphile-worker';
 import { env } from '../config/env.js';
 import { assertDatabaseReachable, closePool } from '../db/client.js';
 import { log } from '../log.js';
+import { SYNC_SHEETS_TASK, syncSheetsTask } from './tasks/sync-sheets.js';
 
 /**
  * Job definitions live in their own schema so `pg_dump` of the application
@@ -25,7 +26,27 @@ const ping: Task = async (_payload, helpers) => {
   helpers.logger.info('worker ping');
 };
 
-export const taskList = { ping } satisfies Record<string, Task>;
+export const taskList = {
+  ping,
+  [SYNC_SHEETS_TASK]: syncSheetsTask,
+} satisfies Record<string, Task>;
+
+/**
+ * The schedule.
+ *
+ * graphile-worker reads this in crontab form and, crucially, will not run a job
+ * twice for the same slot even across restarts — so a deploy in the middle of a
+ * scheduled minute does not double-run it.
+ *
+ * `?` fills the minute and hour from a hash of the job name where it does not
+ * matter exactly when a job runs. Here it does matter, so both are explicit.
+ */
+export const CRONTAB = `
+# Copy the FAQ bank and the teacher roster out of the spreadsheet. Ten minutes
+# is the promise made to staff: an edited answer reaches teachers within ten
+# minutes, rather than the up-to-six-hours the Apps Script cache allowed.
+*/10 * * * * ${SYNC_SHEETS_TASK}
+`.trim();
 
 async function main(): Promise<void> {
   const settings = env();
@@ -47,6 +68,7 @@ async function main(): Promise<void> {
     noHandleSignals: true,
     pollInterval: 2_000,
     taskList,
+    crontab: CRONTAB,
   };
 
   const runner = await run(options);

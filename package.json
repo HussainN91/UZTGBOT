@@ -8,8 +8,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "dev:web": "tsx watch src/web/main.ts",
     "dev:worker": "tsx watch src/worker/main.ts",
     "start:web": "node dist/web/main.js",
@@ -18,11 +18,14 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json",
+    "sync": "tsx src/scripts/sync-sheets.ts",
+    "set-webhook": "tsx src/scripts/set-webhook.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "google-auth-library": "^10.9.1",
     "grammy": "^1.45.1",
     "graphile-worker": "^0.17.3",
     "pg": "^8.22.0",
