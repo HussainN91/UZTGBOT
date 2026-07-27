@@ -1,0 +1,39 @@
+# Caddy terminates TLS and forwards to the web process.
+#
+# It obtains the certificate from Let's Encrypt on first start and renews it on
+# its own, with no cron entry and no expiry to diarise. Telegram refuses to
+# deliver webhooks over plaintext HTTP or to an invalid certificate, so a lapsed
+# certificate is a full outage — which is exactly why this is automatic.
+
+{$BOT_HOSTNAME} {
+	encode gzip
+
+	# Telegram authenticates itself with the X-Telegram-Bot-Api-Secret-Token
+	# header, which the web process checks. Caddy deliberately does not inspect
+	# it: one place decides whether an update is genuine, and that place is the
+	# code with the test suite around it.
+	handle /webhook/telegram {
+		reverse_proxy web:8080
+	}
+
+	handle /healthz {
+		reverse_proxy web:8080
+	}
+
+	# Nothing else is served. There is no admin website by design — staff use
+	# Telegram commands and the spreadsheet — so any other path is either a
+	# mistake or a probe, and gets nothing either way.
+	handle {
+		respond "Not found" 404
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		# The webhook body carries teachers' messages. Log the request line and
+		# status, never the payload.
+		format json
+	}
+}
