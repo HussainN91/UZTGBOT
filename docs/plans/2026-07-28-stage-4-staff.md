@@ -22,30 +22,38 @@
 
 Continuing D1–D6 from the Stage 3 plan. These were open questions; they are settled here, with the reasoning, so they stay decisions rather than becoming accidents.
 
-### D7 — The role ladder is the four values already in the schema, and `ReadOnly` is not carried over
+### D7 — A five-rank ladder, with a deliberate observer at the bottom
 
-**Decision:** Authorization uses `staff_role` exactly as `src/db/schema.ts:85` defines it — `Support < Regional < Program < System`, ranked by index in `STAFF_ROLE_ORDER`. The capability table from `BOT-SPEC.md` §6.1 is re-expressed against these four names. Apps Script's `ReadOnly` gets no equivalent.
+**Revised 29 July** after the design session. The original decision carried Apps Script's four working ranks and no observer; the head of project asked for one, and named a real use — senior ministry staff, auditors, and new hires in their first week.
 
-**Why:** `ReadOnly` was not a designed role. `roleForAdmin_` (`AdminCommands.gs:185-193`) returns it when `ROLE` is blank *and* the row is not a System Admin *and* the Tier is not one of three known values — it is the "we do not know what this row is" bucket, produced by a migration fallback for spreadsheet rows written before the column existed. There are no such rows here: every `staff` row is created by a command that requires an explicit role, so the bucket has nothing to hold.
+**Decision:** Authorization uses `staff_role` as `src/db/schema.ts:85` defines it, ranked by index in `STAFF_ROLE_ORDER`, with **one value added below `Support`**: `Observer < Support < Regional < Program < System`. The capability table from `BOT-SPEC.md` §6.1 is re-expressed against these names.
 
-The re-expressed table, which becomes the single source of truth in `src/staff/roles.ts`:
+**Why an observer, when Apps Script's `ReadOnly` is not being carried over:** they are not the same thing. `roleForAdmin_` (`AdminCommands.gs:185-193`) returned `ReadOnly` when `ROLE` was blank *and* the row was not a System Admin *and* the Tier matched none of three known values — the "we do not know what this row is" bucket, produced by a migration fallback for spreadsheet rows written before the column existed. That bucket has nothing to hold here, because every `staff` row is created by a command requiring an explicit rank. An observer chosen on purpose is a different object with the same permissions, and it is added because somebody asked for it rather than because a fallback needed somewhere to land.
 
-| Capability | Support | Regional | Program | System |
-|---|---|---|---|---|
-| `case.view` — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ | ✅ | ✅ | ✅ |
-| `case.update` — `/reply` `/close` `/reopen` `/note` | ✅ | ✅ | ✅ | ✅ |
-| `case.assign` — `/assign` | | ✅ | ✅ | ✅ |
-| `urgent.issue` — `/generate_urgent_code` | ✅ | ✅ | ✅ | ✅ |
-| `teacher.revoke` — `/revoke` | | | ✅ | ✅ |
-| `staff.manage` — `/staff` `/staff_add` `/staff_role` `/staff_remove` | | | | ✅ |
-| `maintenance` — `/maintenance` | | | | ✅ |
-| `announce`, `export` | | | ✅ | ✅ |
+> ⚠️ **The name is not settled.** "Jstaff" was asked for; this plan uses `Observer`. The value goes into a database enum and is expensive to change afterwards. **Confirm before Task 23 is written.**
+
+The table, which becomes the single source of truth in `src/staff/roles.ts`:
+
+| Capability | Observer | Support | Regional | Program | System |
+|---|---|---|---|---|---|
+| `case.view` — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `case.update` — `/reply` `/close` `/reopen` `/note` | | ✅ | ✅ | ✅ | ✅ |
+| `case.mark` — `/mark` (D22) | | ✅ | ✅ | ✅ | ✅ |
+| `case.assign` — `/assign` | | | ✅ | ✅ | ✅ |
+| `urgent.issue` — `/generate_urgent_code` | | ✅ | ✅ | ✅ | ✅ |
+| `teacher.region` — `/region` (D20) | | | ✅ | ✅ | ✅ |
+| `teacher.revoke` — `/revoke` | | | | ✅ | ✅ |
+| `staff.manage` — `/staff` `/staff_add` `/staff_role` `/staff_remove` | | | | | ✅ |
+| `maintenance` — `/maintenance` | | | | | ✅ |
+| `announce`, `export` | | | | ✅ | ✅ |
+
+**The rank named `Regional` has nothing to do with regions**, and region is a separate setting on every row. A MoPSE "regional admin" is usually `Support` rank with a region set. Renaming the rank — `Lead` was suggested — is raised in the open items and **not yet answered**; it is free before there are rows and a migration afterwards.
 
 `announce` and `export` are in the table but have no command in this stage. They are listed so Stage 5 adds a command rather than a permission model, and so `/whoami` — which reads this table — does not have to change twice.
 
 A System member bypasses every capability, queue and region check, exactly as `adminCanSeeCase_` does (`AdminCommands.gs:290-294`).
 
-**Consequence, recorded as an open item:** there is now no way to give somebody sight of cases without also giving them the ability to change one. If MoPSE wants a ministry observer, that is one added enum value and one table row — cheap, and cheapest before launch. It is called out in the open items rather than quietly absorbed.
+**Consequence of the observer, which is where it will go wrong if it goes wrong:** `case.view` is not the same question as "should this person be told when a case arrives". An observer who receives a notification for every new case is being paged about work they cannot do. New-case notification therefore filters on `case.update`, not on `case.view` — see R14. Apps Script filtered on visibility alone (`AdminCommands.gs:353`), which was correct there only because its `ReadOnly` bucket was almost always empty.
 
 ### D8 — Staff notes get their own table, rather than being appended to `cases.detail`
 
@@ -162,6 +170,60 @@ This is the third dead pipeline of the same shape: the columns exist (`teachers.
 
 ---
 
+*D20–D24 were added on 29 July, from the design session recorded in `2026-07-29-staff-and-lifecycle-design.md`.*
+
+### D20 — A region correction lives in the database and never goes back to the spreadsheet
+
+**Decision:** `teachers` gains `region_override text` and `region_set_by`/`region_set_at`. A new function `regionFor(teacher)` returns `region_override ?? region`, and **every** region read goes through it. `/region <chat_id> <region>` at `Regional` rank and above is the only writer.
+
+**Why not write to the sheet:** the bot holds Viewer access to one spreadsheet, and `CONCERNS-AND-IT-ACTIONS.md` A8 is about read access to that document already being broader than anyone would like. Writing needs Editor, which is edit power over the tab holding the confidential answer bank. It would also reverse the one-way flow that `src/db/schema.ts:10-17` states as the ownership rule — the sheet owns what the bot reads, the database owns what the bot writes — and two writable copies of one fact is an argument waiting for the worst possible moment.
+
+**Precedence, stated once so it is never re-derived:** an explicit decision by a named person beats an import. The override wins whenever it is set; clearing it (`/region <chat_id> clear`) returns the teacher to whatever the roster says, which is also the recovery path from a mistyped region.
+
+**The function this breaks, and it is not obvious.** `bindTeacher` (`src/teachers/repository.ts:119`) upserts with `onConflictDoUpdate` and its `set` object includes `region`. A teacher who signs in again — a new phone, the commonest legitimate reason — would have their staff-set region silently overwritten by the roster's. The override column must be absent from that `set`, with a test that re-verifies a teacher and asserts the override survives. See R11.
+
+### D21 — The teacher confirms their region; only staff change it
+
+**Decision:** the bot shows the region it holds and asks whether it is still right. "No" writes nothing — it raises a flag a Regional manager sees. Staff make the change through D20.
+
+**Why not a picker:** region decides who sees a teacher's case. A menu of regions is a menu of "who gets my problem", and a wrong tap routes an emergency to the wrong province. The teacher is the best source of the *signal* and the worst source of the *record*.
+
+**Why not on every conversation:** there is no session to attach it to — the bot has no login, only messages and a thirty-minute conversation state. "Every new session" becomes "most times they come back", which for 1,800 people is a question tapped through unread, filling the field that routes emergencies with noise.
+
+**Split across stages, deliberately.** Stage 4 builds the staff-facing half: the flag, and `/region`. The teacher-facing prompt is Task 45 and is the one piece of teacher-visible change in this stage — it is small, and putting it here avoids a second round of teacher-facing work in Stage 5.
+
+### D22 — Importance is a permanent marker, separate from status
+
+**Decision:** `cases` gains `importance` — `Normal | Urgent | Critical`, default `Normal`, set by `/mark <ref> <level>` at `Support` rank and above. The urgent-code path sets `Urgent` at creation.
+
+**Why it cannot be the status:** the agreed retention rule keeps urgent and critical cases for six months and removes the rest sooner. `Escalated` is a *status*, and a status moves — an escalated case that gets resolved becomes `Completed`, and its history of having been an emergency disappears with it. Retention would then delete the record of exactly the cases most worth keeping. A marker is set once and stays.
+
+**Why `Critical` exists at all when `Urgent` already does:** urgent is what a teacher's one-time code buys, and it is issued by the flow. Critical is a judgement a person makes after reading the case. Collapsing them would mean either every code-holder's case is critical or no staff member can mark one.
+
+**Forward, and it must not be forgotten:** Stage 5's retention job reads this column. It is the only thing standing between "six months for urgent" and a job that treats every case identically.
+
+### D23 — A case carries a promised date and a snooze, and Stage 4 writes both
+
+**Decision:** `cases` gains `due_at` and `snoozed_until`, with `/due <ref> <date>` and `/snooze <ref> <period>` at `case.update`. The daily chasing that reads them is Stage 5.
+
+**Why write them here rather than add the columns in Stage 5:** two reasons, and the first is this plan's own argument turned on itself. The backward audit above lists eleven things earlier stages built with no consumer, and every one of them cost something. Adding two columns nothing writes would put this stage on that list. Giving them a writer now means Stage 5 adds a schedule to a field that already holds real data, rather than a schedule and a field and the hope that staff start filling it.
+
+The second is cheaper: one migration instead of two.
+
+**What is deliberately not built:** nothing arrives unasked. `overdueCases()` is written in Task 28 and returns cases whose `due_at` has passed and whose `snoozed_until` is null or past. Stage 5 gives it a trigger.
+
+> **Open, and it blocks Task 34.** The four working states described in the design session — *not yet opened / under review / approved or processing / done* — are close to but not the same as the eight statuses in `caseStatusEnum`. The mapping has to be agreed before the mutation commands are written, because they are what move a case between statuses.
+
+### D24 — Documents stay in Google Forms, and this reverses a planned direction
+
+**Decision:** teachers submit documents through the existing per-stage Google Forms. The bot never accepts or stores a file. Form links live in a third spreadsheet tab; submissions are matched to teachers by recruitment email read from the form's own responses tab.
+
+**Why it is recorded in the Stage 4 plan when it is Stage 6 work:** because it contradicts documents this stage is already correcting, and because one line of it constrains this stage. `RUNBOOK.md` Part 6 calls Telegram upload *"the only genuinely new feature in the rebuild"*; `BOT-SPEC.md` §1 says the opposite of both, describing the Apps Script Forms flow as current. Task 41 corrects all of it in one pass rather than leaving a third drift for somebody to find.
+
+**The line that constrains this stage:** the forward table already says not to reintroduce the `UNRESOLVED:` sentinel, and this decision is why that holds. Matching on the roster identifier is stronger than the mechanism it replaces — the Apps Script version pre-filled the chat id into a *visible, editable* form field and could therefore never trust it as identity. An email matched against the roster is the same identity check as sign-in. Commands written in this stage must not carry a branch for an unidentifiable submitter, because the schema cannot store one and now nothing will produce one.
+
+---
+
 # The pipeline audit — backward and forward
 
 The instruction for this stage was to check the pipelines in both directions and put their endpoints in the right place. This section is that audit. It is the reason several tasks below exist at all.
@@ -183,6 +245,7 @@ Every row here is something a previous stage created and nothing has ever used. 
 | Stage 3 | `cases.public_update` | always `''`; teachers see an empty field | `/reply` writes it — it is the only case text a teacher ever sees |
 | Stage 3 | `urgent_codes.issued_by` | hand-inserted `'0'` per RUNBOOK §4.4 | `/generate_urgent_code` |
 | Stage 3 | `teachers.region` | copied at bind time for "Stage 4's entire region axis" | The region half of D10 |
+| Stage 2 | `roster_entries.region` | synced from the sheet, **reaches no teacher who has already signed in** (R12) | `regionFor` reads it live (Task 43) |
 
 **The one that is not connected:** `messages`' `ANSWER_HELPFUL` / `ANSWER_UNHELPFUL` rows and the `AWAITING_QUESTION_TOPIC` misses are read by the monthly content review in `RUNBOOK.md` §4.7, by a human running SQL. That is a real endpoint and needs no command.
 
@@ -192,9 +255,11 @@ Every row here is something a previous stage created and nothing has ever used. 
 |---|---|---|
 | Stage 5 | `announcements`, `announcement_recipients` | Leave untouched. Carry `announce`/`export` in the capability table so Stage 5 adds commands only (D7, D19) |
 | Stage 5 | The daily overdue digest | Read `OVERDUE_DAYS` for `/urgent`; do not push anything on a schedule. The digest is the same query with a different trigger, so `overdueCases()` is written here as a reusable query |
-| Stage 5 | Retention clean-up | Do not consume `RETENTION_DAYS`. `case_notes` (D8) is a new table with teacher-adjacent content, so it must be added to the retention job's scope — recorded in the open items so Stage 5 does not miss it |
+| Stage 5 | Retention clean-up | Do not consume `RETENTION_DAYS`. Three things must be in that job's scope and none of them are obvious: `case_notes` (D8) holds staff writing about teachers; `isRetained(importance)` (D22) is what makes "six months for urgent and critical" possible, and a job reading `status` instead would delete exactly those; and removal means **anonymise, not delete** — `cases.teacher_chat_id` refuses the delete, which is `CONCERNS` A11 |
+| Stage 5 | Chasing open cases | `due_at` and `snoozed_until` are written here (D23) and `casesPastDue()` exists and is tested. Stage 5 adds a schedule, not a field |
 | Stage 6 | `DOC:` callback prefix, `CASE_CATEGORY.SUBMIT_DOCS` | The queue map must be **total** over `CaseCategory` today, so a document case files to a real queue the moment Stage 6 emits one |
-| Stage 6 | Document cases with an unresolvable submitter | Do **not** reintroduce the `UNRESOLVED:` sentinel. `cases.teacher_chat_id` is a non-null FK with a digits check; Apps Script's sentinel cannot be stored and `hasNotifiableChatId_` (`AdminCommands.gs:652`) has no equivalent here. Commands must not carry a check for a state the schema forbids |
+| Stage 6 | Document cases with an unresolvable submitter | Do **not** reintroduce the `UNRESOLVED:` sentinel. `cases.teacher_chat_id` is a non-null FK with a digits check; Apps Script's sentinel cannot be stored and `hasNotifiableChatId_` (`AdminCommands.gs:652`) has no equivalent here. Under D24 nothing will produce one either — submissions are matched on the roster identifier — so commands written in this stage must not carry a branch for a state that is both forbidden and unreachable |
+| Stage 6 | Documents through Google Forms (D24) | A third spreadsheet tab, `FORMS`, synced exactly as `FAQ` and `ROSTER` are. Nothing in this stage blocks it; the sync's existing shape — reject a bad row, report it with its row number, apply the rest — is what makes a half-ready form unable to reach a teacher |
 | Stage 7 | Launch readiness | Bootstrap SQL, two named System members, and the smoke-test steps below |
 
 ## Endpoint check — where each pipeline terminates
@@ -210,6 +275,10 @@ Every row here is something a previous stage created and nothing has ever used. 
 | Maintenance | — | Read by the router | Flippable by a person in seconds | `/maintenance` |
 | Audit | — | Table with no writer | Rows a person can query during an investigation | D18 |
 | Privilege denial | A staff command | — | A logged `STAFF_DENIED` with the caller's shape | D9 |
+| Region correction | Recruitment edits the sheet | **nothing reaches the teacher** (R12) | The region used to route their cases | Task 43 |
+| Region, teacher moved | Nobody — no route exists | — | A flag a manager sees and acts on | Tasks 45, 46 |
+| Importance | Urgent code, or a judgement | Lost when the case is resolved | A marker retention can read (D22) | Tasks 42, 44 |
+| A promise to a teacher | Staff say when it will be done | Said aloud, recorded nowhere | A date on the case, chased in Stage 5 | Task 44 |
 
 ---
 
@@ -224,26 +293,31 @@ Layer 5  documentation
 Layer 4  seams and pipeline ends
          new-case notification ── staff fan-out alerter ── group gate
               │                          │                     │
-Layer 3  commands (the thin part)
+Layer 3  commands (the thin part)                    · teacher-facing: region confirmation
          /cases /mycases /urgent /case /search       ← case.view
          /reply /close /reopen /note                 ← case.update
+         /mark /due /snooze                          ← case.update
          /assign                                     ← case.assign
          /generate_urgent_code                       ← urgent.issue
+         /region /regions                            ← teacher.region
          /revoke                                     ← teacher.revoke
          /staff /staff_add /staff_role /staff_remove ← staff.manage
          /maintenance                                ← maintenance
          /whoami /help                               ← any active staff row
               │
 Layer 2  stores (database, no Telegram)
-         staff repository ── visibility predicate ── case queries
-         case notes ── teacher revocation ── existing: updateCase, setSetting, recordAudit
+         staff repository ── region resolution ── visibility predicate ── case queries
+         case notes ── importance and chasing ── teacher revocation
+         existing: updateCase, setSetting, recordAudit
               │
 Layer 1  leaves (no database, no network)
-         role ladder + capability table ── queue map ── command parser
+         role ladder + capability table ── queue map ── importance vocabulary ── command parser
               │
-Layer 0  already built, unchanged
+Layer 0  the migration (Task 42), then everything already built and unchanged
          chat lock · conversation state · interaction log · send · alerts · constants
 ```
+
+**Two edges that are easy to get backwards.** The visibility predicate depends on region resolution, not the other way round — Task 43 before Task 27. And every case query depends on the migration, so Task 42 is first in Layer 2 rather than sitting with the other schema work in the middle of it.
 
 **Legend for the gap hunt:** everything in Layers 0–2 marked *existing* is built and tested; everything else is new in this stage. There is no branch of this tree that depends on Stage 5, 6 or 7 — checked deliberately, because Stage 3's plan claimed that of itself and the dependency review refuted it.
 
@@ -307,6 +381,39 @@ A new case notifies up to twenty staff → `deliver` sends sequentially inside t
 `bot.ts:70-77` hardcodes *"This was a notice about somebody else's action (a duplicate sign-in)"* for every message after the first → new-case notification adds a second kind of non-first message → a failed staff notification would be alerted as a duplicate sign-in.
 **Terminates at:** `OutgoingMessage` carrying a short `purpose`, used in the alert text. Small, and the kind of thing that silently misleads an operator at three in the morning.
 
+*R11–R15 trace the decisions added on 29 July.*
+
+### R11 — Signing in again wipes a staff-set region
+
+`/region` writes `region_override` → the teacher later changes phone and verifies again → `verifyIdentifier` calls `bindTeacher` → `bindTeacher` upserts with `onConflictDoUpdate` whose `set` object writes `region` from the roster (`src/teachers/repository.ts:120-131`) → if the override lives anywhere that `set` touches, a Regional manager's correction is silently undone by the teacher buying a phone.
+**Terminates at:** the override columns being absent from `bindTeacher`'s `set`, and a test that verifies, overrides, re-verifies and asserts the override survived. The same test guards `revoked_at`, which `bindTeacher` deliberately *does* clear — a previously revoked chat that verifies again is active once more, and that behaviour must not be broken by fixing this one.
+
+### R12 — The roster's region column has never reached anybody
+
+Recruitment corrects a region in the spreadsheet → the sync updates `roster_entries.region` → **nothing else happens.** `teachers.region` is written once, at bind time, and `bindTeacher` is the only writer. A teacher who signed in last month keeps last month's region for ever, because there is no reason for them ever to sign in again.
+**So there are two ways to change a teacher's region today and neither works:** the spreadsheet (never propagates) and no command at all.
+**Terminates at:** `regionFor()` resolving `region_override ?? roster_entries.region`, read live through the join the visibility predicate already needs, rather than from the `teachers` snapshot. Recruitment's edits then take effect within ten minutes like every other sheet edit, and `teachers.region` becomes what it honestly is — a record of the region at bind time, kept because it costs nothing and answers "what did we think then".
+**The property that must survive:** D10's rule that an unknown region hides a case from nobody. `COALESCE` of two nulls is null, and the predicate's `OR ... IS NULL` branch still catches it — tested explicitly, because this is the change most likely to break it.
+
+### R13 — Importance, status, and a retention job that has not been written
+
+`/mark` sets `Critical` → the case is worked and closed → its status becomes `Completed` → Stage 5's retention job runs → if the job reads *status* it deletes a critical case at the ordinary interval, because nothing about `Completed` says it was ever critical.
+**Terminates at:** D22's separate column, and one test asserting a marked case keeps its marker through close and reopen.
+**Second order:** the urgent-code path files at `Escalated` and must now also set `importance = 'Urgent'`, in the same insert. Two writes would mean a code spent for a case that is not marked as what the code bought — the same shape of fault as an urgent code spent with no case, which already has an alarm.
+**Third order:** `appendUrgentFollowUp` escalates an *existing* case on the deduplicated path (`src/cases/service.ts:145`). That path must raise importance too, or the common urgent case — urgent plus deduplicated — is the one that loses its marker.
+
+### R14 — Notifying an observer about work they cannot do
+
+New case → recipients computed → an observer holds `case.view` and matches the queue and region → they are paged for every case that arrives → they cannot reply, close or take it.
+**Terminates at:** filtering recipients on `case.update` rather than on visibility. Apps Script filtered on `adminCanSeeCase_` alone (`AdminCommands.gs:353`), which was right there only because its `ReadOnly` bucket was nearly always empty; here the rank exists because somebody asked for it, so it will have people in it.
+**Collides with R4:** the zero-recipients alarm must count people who can *act*, not people who can see. A queue covered only by observers is a queue where cases arrive and nobody works them, and that must alarm rather than look staffed.
+
+### R15 — Two columns nobody reads until the stage after next
+
+`due_at` and `snoozed_until` are added here (D23) and the chasing that reads them is Stage 5 → for one stage they are columns with a writer and no reader → which is a milder version of the eleven-row backward audit at the top of this plan.
+**Terminates at:** `/case` displaying both, and `overdueCases()` existing and being tested in Task 28. The data is visible to a human and queryable from the first day, so Stage 5 adds a schedule rather than a schedule plus a field plus the hope that staff have been filling it in.
+**Left as a known cost:** until Stage 5, a promised date that passes is visible only to somebody who looks. That is the same position `OVERDUE_DAYS` has been in since Stage 2 and is honest about what this stage does not do.
+
 ---
 
 # File structure
@@ -327,21 +434,34 @@ A new case notifies up to twenty staff → `deliver` sends sequentially inside t
 | `src/telegram/commands/cases.ts` | `/cases` `/mycases` `/urgent` `/case` `/search` `/reply` `/close` `/reopen` `/assign` `/note` |
 | `src/telegram/commands/staff.ts` | `/staff` `/staff_add` `/staff_role` `/staff_remove` `/whoami` `/revoke` |
 | `src/telegram/commands/ops.ts` | `/maintenance` `/generate_urgent_code` |
-| `drizzle/0006_case_notes.sql` | Generated |
+| `src/teachers/region.ts` | `regionFor`, `setRegionOverride`, `clearRegionOverride`, `flagRegionMismatch`, `listRegionFlags` (D20, D21) |
+| `src/cases/importance.ts` | The `Normal / Urgent / Critical` vocabulary and its parser. Pure (D22) |
+| `drizzle/0006_notes_regions_importance.sql` | Generated — one migration for the whole stage (D23) |
 
 Test files alongside each, following the existing `.test.ts` / `.integration.test.ts` split.
 
 ## Modified
 
-- `src/db/schema.ts` — add `caseNotes`
+- `src/db/schema.ts` — `caseNotes`; `Observer` added to `staffRoleEnum` and `STAFF_ROLE_ORDER`; `teachers.region_override`, `region_set_by`, `region_set_at`; `cases.importance`, `due_at`, `snoozed_until`
 - `src/telegram/router.ts` — the staff branch in `routeText`; `OutgoingMessage.purpose`
 - `src/telegram/bot.ts` — private-chat gate, `my_chat_member` leave handler, generalised failure alert
 - `src/telegram/alerter.ts` — System-staff fan-out
 - `src/log/interactions.ts` — the `/` prefix rule (D16)
-- `src/cases/service.ts` — `findCase`; `createCase` reports what notification needs
-- `src/teachers/repository.ts` — roster-active re-check, `revokeTeacher`
-- `src/config/constants.ts` — `STAFF_LIST_CAP`, `CASE_NOTES_SHOWN`, `URGENT_CODE_TTL_HOURS`
+- `src/cases/service.ts` — `findCase`; `createCase` reports what notification needs and sets `importance` on the urgent path; `appendUrgentFollowUp` raises importance on the deduplicated path (R13)
+- `src/teachers/repository.ts` — roster-active re-check, `revokeTeacher`, and **`bindTeacher`'s `set` must not touch the override columns** (R11)
+- `src/staff/visibility.ts` — resolves region through `regionFor`, joining `roster_entries` (R12)
+- `src/config/constants.ts` — `STAFF_LIST_CAP`, `CASE_NOTES_SHOWN`, `URGENT_CODE_TTL_HOURS`, `REGION_CONFIRM_AFTER_DAYS`, `MAX_SNOOZE_DAYS`
 - `BOT-SPEC.md`, `RUNBOOK.md`, `CONCERNS-AND-IT-ACTIONS.md`
+
+---
+
+---
+
+## A note on task numbers
+
+Tasks 42–46 came out of the 29 July design session, after this plan was already committed. They are numbered after 41 so that anything already referring to a task number still means what it said, and they are placed **where they must be built** rather than at the end. Build the document in the order it reads, top to bottom:
+
+`23 · 24 · 25 · 42 · 26 · 43 · 27 · 28 · 29 · 44 · 30 · 31 · 32 · 33 · 34 · 35 · 45 · 46 · 36 · 37 · 38 · 39 · 40 · 41`
 
 ---
 
@@ -376,10 +496,19 @@ describe('the capability table', () => {
     expect(can({ role: 'Regional', active: true }, 'case.assign')).toBe(true);
   });
 
-  it('lets every role work a case, because there is no observer role', () => {
-    // D7: ReadOnly was the fallback for a blank Tier, not a designed role.
-    // If this test ever needs changing, add the enum value deliberately.
-    expect(can({ role: 'Support', active: true }, 'case.update')).toBe(true);
+  it('lets an Observer see a case and change nothing', () => {
+    // D7. The whole point of the rank: sight without the power to alter.
+    expect(can({ role: 'Observer', active: true }, 'case.view')).toBe(true);
+    for (const capability of ALL_CAPABILITIES.filter((c) => c !== 'case.view')) {
+      expect(can({ role: 'Observer', active: true }, capability)).toBe(false);
+    }
+  });
+
+  it('does not let an Observer issue an urgent code', () => {
+    // Called out separately because it is the one capability that is not about
+    // cases and would be easy to grant by pattern-matching on "read-only means
+    // no writes to cases".
+    expect(can({ role: 'Observer', active: true }, 'urgent.issue')).toBe(false);
   });
 
   it('names every capability in the ladder order, so /whoami can list them', () => {
@@ -546,6 +675,96 @@ it('splits a reference from a message without losing internal spacing', () => {
 
 # Layer 2 — stores (database, no Telegram)
 
+### Task 42: One migration for the whole stage
+
+Numbered after 41 because this plan was already committed; **built in the position it appears here**, first in Layer 2, because everything below reads what it creates.
+
+Every schema change this stage needs, in one migration. D23's second reason: one migration instead of three, and no window in which half the columns exist.
+
+**Files:** Modify `src/db/schema.ts`; generate `drizzle/0006_notes_regions_importance.sql`
+
+- [ ] **Step 1: `Observer` into the role enum and the ladder**
+
+```ts
+export const staffRoleEnum = pgEnum('staff_role', ['Observer', 'Support', 'Regional', 'Program', 'System']);
+export const STAFF_ROLE_ORDER = ['Observer', 'Support', 'Regional', 'Program', 'System'] as const;
+```
+
+⚠️ **Confirm the name first (D7).** This value is permanent from the moment it ships.
+
+⚠️ **A PostgreSQL trap worth knowing before you run it.** `ALTER TYPE … ADD VALUE` may run inside a transaction on PostgreSQL 12 and later — which matters because `src/db/migrate.ts` wraps each migration in one — but the new value **cannot be used in that same transaction**. Adding it is all this migration does; nothing inserts an `Observer` row until runtime, which is a different transaction. Do not add a seed row to this migration.
+
+Generate with `BEFORE 'Support'` so `ORDER BY role` in any future ad-hoc query sorts the way the ladder reads. Ranking in the program is by index in `STAFF_ROLE_ORDER`, not by the enum's internal order, so this is tidiness rather than correctness.
+
+- [ ] **Step 2: The region override columns** (D20)
+
+```ts
+    /**
+     * A region set by a named person, which beats the roster.
+     *
+     * The roster is recruitment's copy and it goes stale — teachers are moved.
+     * The bot cannot write back to the spreadsheet (it holds Viewer access to
+     * one document, and edit access would reach the confidential answer bank),
+     * so a correction is recorded here and `regionFor` resolves the precedence
+     * in one place. Clearing it returns the teacher to whatever the roster says,
+     * which is also how a mistyped region is undone.
+     *
+     * NOT written by `bindTeacher`. A teacher who signs in again — a new phone,
+     * the commonest legitimate reason — would otherwise have a manager's
+     * correction silently reverted by the roster's value.
+     */
+    regionOverride: text('region_override'),
+    regionSetBy: chatId('region_set_by'),
+    regionSetAt: tsz('region_set_at'),
+    /** Raised when a teacher says the region we hold is wrong. Cleared when staff act. */
+    regionFlaggedAt: tsz('region_flagged_at'),
+```
+
+- [ ] **Step 3: Importance, promised date and snooze** (D22, D23)
+
+```ts
+    /**
+     * How serious this case is, as a person judged it — not as its status says.
+     *
+     * Separate from `status` because status moves: an escalated case that gets
+     * resolved becomes Completed, and with it goes every trace of its having
+     * been an emergency. Retention keeps urgent and critical cases for six
+     * months, so a retention job reading status would delete exactly the cases
+     * most worth keeping.
+     */
+    importance: caseImportanceEnum('importance').notNull().default('Normal'),
+    /** When whoever holds this case said it would be done. */
+    dueAt: tsz('due_at'),
+    /** Suppresses chasing until this passes. Never suppresses the case itself. */
+    snoozedUntil: tsz('snoozed_until'),
+```
+
+plus `caseImportanceEnum` (`Normal`, `Urgent`, `Critical`) and `index('cases_chasing_idx').on(t.status, t.dueAt, t.snoozedUntil)`.
+
+- [ ] **Step 4: `case_notes`** — the table from Task 29, created here rather than there.
+
+- [ ] **Step 5: Generate and check it is additive**
+
+```bash
+npx drizzle-kit generate --name=notes_regions_importance
+```
+
+Expected: one `CREATE TABLE`, one `CREATE TYPE`, one `ALTER TYPE … ADD VALUE`, four `ALTER TABLE … ADD COLUMN`, two indexes. **No column drops, no type changes, no `NOT NULL` without a default** — rollback stays code-only only while every migration is additive, and this is the largest one in the rebuild so far.
+
+- [ ] **Step 6: Run the whole existing suite against the new schema**
+
+Run: `npm test`
+Expected: 332 passing, unchanged. A migration that changes behaviour before a line of new code is written means one of the defaults is wrong.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/db/schema.ts drizzle
+git commit -m "feat: the stage 4 schema — notes, region overrides, case importance and chasing"
+```
+
+---
+
 ### Task 26: The staff repository
 
 **Files:** Create `src/staff/repository.ts`, `repository.integration.test.ts`
@@ -578,6 +797,83 @@ it('counts only active System members', async () => { /* … */ });
 - [ ] **Step 2: Implement.** `addStaff` requires an explicit role and queue — no defaults. The schema defaults `queue` to `'All'` and `role` to `'Support'` for migration safety; a command that lets somebody omit them grants more than the caller meant to.
 
 - [ ] **Step 3: Commit**
+
+---
+
+### Task 43: Region resolution, in one function
+
+Implements D20 and closes R11 and R12. **Built before Task 27**, because the visibility predicate reads what this defines.
+
+**Files:** Create `src/teachers/region.ts`, `region.integration.test.ts`; modify `src/teachers/repository.ts`
+
+- [ ] **Step 1: Write the test that proves today's behaviour is wrong**
+
+```ts
+it('follows the roster when recruitment corrects a region', async () => {
+  // R12. There is no code path from a corrected roster row to a teacher who has
+  // already signed in: teachers.region is written once, by bindTeacher, and a
+  // verified teacher never verifies again. Recruitment's edits reach nobody.
+  await verifyTeacher(db, CHAT, IDENTIFIER);           // roster says Tashkent
+  await setRosterRegion(db, IDENTIFIER, 'Samarkand');  // as the sync would
+  expect(await regionFor(db, CHAT)).toBe('Samarkand');
+});
+
+it('lets a manager override the roster', async () => {
+  await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
+  await setRosterRegion(db, IDENTIFIER, 'Samarkand');
+  expect(await regionFor(db, CHAT)).toBe('Bukhara');
+});
+
+it('keeps the override when the teacher signs in again from a new phone', async () => {
+  // R11. bindTeacher upserts with onConflictDoUpdate and its `set` writes
+  // region from the roster. A manager's correction must not be undone by a
+  // teacher buying a phone.
+  await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
+  await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+  expect(await regionFor(db, CHAT)).toBe('Bukhara');
+});
+
+it('still un-revokes a chat that verifies again', async () => {
+  // The same `set` object deliberately clears revoked_at. Fixing R11 must not
+  // break that — they are two columns in one statement and it is easy to widen
+  // the fix by one field too many.
+});
+
+it('returns null when neither the override nor the roster has one', async () => {
+  // D10 depends on this: an unknown region hides a case from nobody.
+});
+
+it('returns to the roster value when the override is cleared', async () => { /* … */ });
+```
+
+- [ ] **Step 2: `regionFor`, and every region read goes through it**
+
+```ts
+/**
+ * The one answer to "which region is this teacher in".
+ *
+ * Precedence, stated once so nothing re-derives it: an explicit decision by a
+ * named person beats an import. Below that, the roster is read LIVE rather than
+ * from the copy taken at sign-in — `teachers.region` is written once by
+ * `bindTeacher` and a verified teacher never signs in again, so a correction
+ * made in the spreadsheet has never reached anybody. Reading through the join
+ * makes recruitment's edits behave like every other sheet edit: ten minutes.
+ *
+ * `teachers.region` is kept, and is now honestly what it always was — a record
+ * of what we believed at bind time.
+ */
+export async function regionFor(db: Database, chatId: string): Promise<string | null>
+```
+
+- [ ] **Step 3: Repair `bindTeacher`.** Remove nothing from its `set` that is there on purpose; add nothing to it. The override columns are simply never in it. The test in Step 1 is the guard.
+
+- [ ] **Step 4: The writers** — `setRegionOverride(db, chatId, region, actor)`, `clearRegionOverride(db, chatId, actor)`, both writing `region_set_by` / `region_set_at` and an audit row (D18); `flagRegionMismatch(db, chatId)` for the teacher-facing half; `listRegionFlags(db, staffScope)` so a manager can see who has reported a move.
+
+- [ ] **Step 5: Run the whole suite, then commit**
+
+```bash
+git commit -am "feat: one answer to a teacher's region, and roster corrections that arrive"
+```
 
 ---
 
@@ -685,7 +981,7 @@ Implements D8.
 
 **Files:** Modify `src/db/schema.ts`; create `src/cases/notes.ts`, `notes.integration.test.ts`; generate `drizzle/0006_case_notes.sql`
 
-- [ ] **Step 1: The table**
+- [ ] **Step 1: The table** — created in Task 42's migration, not here. Its shape and the reasoning:
 
 ```ts
 /**
@@ -727,13 +1023,58 @@ it('keeps both notes when two staff write at the same moment', async () => {
 });
 ```
 
-- [ ] **Step 3: Generate the migration, run, commit**
+- [ ] **Step 3: Run, commit.** No migration here — Task 42 generated it.
 
-```bash
-npx drizzle-kit generate --name=case_notes
+---
+
+### Task 44: Importance, promised dates and snoozes
+
+Implements D22 and D23, and closes R13. **Built after Task 29**, because it touches the same write path.
+
+**Files:** Create `src/cases/importance.ts`, `importance.test.ts`; modify `src/cases/service.ts`, `src/cases/queries.ts`
+
+- [ ] **Step 1: The vocabulary, pure**
+
+`CASE_IMPORTANCE` (`Normal`, `Urgent`, `Critical`), `parseImportance(raw)` accepting the spellings a person actually types, `isRetained(importance)` naming which levels the six-month rule covers — so Stage 5's retention job asks this module rather than hard-coding two strings.
+
+- [ ] **Step 2: The three writes on the urgent path, tested together**
+
+```ts
+it('marks a case urgent when it is filed with a code', async () => {
+  // In the same insert as the status, not a second write. A code spent for a
+  // case that is not marked as what the code bought is the same shape of fault
+  // as a code spent with no case at all — which already has its own alarm.
+});
+
+it('raises importance when an urgent follow-up escalates an EXISTING case', async () => {
+  // R13, third order, and the one most likely to be missed: urgent plus
+  // deduplicated is the common path (BOT-SPEC §7.3), not an edge case. If
+  // appendUrgentFollowUp escalates the status but leaves importance at Normal,
+  // the commonest urgent case is the one retention throws away first.
+});
+
+it('keeps the marker through close and reopen', async () => {
+  // The whole reason importance is not a status.
+});
+
+it('never lowers importance on the deduplicated path', async () => {
+  // A Critical case that receives an urgent follow-up stays Critical.
+});
 ```
 
-Expected: `CREATE TABLE` and one index. No alterations to existing tables — the additive property that makes rollback code-only must hold.
+- [ ] **Step 3: `markImportance(db, reference, level, actor)`**, through `updateCase`'s pattern — `updated_at` and `last_actor` set by the function, never by the caller.
+
+- [ ] **Step 4: `setDue` and `setSnooze`.** Both single statements. `snoozed_until` is capped at `MAX_SNOOZE_DAYS` so a case cannot be snoozed out of existence, and a snooze never changes the case's status — it suppresses chasing, not the work.
+
+- [ ] **Step 5: `casesPastDue(staffScope)`** in `queries.ts` — `due_at < now()` and `snoozed_until` null or past, with the visibility predicate applied.
+
+⚠️ **Two different ideas of "overdue", and they must not be merged.** `staleCases(overdueDays)` in Task 28 is `/urgent`'s half: an open case nobody has touched for N days, where N comes from `OVERDUE_DAYS`. `casesPastDue()` is a promise somebody made and has missed. A case can be either, both or neither. Name them apart, or Stage 5 will chase the wrong list.
+
+- [ ] **Step 6: Run, commit**
+
+```bash
+git commit -am "feat: case importance that survives being resolved, and dates somebody promised"
+```
 
 ---
 
@@ -851,6 +1192,16 @@ Implements D11. Closes the largest missing endpoint in the system.
 ```ts
 it('tells the staff who can see the case, and nobody else', async () => { /* … */ });
 
+it('does not notify an Observer, who could not act on it', async () => {
+  // R14. `case.view` is not the same question as "should this person be paged".
+  // Recipients are filtered on case.update, not on visibility.
+});
+
+it('alarms when a queue is covered only by Observers', async () => {
+  // R14 colliding with R4. A queue where cases arrive and nobody is able to
+  // work them must alarm, not look staffed.
+});
+
 it('never includes the case detail', async () => {
   // A teacher's free text is not copied into N Telegram histories
   // (AdminCommands.gs:325). Admins read it with /case.
@@ -949,6 +1300,71 @@ it('reports back when the assignee could not be notified', async () => { /* … 
 ```
 
 - [ ] **Step 2: Implement. Step 3: Commit**
+
+---
+
+### Task 45: `/region` `/mark` `/due` `/snooze`
+
+The commands over Tasks 43 and 44. **Built after Task 35.**
+
+**Files:** Modify `src/telegram/commands/cases.ts`, `src/telegram/commands/staff.ts`
+
+- [ ] **Step 1: `/region <chat_id> <region|clear>`** at `teacher.region` — `Regional` and above. Clears `region_flagged_at` when it acts, so the flag means "reported and not yet dealt with" rather than "reported once, ever".
+
+- [ ] **Step 2: `/regions`** — the flag list. Without it, a teacher's report has a writer and no reader, which is the pattern the backward audit of this plan exists to stop.
+
+- [ ] **Step 3: `/mark <ref> Normal|Urgent|Critical`**, `/due <ref> <date>`, `/snooze <ref> <days>` at `case.update`.
+
+- [ ] **Step 4: `/case` shows all four fields** — importance, promised date, snooze, and who set the region — or R15 stands and the columns are invisible until Stage 5.
+
+- [ ] **Step 5: Tests**
+
+```ts
+it('refuses a region a manager does not cover', async () => {
+  // A Regional manager for Samarkand must not be able to move a teacher into
+  // Bukhara. Region is the axis that decides who sees a case, so a command that
+  // edits it is a command that can move work away from the person holding it.
+});
+
+it('accepts a date a person would actually type, and refuses one in the past', async () => { /* … */ });
+```
+
+- [ ] **Step 6: Commit**
+
+---
+
+### Task 46: Asking the teacher whether their region is still right
+
+Implements D21's teacher-facing half — the only teacher-visible change in this stage.
+
+**Files:** Modify `src/telegram/router.ts`, `src/telegram/keyboards.ts`, `src/telegram/handlers/menu.ts`
+
+- [ ] **Step 1: Ask rarely, and only where it is relevant**
+
+Shown when the chat is verified, `REGION_CONFIRM_AFTER_DAYS` have passed since the last confirmation, and the teacher is at the main menu — never in the middle of describing a case, and never as a blocker. Two buttons: *Yes, still right* / *No, I have moved*.
+
+- [ ] **Step 2: "No" writes nothing but a flag**
+
+```ts
+it('does not change the region when a teacher says it is wrong', async () => {
+  // D21. The teacher is the best source of the signal and the worst source of
+  // the record — region decides who receives their emergency, so a menu of
+  // regions is a menu of "who gets my problem". They report; staff decide.
+  await tapRegionWrong(CHAT);
+  expect(await regionFor(db, CHAT)).toBe('Tashkent');
+  expect(await listRegionFlags(db, ANY_MANAGER)).toContainEqual(expect.objectContaining({ chatId: CHAT }));
+});
+
+it('does not ask again the next day', async () => { /* … */ });
+
+it('never interrupts a teacher part-way through a case', async () => { /* … */ });
+```
+
+- [ ] **Step 3: Two new callback prefixes** through `encodeCallback`, and the byte-ceiling assertion extended to cover them — one place measures callback data and the suite asserts the worst realistic payload with real values.
+
+- [ ] **Step 4: Run the full router suite.** This adds a branch to the teacher path, which is finished and working; the 35 router tests are what will catch a mistake.
+
+- [ ] **Step 5: Commit**
 
 ---
 
@@ -1096,8 +1512,10 @@ it('leaves an ordinary question alone', () => {
 Not optional, and larger than Stage 3's equivalent because this stage corrects two documented behaviours that were never true.
 
 - [ ] **Step 1: `BOT-SPEC.md`**
-  - §6.1 — the capability table, re-expressed against `Support/Regional/Program/System` (D7)
-  - §6.4, §6.5 — command names (D14), the nineteen becoming eighteen plus two deferred (D19)
+  - §6.1 — the capability table, re-expressed against the five ranks `Observer/Support/Regional/Program/System`, with the note that the rank named `Regional` is not the region axis (D7)
+  - §6.4, §6.5 — command names (D14), and the command list: nineteen becomes eighteen, minus two deferred (D19), plus `/mark` `/due` `/snooze` `/region` `/regions` (D20, D22, D23)
+  - **§10 — rewrite.** It describes the Apps Script Forms flow as current, including the pre-filled chat id. D24 keeps Forms and changes how a submission is identified; the `FORMS` tab and roster-email matching replace `FORM_URLS` and the prefill entirely
+  - **§1 — the non-goal about uploads is now correct rather than aspirational**, and should say so; `RUNBOOK.md` Part 6 says the opposite and is the one that changes
   - §6.2 — queue and region as one SQL predicate; the seven FAQ-topic mappings deleted as structurally impossible (Task 24)
   - §5.1 — **correct the revocation claim** (D17)
   - §7.1.1 — notification, now built
@@ -1111,15 +1529,20 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
   - §4.3 — **rewrite.** It currently describes revocation that does not happen
   - §4.4 — `/generate_urgent_code` replaces the hand-written `INSERT`
   - §4.5 — `/maintenance on`
+  - **new §4.10 — changing a teacher's region**, and the fact that correcting the spreadsheet now reaches teachers who already signed in, which it never did (R12)
   - Part 3 — smoke-test steps below
-  - Part 6 — what is left is Stage 5 and 6 only
+  - **Part 6 — correct the document entry.** It calls Telegram upload "the only genuinely new feature in the rebuild"; under D24 there is no upload. What arrives is a `FORMS` tab and submissions matched by recruitment email
+  - **Part 1 §1.3 — two of the five decisions can be marked settled**: removal means anonymisation (D24 of the design session), and urgent and critical cases are kept six months. The rest of the retention question stays open
+  - **A note for whoever owns the spreadsheet:** the bot reads two tabs. If the original document is reused, the other six are inert and should be deleted — especially `ADMINS`, which used to grant administrator rights and now does nothing at all. A tab that looks like it works and does not is worse than no tab
 
 - [ ] **Step 3: `CONCERNS-AND-IT-ACTIONS.md`**
   - A2 — correct the revocation sentence
   - A4 — two System members, now with the commands to manage them
   - A7 — close the "left for you" half; the ops chat is still required (D12)
   - B3 — unchanged, re-pointed at Stage 5
-  - **new B11** — no observer role (D7's consequence), cheapest to fix before launch
+  - **A11 — close it.** Removal means anonymisation: replace the identifying columns, keep the case. The database's refusal to delete a teacher who has opened a case stops being a contradiction with the privacy notice and becomes the mechanism that satisfies it
+  - **A10 — narrow it.** Urgent and critical cases are kept six months. The period for ordinary cases and for the message log is still unset, and the item stays red until both are
+  - **new B11 — regions were never correctable.** Recruitment's spreadsheet edits reached nobody who had already signed in, and no command existed. Recorded as closed by Task 43, because the lesson is the one B4 already teaches: a column with a writer and no reader looks exactly like a working feature
 
 - [ ] **Step 4: Commit**
 
@@ -1155,18 +1578,33 @@ Then add the second one with `/staff_add`, from the first one's account. Two nam
 
 1. **A case reaches a person.** File a case from the teacher account. A staff member holding that queue and region must receive the notification, and it must not contain what the teacher typed.
 2. **A reply reaches the teacher.** `/reply <ref> <message>`, then Check My Case from the teacher account. The public update is there; the internal note from `/note` is not.
-3. **A code issued by command is spent by a teacher.** `/generate_urgent_code`, give the code to the test account, file an urgent case. `used_at`, `used_by` and `case_reference` are all set, and `issued_by` names a real person rather than `'0'`.
+3. **A code issued by command is spent by a teacher.** `/generate_urgent_code`, give the code to the test account, file an urgent case. `used_at`, `used_by` and `case_reference` are all set, `issued_by` names a real person rather than `'0'`, and the case's `importance` is `Urgent`.
+4. **A region correction arrives.** Change the region on `deploy-check@mopse.uz` in the roster tab, wait for the sync, and confirm `/case` on that teacher's case shows the new region. This has never worked and the runbook has always said it did.
 
 **4. Revocation now bites.** After the deploy, deactivating a roster row ends that teacher's access on their next message (D17). Anyone who deactivated rows expecting today's no-op behaviour should be told before the deploy, not after.
 
 ---
 
+## Four answers this plan needs before parts of it can be built
+
+These came out of the 29 July design session and were not settled in it. Each names the task it blocks, so nobody discovers it mid-build.
+
+| # | Question | Blocks | Cost of deciding late |
+|---|---|---|---|
+| 1 | **The observer rank's name** — "Jstaff" was asked for, `Observer` is the placeholder | Task 42, Task 23 | It is a database enum value. Changing it after launch is a migration and a retraining |
+| 2 | **Whether to rename the `Regional` rank** (to `Lead` or similar) so one word does not mean two things | Task 42 | Free while there are no rows. A migration and a documentation pass afterwards |
+| 3 | **How the four working states map to the eight case statuses** — *not yet opened / under review / approved or processing / done* against `New, Received, Under review, Action required, Escalated, Completed, Closed, Duplicate` | Task 34 | The mutation commands are what move a case between statuses. Getting it wrong means staff learn a vocabulary that then changes |
+| 4 | **Retention for ordinary cases, and for the message log** — six months covers urgent and critical only | Stage 5, not this stage | `CONCERNS` A10 stays red. The message log is the one filling up now |
+
+One more, raised and unanswered, that blocks nothing: **should the bot tell a teacher who their regional manager is**, by name and possibly by phone? It would answer "teachers who do not know who to call" directly, and it publishes staff contact details to 1,800 people. A MoPSE decision.
+
 ## Open items this plan deliberately does not close
 
-- **There is no observer role.** D7 removed `ReadOnly` because it was a migration fallback rather than a designed role, but the consequence is real: sight of cases now comes with the ability to change them. One enum value and one row if MoPSE wants a ministry observer, and cheapest before launch.
 - **`audit_log` has no reader.** By decision (D18). It is queried during an investigation by somebody with database access, and a command to read it would need a permission model to stop it becoming the thing it audits.
 - **`case_notes` is new content with no retention rule.** It holds staff writing about teachers and is covered by the same unset `RETENTION_DAYS` as everything else (A10). Stage 5's clean-up job must include it; the `ON DELETE CASCADE` on the case is what makes that possible.
 - **Announcements and export remain absent** (D19), and `CONCERNS-AND-IT-ACTIONS.md` B3 stays open until Stage 5.
 - **The overdue digest is not pushed.** `/urgent` reads `OVERDUE_DAYS`, but nothing arrives unasked until Stage 5. `overdueCases()` is written here so that stage adds a schedule, not a query.
 - **Staff notification volume is bounded at twenty** (R9). Past that it belongs in the worker, which is the same threshold `/announce` will have to respect.
-- **`RETENTION_DAYS` is still unset, and erasure is still blocked by the database.** Unchanged from Stage 3, and now with more tables holding more content.
+- **`RETENTION_DAYS` is still unset**, and now there are more tables holding more content — `case_notes` among them. What changed is that erasure is no longer blocked: removal means anonymisation, which the database permits and which satisfies the notice. `CONCERNS` A11 closes; A10 narrows to the two periods still unnamed.
+- **Nothing chases a missed date until Stage 5.** `due_at` is written and shown from the first day; a date that passes is visible to whoever looks and to nobody else. The same position `OVERDUE_DAYS` has been in since Stage 2, stated rather than implied.
+- **The resignation route is not built.** A teacher submitting a resignation, unlocked case by case by a Program-rank member, with the record anonymised three months later, is agreed and belongs after this stage. Recorded here so the three-month timer is designed with the retention job rather than bolted onto it.
