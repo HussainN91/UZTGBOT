@@ -19,6 +19,12 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # Bounded on purpose. Docker's default json-file driver grows without limit,
+    # and this stack logs every inbound message. On a 50 GB disk that is a slow
+    # disk-full outage which takes PostgreSQL down with it.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mopse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -43,6 +49,12 @@ services:
   web:
     build: .
     restart: unless-stopped
+    # Bounded on purpose. Docker's default json-file driver grows without limit,
+    # and this stack logs every inbound message. On a 50 GB disk that is a slow
+    # disk-full outage which takes PostgreSQL down with it.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     command: ["node", "dist/web/main.js"]
     env_file: [.env]
     environment:
@@ -63,6 +75,12 @@ services:
   worker:
     build: .
     restart: unless-stopped
+    # Bounded on purpose. Docker's default json-file driver grows without limit,
+    # and this stack logs every inbound message. On a 50 GB disk that is a slow
+    # disk-full outage which takes PostgreSQL down with it.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     command: ["node", "dist/worker/main.js"]
     env_file: [.env]
     environment:

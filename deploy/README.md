@@ -68,8 +68,12 @@ migrations are recorded and skipped, and each runs in a transaction, so a failur
 leaves the schema exactly as it was:
 
 ```bash
-docker compose exec web node dist/db/migrate.js
+docker compose run --rm --no-deps web node dist/db/migrate.js
 ```
+
+`run --rm --no-deps`, not `exec`: this uses a throwaway container rather than the
+one serving teachers. On a first install the difference is cosmetic; on an
+upgrade it is the whole point — see "Deploying a new version" below.
 
 Then watch it come up:
 
@@ -150,15 +154,33 @@ Everything previously sat in one Google account, so losing that account lost
 every case ever filed. A rented server with no off-site copy is the same risk
 wearing a different hat.
 
-Install the tools and configure a remote:
+Install the tools and configure a remote.
+
+**Use the PostgreSQL project's repository, not Ubuntu's.** Ubuntu 24.04 ships
+`postgresql-client` 16, and this stack runs PostgreSQL 17. `pg_dump` refuses to
+dump a server newer than itself, so the distribution package produces a backup
+that fails every night — silently, until the night you need it. `backup.sh`
+checks the versions and stops with this instruction if they do not match.
 
 ```bash
-sudo apt-get install -y gnupg rclone postgresql-client
+sudo install -d /usr/share/postgresql-common/pgdg
+sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
+  https://www.postgresql.org/media/keys/ACCC4CF8.asc
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  | sudo tee /etc/apt/sources.list.d/pgdg.list
+sudo apt-get update
+sudo apt-get install -y postgresql-client-17 gnupg rclone
 rclone config          # create a remote, e.g. "backups"
 ```
 
-Set `BACKUP_PASSPHRASE` (generate it: `openssl rand -base64 48`) and
-`BACKUP_REMOTE` (e.g. `backups:mopse-bot`) in `.env`.
+Set `BACKUP_PASSPHRASE` (generate it: `openssl rand -base64 48`),
+`BACKUP_REMOTE` (e.g. `backups:mopse-bot`) and `BACKUP_DATABASE_URL` in `.env`.
+
+**`BACKUP_DATABASE_URL` is not `DATABASE_URL`.** The backup runs from the host,
+out of cron, where the compose service name `postgres` does not resolve — that
+hostname exists only inside the compose network. Postgres is published on
+loopback for exactly this, so use `127.0.0.1` with the same credentials.
 
 **Record the passphrase somewhere that is not this server.** An encrypted backup
 whose passphrase died with the machine is not a backup.
@@ -206,8 +228,36 @@ Run it before launch and quarterly after.
 docker compose ps                     # what is running
 docker compose logs -f web worker     # follow both
 docker compose restart worker         # restart one piece
-docker compose up -d --build          # deploy a new version
 ```
+
+### Deploying a new version
+
+**Migrate before serving, always.** The schema must be at least as new as the
+newest running process. New code against an old schema errors on every teacher
+message — and because handler errors are caught so Telegram does not retry
+forever, the teacher gets *silence* rather than an error. That is the worst
+failure shape available, and it is why this is a sequence rather than one
+command:
+
+```bash
+git fetch && git checkout <tag>
+docker compose build web worker                              # nothing changes yet
+docker compose stop web worker                               # Telegram queues updates; none are lost
+docker compose run --rm --no-deps web node dist/db/migrate.js
+docker compose up -d worker                                  # worker first
+docker compose logs --tail 20 worker                         # must not be restarting
+docker compose up -d web
+```
+
+Worker first, deliberately: if the new code disagrees with the schema it will
+crash-loop, and it is far better to discover that while nothing is serving
+teachers than after the web process is live.
+
+**Rolling back is code-only.** Migrations are forward-only — there are no down
+migrations — so a rollback means checking out the previous tag and rebuilding,
+against the newer schema. That works only because every migration is additive.
+Restoring a backup is *not* a rollback: it would also destroy every case filed
+since the dump.
 
 Connect to the database over an SSH tunnel — Postgres is published on loopback
 only and is not reachable from outside the host:

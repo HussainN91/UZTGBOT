@@ -27,7 +27,12 @@ REPO_DIR="$(dirname -- "$SCRIPT_DIR")"
 # shellcheck source=/dev/null
 [ -f "$REPO_DIR/.env" ] && set -a && . "$REPO_DIR/.env" && set +a
 
-: "${DATABASE_URL:?DATABASE_URL is required}"
+# Deliberately NOT DATABASE_URL. That value is written for the application
+# containers, where the database is reachable as the compose service name
+# "postgres" — a hostname that exists only inside the compose network. This
+# script runs from the host, out of cron, where "postgres" does not resolve at
+# all. Postgres is published on loopback for exactly this.
+: "${BACKUP_DATABASE_URL:?BACKUP_DATABASE_URL is required. DATABASE_URL points at the compose hostname \"postgres\", which the host cannot resolve — use 127.0.0.1 here. See .env.example}"
 : "${BACKUP_PASSPHRASE:?BACKUP_PASSPHRASE is required — an unencrypted off-site backup of teacher data is not acceptable}"
 : "${BACKUP_REMOTE:?BACKUP_REMOTE is required, e.g. myremote:mopse-backups — a local-only backup is not a backup}"
 
@@ -37,9 +42,18 @@ STAMP="$(date +%Y%m%dT%H%M%S)"
 DUMP="$STAGING/mopse-$STAMP.dump"
 ENCRYPTED="$DUMP.gpg"
 
-for tool in pg_dump gpg rclone; do
+for tool in pg_dump psql gpg rclone; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"
 done
+
+# pg_dump refuses to dump a server newer than itself, and Ubuntu 24.04 ships
+# client 16 while this stack runs PostgreSQL 17 — so the default apt package
+# produces a backup that never runs, every night, silently. Fail loudly here
+# instead, with the fix in the message.
+DUMP_MAJOR="$(pg_dump --version | grep -oE '[0-9]+' | head -1)"
+SERVER_MAJOR="$(psql "$BACKUP_DATABASE_URL" -tAc 'SHOW server_version_num' | cut -c1-2)"
+[ -n "$SERVER_MAJOR" ] || die "could not reach the database at BACKUP_DATABASE_URL"
+[ "$DUMP_MAJOR" -ge "$SERVER_MAJOR" ] || die "pg_dump is version $DUMP_MAJOR but the server is $SERVER_MAJOR. pg_dump refuses to dump a newer server. Install postgresql-client-$SERVER_MAJOR from the PGDG repository — see deploy/README.md"
 
 mkdir -p "$STAGING"
 chmod 700 "$STAGING"
@@ -53,7 +67,7 @@ trap cleanup EXIT
 log "dumping database"
 # Custom format: compressed, and restorable table-by-table, which matters when
 # the thing you need back is one accidentally-cleared table rather than the lot.
-pg_dump --format=custom --no-owner --no-privileges --file="$DUMP" "$DATABASE_URL"
+pg_dump --format=custom --no-owner --no-privileges --file="$DUMP" "$BACKUP_DATABASE_URL"
 
 DUMP_BYTES="$(stat -c %s "$DUMP")"
 [ "$DUMP_BYTES" -gt 1024 ] || die "dump is only ${DUMP_BYTES} bytes — refusing to ship an empty backup over a good one"
@@ -87,5 +101,16 @@ rm -f "$ENCRYPTED"
 log "pruning copies older than ${RETAIN_DAYS} days"
 rclone delete "$BACKUP_REMOTE" --min-age "${RETAIN_DAYS}d" --include 'mopse-*.dump.gpg' || \
   log "WARNING: pruning failed; backups are safe but will accumulate"
+
+# Report success into the same table the worker's heartbeat watches, so a cron
+# job that silently stops running becomes an alarm within the day rather than a
+# discovery three months later when a restore is needed. Thirty hours, so one
+# missed night is enough to raise it.
+psql "$BACKUP_DATABASE_URL" -q -c "
+  INSERT INTO job_runs (job_name, last_success_at, expected_interval_seconds)
+  VALUES ('nightly_backup', now(), 108000)
+  ON CONFLICT (job_name) DO UPDATE
+    SET last_success_at = now(), consecutive_failures = 0, last_error = NULL, alerted_at = NULL;" \
+  || log "WARNING: the backup succeeded but its heartbeat could not be recorded"
 
 log "done: $(basename "$ENCRYPTED") is off-site"

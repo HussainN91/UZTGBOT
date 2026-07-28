@@ -26,7 +26,7 @@ REPO_DIR="$(dirname -- "$SCRIPT_DIR")"
 # shellcheck source=/dev/null
 [ -f "$REPO_DIR/.env" ] && set -a && . "$REPO_DIR/.env" && set +a
 
-: "${DATABASE_URL:?DATABASE_URL is required}"
+: "${BACKUP_DATABASE_URL:?BACKUP_DATABASE_URL is required. DATABASE_URL points at the compose service hostname, which the host cannot resolve — use 127.0.0.1 here}"
 : "${BACKUP_PASSPHRASE:?BACKUP_PASSPHRASE is required}"
 : "${BACKUP_REMOTE:?BACKUP_REMOTE is required}"
 
@@ -36,8 +36,8 @@ done
 
 WORK="$(mktemp -d)"
 SCRATCH_DB="mopse_restore_drill_$(date +%s)"
-# Same server, different database. Strips any path/query off DATABASE_URL.
-ADMIN_URL="${DATABASE_URL%%\?*}"
+# Same server, different database. Strips any path/query off the URL.
+ADMIN_URL="${BACKUP_DATABASE_URL%%\?*}"
 BASE_URL="${ADMIN_URL%/*}"
 
 cleanup() {
