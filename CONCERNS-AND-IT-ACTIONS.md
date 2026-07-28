@@ -1,6 +1,10 @@
 # Engineering Concerns and Actions Needed from IT
 
-**Version:** 1.1 · **Date:** 2026-07-27 — updated after the UPGRADE-PLAN v1.1 execution
+**Version:** 2.0 · **Date:** 2026-07-28 — updated after Stage 3 of the rebuild
+
+> Items marked **✅ closed by the rebuild** were true of the Apps Script version
+> and are not true of what runs now. They are kept rather than deleted, because
+> the reason a concern existed is worth more than the concern.
 
 Two parts. **Part A** is a concrete action list — things someone must do, with an
 owner and a deadline. **Part B** is my honest assessment of where this system is
@@ -30,16 +34,21 @@ wherever MoPSE keeps restricted HR material. Keep `FAQ-import.csv` (it is
 teacher-facing by construction).
 **Owner:** Head of project · **When:** before sharing this folder with anyone
 
-## 🔴 A2. Re-run `installTriggers()`
+## ✅ A2. Re-run `installTriggers()` — **closed by the rebuild**
 
-Newer triggers were added (`handleSheetChange`, and `runDailyDigest` from the
-upgrade plan). Without re-running, revoking a teacher's access by deleting their
-USERS row silently keeps working for up to 30 minutes, and no overdue digest is
-ever sent.
+There are no triggers to install. Scheduled work runs in the worker process from
+a schedule held in code, so it cannot be half-installed, and there are no sheet
+watchers at all — the two the old system needed existed to invalidate caches that
+no longer exist.
 
-**Action:** run `installTriggers` once after deploying. Re-run `createAllSheets`
-at the same time — the upgrade plan appended columns to CASES and ADMINS.
-**Owner:** IT · **When:** at deployment
+The failure this action guarded against is closed twice over. Revoking a teacher
+takes effect on their next message rather than up to thirty minutes later
+(`BOT-SPEC.md` §5.1), and **a scheduled job that stops running now raises an
+alarm within minutes** rather than being silently absent — `job_runs` records
+every run and the heartbeat alerts on any job that misses its interval.
+
+**Nothing to do.** The equivalent deployment step is applying migrations before
+serving, which is in the runbook and in `deploy/README.md`.
 
 ## ✅ A3. Delete or quarantine `bot_spec.md` — **DONE**
 
@@ -72,20 +81,27 @@ None of that changes the underlying need for a second person.
 **Action:** seed at least two System Admins in different people's names.
 **Owner:** Head of project · **When:** at deployment
 
-## 🟠 A5. Establish spreadsheet ownership and backup
+## 🔴 A5. Prove the backup and the restore, and own the spreadsheet properly
 
-Everything lives in one Google Spreadsheet on one Google account. If that account
-is suspended, has its password lost, or belongs to someone who leaves, the entire
-system and all case history goes with it.
+Two halves, and the second one is now the sharper of the two.
 
-**Action:**
-- Own the spreadsheet with a **MoPSE organisational account**, not a personal one
-- Add a second owner
-- Enable a scheduled export or use Google Takeout periodically
-- Record who owns it in your IT asset register
+**The server.** Case history, teacher records and the interaction log live in
+PostgreSQL on one rented machine. `deploy/backup.sh` takes an encrypted nightly
+dump and pushes it off the server; `deploy/restore-drill.sh` restores it into a
+throwaway database and checks the result actually contains tables. Both are
+written and neither has been run against the real server, because there is no
+real server yet. **An untested backup is a belief, not a capability** — running
+the drill is a launch blocker, not a nicety.
 
-Google Sheets version history covers accidental edits but **not** account loss.
-**Owner:** IT · **When:** before launch
+Record `BACKUP_PASSPHRASE` somewhere that is not the server. An encrypted backup
+whose passphrase died with the machine is not a backup.
+
+**The spreadsheet** still holds the roster and the answer bank, and the bot only
+ever reads it — so losing it no longer loses case history, but it does stop
+anybody signing in. Own it with a **MoPSE organisational account**, not a
+personal one, add a second owner, and record it in the IT asset register.
+
+**Owner:** IT · **When:** restore drill before launch, then quarterly
 
 ## 🟠 A6. Decide the FAQ content review cadence
 
@@ -97,45 +113,82 @@ read by code.
 populate `LAST_APPROVED_BY` / `LAST_APPROVED_DATE` at import so the clock starts.
 **Owner:** Head of project · **When:** first month
 
-## 🟡 A7. Set up a way to notice failures
+## 🟠 A7. Give the alerts somewhere to arrive — mostly built
 
-Errors go to Apps Script's execution log, which nobody reads by default. A
-broken FAQ row, an exhausted quota, or a failed announcement will be invisible
-until a teacher complains.
+The concern was that errors went to a log nobody opened, so a broken feature
+stayed broken until a teacher complained. That is now built rather than
+recommended:
 
-**Action:** add a weekly calendar reminder to open **Apps Script → Executions**
-and filter to **Failed**. A lightweight alternative is a time-driven function
-that emails a daily error digest — say the word and I'll write it.
-**Owner:** IT · **When:** first month
+- Operational alarms are **sent to a Telegram chat**, not only logged — a refused
+  sync, a duplicate sign-in, an urgent code spent for nothing, a teacher who was
+  never told what happened.
+- **Silence is audible.** Every scheduled job records its runs, and one that
+  stops being scheduled raises an alarm within minutes. A job that stops produces
+  no error of its own, which is exactly why something has to look for its
+  absence.
 
-## 🟡 A8. Restrict spreadsheet access
+**What is left for you:** create the operations group, add the bot to it, and put
+its chat id in `OPS_ALERT_CHAT_ID`. Use a **group**, not one person's private
+chat — one person on leave should not mean nobody is watching. Group ids are
+negative; the setting accepts them.
 
-Anyone with read access to the spreadsheet can read **every teacher's case
-detail**, including whatever they typed into Contact Support. `DETAIL` is
-internal-only by design and is never shown to teachers, but the sheet has no
-row-level permissions. Anyone with **edit** access can grant themselves System
-Admin by typing their Telegram ID into the ADMINS tab.
+Without it, alarms fall back to the log and the concern above is exactly as true
+as it ever was.
+**Owner:** IT · **When:** at deployment
 
-**Detection now exists, prevention still doesn't:** a direct edit of the ADMINS
-tab alerts every System Admin and is logged (`ADMINS_SHEET_EDITED`), `/export`
-requires a recorded reason and notifies peers, and every case mutation records
-its actor (`LAST_ACTOR`). The Drive sharing list remains the real access
-boundary — restricting it is still the actual fix.
+## 🟠 A8. Restrict spreadsheet access — narrowed, not closed
 
-**Action:** share the spreadsheet with named staff only. Do not use "anyone with
-the link". Review the access list quarterly.
+**The severe half is closed.** Case details never reach the spreadsheet: they are
+written to the database and the bot only ever *reads* Sheets. Nobody can grant
+themselves staff access by typing a Telegram id into a tab, because permissions
+live in a table on the server. The Google service account holds **Viewer on one
+spreadsheet** and nothing else.
+
+**What is left is the answer bank.** `FAQ-import.csv` and the FAQ tab hold the
+112 approved answers on salary, tax, visas and contracts. That is confidential
+ministry content, and read access to the spreadsheet is read access to all of it.
+
+**Action:** share with named staff only — never "anyone with the link" — and
+review the access list quarterly. Edit access should be narrower still: an
+accidental clear of the roster tab is caught by the sync's damage limit, but a
+plausible-looking bad edit is not.
 **Owner:** IT · **When:** before launch — **still open**
 
-## 🟡 A9. Note where the webhook secret is visible
+## ✅ A9. The webhook secret in the URL — **closed by the rebuild**
 
-`WEBHOOK_SECRET` is passed as a URL query parameter, because Apps Script exposes
-request headers inconsistently for `doPost`. It is therefore visible in the full
-webhook URL, which appears in `getWebhookInfo()` output and any log that records
-it.
+It travels in the `X-Telegram-Bot-Api-Secret-Token` header now, compared on every
+request. Apps Script could not read request headers reliably for `doPost`, which
+is the only reason it was ever in the query string — where it leaked into every
+proxy log, access log and `getWebhookInfo` output in the path.
 
-This is an accepted trade-off and the URL is not public — but treat the output of
-`getWebhookInfo()` as sensitive and don't paste it into tickets or chats.
-**Owner:** IT · **When:** ongoing awareness
+`getWebhookInfo` output is no longer sensitive, so the awareness this item asked
+for is no longer needed.
+
+## 🔴 A10. Decide how long records are kept — **new, and now dated**
+
+`RETENTION_DAYS` is unset, and Stage 3 is what starts filling `messages`: every
+inbound message writes a row. The privacy notice shown to every teacher before
+they sign in already promises their data can be removed.
+
+There is a test that fails if anybody writes a number in before you have chosen
+one, so this cannot be closed by a developer picking something reasonable.
+
+**Answering before the first deployment is a decision about a design. Answering
+after is a decision about data that already exists.**
+**Owner:** Head of project · **When:** before the bot serves a single teacher
+
+## 🔴 A11. Decide how a removal request is honoured — **new**
+
+`cases.teacher_chat_id` is `ON DELETE RESTRICT`, deliberately: it guarantees no
+case can exist without a real teacher behind it. It also means a teacher who has
+ever opened a case **cannot be deleted**, and the privacy notice promises removal
+on request.
+
+The promise is now blocked by a constraint we added on purpose, not merely
+unimplemented. Honouring it needs a deliberate anonymisation route — replace the
+identifying columns, keep the case — which is Stage 4 or later work but is a
+policy decision first.
+**Owner:** Head of project · **When:** before launch
 
 ---
 
@@ -143,101 +196,137 @@ This is an accepted trade-off and the URL is not public — but treat the output
 
 Ranked by how likely they are to bite you.
 
-## B1. The global lock is the throughput ceiling — 🟠 Medium
+## ✅ B1. The global lock is the throughput ceiling — **closed by the rebuild**
 
-`logInteraction()` takes `LockService.getScriptLock()` on **every single
-update**, and it is a *global* mutex, not per-row. Every webhook execution
-serialises behind every other one. If the lock isn't acquired within 3 seconds
-the log row is dropped.
+The lock is per chat, so two teachers can never block each other, and it is
+transaction-scoped — a handler that throws or a process that is killed cannot
+strand it. The log no longer takes a lock at all, so it no longer discards rows
+under load, which it did exactly when they were most worth reading.
 
-**Practical impact:** fine for hundreds of teachers with ordinary usage. It will
-bite during a burst — the minutes after an `/announce`, or the day placement
-letters go out.
+## ✅ B2. Sheets is not a database — **closed by the rebuild**
 
-**Fix if it becomes a problem:** buffer log rows in `CacheService` and flush them
-in a batch from a time-driven trigger. Roughly half a day's work. I would not do
-it pre-emptively.
+It is a database. Case operations are indexed lookups rather than full reads, and
+nothing degrades as the table grows — which also deletes the entire archive
+system, whose only purpose was keeping the live sheet small.
 
-## B2. Sheets is not a database — 🟠 Medium, grows over time
+**The retention half of this item did not go away with it; it got sharper, and it
+has moved to Part A as A10.** Retention was previously half a performance
+argument and half a privacy one, and the performance half was doing the
+persuading. With the performance half gone, what is left is purely a promise made
+to teachers in the privacy notice, with no technical excuse attached to it.
 
-Nearly every case operation calls `getDataRange().getValues()`, reading the
-**entire** CASES sheet into memory. At a few thousand rows this is unnoticeable.
-At tens of thousands it will be slow, and eventually it will hit the 6-minute
-execution limit.
+## B3. `/announce` still runs inside the webhook — 🟡 Not yet rebuilt
 
-Archiving (§6.1 of the runbook) is the pressure valve — it keeps the live sheet
-small. **This is precisely why setting `RETENTION_DAYS` matters more than it
-looks.** Left unset, CASES and MESSAGES grow without bound — and since the
-privacy notice shipped (`/privacy`), indefinite retention also contradicts what
-teachers are told. One decision closes both the performance and the privacy
-side.
+Announcements are Stage 5 and do not exist yet. The architecture that fixes this
+does: the worker process runs slow work so it can never delay a teacher waiting
+for a reply, and the audience is frozen into a table the moment the sender
+confirms, so a paced send is resumable rather than restartable.
 
-## B3. `/announce` still runs inside the webhook — 🟠 Medium
+Nothing here is a risk today, because the feature is absent rather than broken.
+Re-read this item when Stage 5 is planned.
 
-It paces at 60 ms per recipient and self-caps at 4.5 minutes. Telegram's webhook
-timeout is shorter, so on a large audience the admin's HTTP request times out.
+## B4. The tests now run, and finding out cost four faults — 🟡 Low
 
-`update_id` deduplication (added this week) means the retry is ignored, so the
-broadcast **is not sent twice** — that was the real damage and it's fixed. What
-remains: the admin may see no immediate response, and on very large audiences
-some recipients are reported as "not attempted" and need a re-run.
+Not closed, rewritten. There is a suite — 332 tests, of which the ones that
+matter run against a real PostgreSQL, on a schema built by the migrations
+themselves, so the migrations are proven too.
 
-**Proper fix:** queue recipients and drain from a time-driven trigger. A day's
-work. Worth doing before the roster passes ~500 teachers.
+The honest form of this concern is now **"code that no test has ever executed is
+not known to work"**, and Stage 3 produced the evidence. Four faults surfaced
+within minutes of the tests being pointed at a database, every one of them
+invisible to reading:
 
-## B4. No automated tests — 🟠 Medium
+- `checkHeartbeats` threw on **every** call — a parameter inferred as an integer
+  could not hold `1.5`. The job that exists to make silence audible had never once
+  completed, and nothing was watching it, because it is the thing that watches.
+- The same function's "do not repeat this alarm" update also threw, so a job that
+  stayed down would have re-alerted every five minutes.
+- Timestamps read through `db.execute` come back as strings, not `Date` objects.
+  The heartbeat alarm called `.toISOString()` on one — on the branch where a job
+  had succeeded once and then stopped, which is the commonest real failure.
+- Two test files truncated tables the other was using, and each passed alone.
 
-There is no test suite and, being Apps Script, no practical way to run one
-locally. Every change is verified by deploying and clicking through. The smoke
-test in Part 3 of the runbook is the substitute.
+The first three were in code committed a day earlier and reviewed. The lesson is
+not "write more tests" but **"run the thing against the real dependency"** — all
+four are shaped so that no amount of reading finds them.
 
-This is why I have been conservative about refactors: there is no safety net.
+**What is still uncovered:** delivery to Telegram itself, and the deploy path.
+Both are covered by the smoke test in the runbook rather than by the suite.
 
-## B5. Single points of failure — 🟠 Medium
+## B5. Single points of failure — 🟠 Medium, changed shape
 
-One Google account, one spreadsheet, one script project, one bot token. Any one
-of them lost takes the whole system down. Mitigations are in A4 and A5; the
-architecture itself cannot be made redundant without a rewrite onto real
-infrastructure, which is not warranted at this scale.
+The dependency on one Google account is largely gone: losing it now costs sign-in
+and FAQ updates until it is restored, not every case ever filed.
 
-## B6. Header names are silent contracts — 🟡 Low probability, high impact
+What replaces it is **one rented server**. Lose the machine and the bot is down
+until it is rebuilt — which is a recovery procedure rather than a catastrophe,
+but only if the backup and the restore have actually been proven (A5). One bot
+token remains a single point of failure and always will.
 
-Code looks columns up by name (`headers.indexOf('REFERENCE')`). Renaming a header
-in the spreadsheet does not throw — the lookup returns `-1` and the feature
-silently stops working. A well-meaning "tidy up" of column names would break case
-notifications with no error anywhere.
+This is the right trade at one intake cohort. It is a deliberate, recorded choice
+rather than an oversight: redundancy would mean a second machine, a replicated
+database and a load balancer, for a bot serving 1,800 people in one time zone.
 
-**Mitigation:** protect the header row (Data → Protect sheets and ranges) on
-CASES, USERS, FAQ, ROSTER and ADMINS. The list of load-bearing headers grew
-with the upgrade plan: `CASES.LAST_ACTOR` and the six appended ADMINS columns
-(`NAME`, `ACTIVE`, `ADDED_BY`, `ADDED_AT`, `REGIONS`, `ROLE`) are all looked up
-by name.
+## B6. Header names are silent contracts — 🟡 Low, and no longer silent
 
-## B7. Verification is only as strong as the roster — 🟡 Accepted, now **detected**
+Almost closed. Column names inside the system live in the program, so renaming
+one is a compile error across every query that touches it rather than a feature
+that quietly stops working.
 
-Identity is "types a string that appears in ROSTER". If a teacher forwards their
-verification email, whoever has it can verify as them. This is an accepted
-trade-off from the original design — the alternative (one-time codes issued per
-person) is materially more work for recruitment.
+**Two spreadsheet tabs still have header contracts** — the roster and the FAQ —
+because they are the two things the spreadsheet still owns. The difference is
+that a renamed column now **stops the sync and reports it** instead of silently
+returning nothing: the sync refuses the run, changes nothing, and raises an
+alarm naming the column. A single bad *cell* rejects that one row and reports it
+with the row number, rather than failing the whole run.
 
-**Since the upgrade plan it is no longer invisible:** a second chat verifying an
-already-held identifier triggers an `IDENTITY_DUPLICATE_BINDING` log row, an
-alert to every System Admin, and a security notice to the chat that already held
-the identity. Impersonation is detected, not prevented — prevention remains the
-per-person one-time-code decision, which stays with the head of project.
+**Mitigation:** still protect the header row on both tabs. It is now the
+difference between an alarm and no interruption at all, rather than between
+working and silently broken.
 
-Worth knowing rather than fixing: the 5-attempt cap stops brute-forcing, but not
-a leaked identifier.
+## B7. Verification is only as strong as the roster — 🟠 Accepted, detected, and **expiring**
 
-## B8. Urgent codes can still be lost — 🟡 Low
+Unchanged in substance: identity is "types a string that appears on the roster".
+Anyone holding a teacher's recruitment email can sign in as them. The alternative
+— one-time codes issued per person — is materially more work for recruitment.
 
-The code is consumed *before* the teacher types their issue. The window was 30
-minutes; it is now 6 hours (`CacheService`'s maximum). A teacher who takes longer
-than 6 hours still loses the code with no self-service recovery.
+**It is reported, not blocked, and that direction is deliberate.** A second chat
+presenting an already-bound identity is allowed; the operations chat is alerted
+and the previous holder is sent a security notice. Blocking looks safer and is
+worse in both directions: it locks out any teacher who changes phone, with no
+command to release them, and it hands anyone holding a leaked email the power to
+sign in first and lock the real teacher out permanently.
 
-**Full fix** requires validating the code without consuming it and consuming it
-at case creation, which opens a double-use race. The 6-hour window is the
-pragmatic middle ground.
+**What has changed is the deadline.** This is the cheapest it will ever be to
+reconsider. Before launch it is a change to a sign-in flow nobody has used; after
+launch it is a change to how every teacher already signed in, plus a migration,
+plus telling them. **The decision expires at launch** — not because it becomes
+wrong, but because it stops being cheap.
+
+## ✅ B8. Urgent codes can still be lost — **closed by the rebuild**
+
+This item said the full fix "requires validating the code without consuming it
+and consuming it at case creation, **which opens a double-use race**".
+
+That blocker was true of Script Properties and is not true of PostgreSQL. One
+conditional statement —
+`UPDATE … WHERE code = … AND used_at IS NULL AND expires_at > now()` — can
+succeed exactly once, whoever runs it and however many run at the same instant.
+So the code is checked when the teacher types it and spent when their case is
+filed, the window is 24 hours rather than 6, and a teacher who gives up halfway
+keeps their code.
+
+**This was a capability that became available and nobody noticed.** It is worth
+recording as a category: some entries on a concerns list are not "we could not
+afford to fix this" but "this could not be fixed *then*", and nothing re-examines
+them when the constraint disappears.
+
+**It did not come free.** Apps Script destroyed a code whether the guess was
+right or wrong, so a wrong guess burned the thing it was guessing at. Leaving a
+wrong code untouched made guessing free against a six-character space, which
+needed a guess cap that no document had ever called for — five per chat per
+rolling hour. Making one thing safer made something adjacent unsafe, and only
+tracing the change outward found it.
 
 ## B9. `DOC-001` speaks in the third person — 🟢 Cosmetic
 
@@ -257,24 +346,32 @@ own flood limits provide some protection.
 
 # Summary for the head of project
 
-**The bot is in good shape.** The code has no undefined references, no column
-mismatches, a complete state machine, locking on every teacher-facing write path,
-and it cannot get stuck in a Telegram retry loop. The audit found zero
-dead-on-arrival defects.
+**The rebuild has closed most of Part B outright**, because most of Part B was a
+list of things Google Sheets could not do. B1, B2 and B8 are gone; B6 is nearly
+gone; B4 has been rewritten into something more useful than it was.
 
-Four low-frequency admin paths are deliberately unlocked — `/add_admin`,
-`/set_role`, the announcement row append, and urgent-code consumption. They are
-listed in §12 of `BOT-SPEC.md` with the reasoning, so it is a recorded decision
-rather than an omission.
+**What it did not close, it made sharper.** Three items are now *more* pressing
+than before, and all three are yours rather than IT's:
 
-**Three things need a decision from you, not from IT:**
+1. **How long records are kept (A10).** Previously half a performance argument.
+   The performance half is gone, so what remains is a promise made to every
+   teacher in the privacy notice, with nothing technical left to hide behind.
+   Stage 3 is what starts filling the table.
+2. **How a removal request is honoured (A11).** The database now actively refuses
+   to delete a teacher who has ever opened a case. That is a guarantee we added
+   deliberately, and it blocks a promise we also made deliberately.
+3. **Whether to reconsider sign-in (B7).** Unchanged in substance, but this is
+   the cheapest it will ever be to change. It expires at launch.
 
-1. Move the confidential answer bank out of this folder (**A1**)
-2. Name at least two System Administrators (**A4**)
-3. Provide the real support contact and the teacher roster — without these,
-   verification fails for everyone and no case can be opened
+**Still needed, unchanged from the last version:** a real support contact — the
+bot now *refuses to start* without one, so it can no longer be forgotten — the
+teacher roster, and at least two named administrators so one person leaving
+cannot lock everyone out (**A1**, **A4**).
 
-**Everything in Part B is a known trade-off of building on Google Sheets**, not a
-mistake. At the scale of one intake cohort, they are the right trade-offs. If
-this system is still running in three years across multiple intakes, B1, B2 and
-B3 are the three to revisit first.
+**And one that is only a launch blocker because it has never been done:** prove
+the backup restores (**A5**). The scripts are written and have never been run
+against a real server. An untested backup is a belief.
+
+**Everything remaining in Part B is a known trade-off**, not a mistake. At the
+scale of one intake cohort they are the right trade-offs. If this system is still
+running in three years, B5 — one server — is the first to revisit.

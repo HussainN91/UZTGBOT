@@ -6,14 +6,14 @@
  * primary key, not of the code. A mock would only confirm the statement was
  * issued.
  *
- *   docker compose up -d postgres
+ *   docker compose -f docker-compose.test.yml up -d
  *   TEST_DATABASE_URL=postgres://mopse:mopse@localhost:5432/mopse_test npm test
+ *
+ * The schema is applied once by src/test/global-setup.ts, not here — see the
+ * note there about why migrating per file raced.
  */
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../db/index.js';
@@ -21,7 +21,6 @@ import * as schema from '../db/schema.js';
 import { claimUpdate, pruneProcessedUpdates } from './dedup.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
-const migrationsFolder = resolve(dirname(fileURLToPath(import.meta.url)), '../../drizzle');
 
 describe.skipIf(!TEST_DATABASE_URL)('update deduplication', () => {
   let pool: pg.Pool;
@@ -30,7 +29,6 @@ describe.skipIf(!TEST_DATABASE_URL)('update deduplication', () => {
   beforeEach(async () => {
     pool ??= new pg.Pool({ connectionString: TEST_DATABASE_URL });
     db ??= drizzle(pool, { schema }) as unknown as Database;
-    await migrate(db, { migrationsFolder });
     await db.execute(sql`TRUNCATE processed_updates`);
   });
 

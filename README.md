@@ -35,9 +35,10 @@ Secrets are a separate matter and are never committed at all — see `.gitignore
 ```
 BOT-SPEC.md                  What the system does. The statement of intent, and
                              what the test suite is written against.
-RUNBOOK.md                   How to deploy and operate it. Rewritten in Stage 7
-                             for the new architecture — still describes Apps
-                             Script until then.
+RUNBOOK.md                   How to operate it, what still needs deciding, and
+                             what is deliberately not built yet.
+deploy/README.md             How to deploy it, step by step. Kept beside the
+                             scripts it describes so the two cannot drift.
 CONCERNS-AND-IT-ACTIONS.md   Accepted risks and outstanding IT actions.
 FAQ-import.csv               The approved answer bank (see warning above).
 
@@ -51,6 +52,37 @@ reference/                   The previous implementation, preserved as a
 
 The new application is added stage by stage. Each stage produces something
 testable and no stage depends on a later one.
+
+## Running the tests
+
+```bash
+npm test
+```
+
+That runs everywhere and needs nothing installed. The integration tests skip
+themselves when there is no database, and **a skipped test is not a passing
+test**: the properties that matter most here — a redelivered update cannot be
+processed twice, a refused sync leaves the previous data exactly as it was —
+are guarantees of PostgreSQL, not of the code, and a mock only confirms the
+statement was issued.
+
+To run those too, start the test database and point the suite at it:
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+```
+
+```bash
+TEST_DATABASE_URL=postgres://mopse:mopse@localhost:5432/mopse_test npm test
+```
+
+The stack creates the database itself, and `src/test/global-setup.ts` applies
+the schema once before the run — there is no separate migrate step. Tear it down
+with `docker compose -f docker-compose.test.yml down`.
+
+> **Never point `TEST_DATABASE_URL` at the server.** These tests `TRUNCATE` the
+> tables they use. Against the live database they would empty the roster, and
+> nobody could sign in.
 
 ## Why the old code is kept
 

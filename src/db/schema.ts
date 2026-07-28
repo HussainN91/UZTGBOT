@@ -222,6 +222,19 @@ export const teachers = pgTable(
     revokedAt: tsz('revoked_at'),
     revokedBy: chatId('revoked_by'),
     privacyNoticeAcceptedAt: tsz('privacy_notice_accepted_at'),
+    /**
+     * Which wording they accepted, e.g. '2026-07-28.1'.
+     *
+     * A timestamp alone cannot answer "agreed to what". The notice will be
+     * revised — the retention paragraph is already written on the assumption
+     * that it changes once a period is set — and after a revision a bare
+     * acceptance date proves only that somebody agreed to something.
+     *
+     * Nullable because teachers bound before this column existed genuinely have
+     * no recorded version, and inventing one for them would be worse than
+     * admitting it.
+     */
+    privacyNoticeVersion: text('privacy_notice_version'),
   },
   (t) => [
     check('teachers_chat_id_digits', CHAT_ID_IS_DIGITS('chat_id')),
@@ -379,8 +392,54 @@ export const urgentCodes = pgTable(
     expiresAt: tsz('expires_at').notNull(),
     usedAt: tsz('used_at'),
     usedBy: chatId('used_by'),
+    /**
+     * The case the code bought.
+     *
+     * Written in the same statement as `used_at`, in the same transaction as the
+     * case insert, so a spent code always names what it was spent on. That makes
+     * "spent for nothing" a queryable condition rather than an invisible one —
+     * which is what the heartbeat check reads.
+     *
+     * Deliberately not a foreign key to `cases.reference`: this table outlives
+     * the retention window of an individual case, and a constraint here would
+     * make deleting an old case fail rather than making a spent code
+     * self-describing.
+     */
+    caseReference: text('case_reference'),
   },
-  (t) => [index('urgent_codes_expiry_idx').on(t.expiresAt, t.usedAt)],
+  (t) => [
+    index('urgent_codes_expiry_idx').on(t.expiresAt, t.usedAt),
+    index('urgent_codes_stranded_idx').on(t.usedAt, t.caseReference),
+  ],
+);
+
+/**
+ * Failed urgent-code guesses, counted over a rolling window.
+ *
+ * A row here is a wrong code, never a right one. It exists because making the
+ * code genuinely single-use also made guessing free: Apps Script destroyed a
+ * code whether the guess was right or wrong, so a wrong guess burned the thing
+ * it was guessing at. A conditional `UPDATE … WHERE used_at IS NULL` leaves a
+ * wrong code untouched, and six characters is a small space to search at
+ * leisure.
+ *
+ * Its own table rather than a column on `teachers`, for D3's reason: a durable
+ * counter needs a command to clear it and no such command exists yet. Rows age
+ * out of the window on their own, so the cap heals without anyone acting.
+ */
+export const urgentCodeAttempts = pgTable(
+  'urgent_code_attempts',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    chatId: chatId('chat_id').notNull(),
+    at: tsz('at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('urgent_code_attempts_chat_id_digits', CHAT_ID_IS_DIGITS('chat_id')),
+    index('urgent_code_attempts_chat_idx').on(t.chatId, t.at),
+  ],
 );
 
 /**

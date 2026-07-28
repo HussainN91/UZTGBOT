@@ -221,16 +221,22 @@ Submit Documents is gated because `onFormSubmit` calls `createCase()`, which
 hard-requires verification — an unverified teacher would otherwise reach a form
 only for their submission to become an untraceable "unresolved submitter" case.
 
-### 5.1 Verification caching
+### 5.1 Verification is not cached — ✅ rebuilt
 
-A **positive** result is cached for 30 minutes. Negative results are never
-cached — that would lock a teacher out immediately after they succeed.
+There is no verification cache, and no verification epoch. Both existed only
+because reading a spreadsheet was expensive; `teachers` is a table with a primary
+key, so every check reads the current state.
 
-Cache keys are namespaced by a **verification epoch** held in Script Properties.
-Bumping the epoch invalidates every cached marker at once. This exists because
-`onEdit` does not fire on row deletion, so deleting a USERS row — the intuitive
-way to revoke access — would otherwise keep working for up to 30 minutes.
-`onChange` catches deletions and bumps the epoch.
+The whole mechanism the epoch existed to work around goes with it. Revoking a
+teacher takes effect on their next message rather than up to thirty minutes
+later, and there is no longer a class of bug in which a stale marker outlives the
+row it describes.
+
+**Eligibility is checked against the copied roster, not the live sheet.** The
+sync deactivates roster rows, it never deletes them, so sign-in reads
+`roster_entries.active` — without that, removing a teacher from the spreadsheet,
+which every administrator will assume revokes access, would do nothing at all. A
+row restored by accident restores access silently within ten minutes.
 
 ### 5.2 Privacy
 
@@ -421,32 +427,63 @@ A System Admin bypasses every capability, queue and region check.
 - Every mutation reports a lock failure to the admin instead of vanishing
   silently, and stamps `LAST_ACTOR`.
 
-### 6.6 Urgent code lifecycle
+### 6.6 Urgent code lifecycle — ✅ rebuilt
 
-The one flow that spans an admin and a teacher:
+Every mechanism this section previously named has changed. The flow still spans
+an admin and a teacher:
 
-1. An admin with the **`urgent.issue`** capability (Agent role or above) runs `/generate_urgent_code`
-2. A 6-character code is stored in **Script Properties** — not `CacheService`,
-   which can evict early and would silently void a code the bot promised was good
-   for 48 hours
+1. An admin with the **`urgent.issue`** capability runs the issuing command
+   (Stage 4 — until then codes are seeded by hand)
+2. A 6-character code is stored in **`urgent_codes`**, with its expiry as a
+   column rather than as a property that could be evicted
 3. The admin passes it to the teacher **by phone or in person** — never through
    the bot
 4. The teacher taps **🚨 Urgent Case**, passes the verification gate, and types
    the code
-5. `consumeUrgentCode_` **deletes the code immediately, valid or not**, so a
-   leaked or guessed code cannot be replayed, then checks the stored expiry
-6. On success the chat enters `AWAITING_CASE_DETAIL` with a **6-hour** TTL and the
-   resulting case is filed as `Escalated`
+5. The code is **checked, not consumed**. Wrong, spent and expired are one
+   outcome, deliberately: distinguishing them tells a guesser they have found a
+   real code
+6. The chat enters `AwaitingUrgentDetail` for **24 hours**, carrying the accepted
+   code
+7. When the case is filed, the code is spent **in the same transaction as the
+   case insert**:
+   `UPDATE urgent_codes SET used_at = now(), used_by = …, case_reference = …
+   WHERE code = … AND used_at IS NULL AND expires_at > now()`
 
-**TTL is 48 hours from issue.** Unused codes are swept by the `runArchive`
-trigger, so they do not accumulate in Script Properties forever.
+**Spending it is one statement that can succeed exactly once**, whoever runs it
+and however many run at the same moment. Two teachers cannot spend one code, and
+a redelivered update cannot spend it twice.
+
+**The code is spent at case creation, not at code entry.** The previous version
+of this section, and `CONCERNS-AND-IT-ACTIONS.md` B8, said the full fix "opens a
+double-use race" — against a real database it does not. So a teacher who gives up
+halfway keeps their code instead of telephoning a Regional admin for another.
+
+**24 hours, not 6.** Six was `CacheService`'s ceiling, not a decision. A teacher
+who starts an urgent case in the evening can finish it the next morning.
+
+**Guesses are capped.** New, and required by the change above: Apps Script
+destroyed a code whether the guess was right or wrong, so a wrong guess burned
+the thing it was guessing at. A conditional update leaves a wrong code untouched,
+which made guessing free against a six-character space. Five wrong codes per
+chat per hour, counted in `urgent_code_attempts`, rolling and self-healing —
+there is no command to release a lockout and none is needed.
 
 **If the case deduplicates** (§7.3) the urgent detail is appended to the existing
-case and that case is escalated — the code is never burned for nothing.
+case, that case is escalated, and **the code is still spent**. This is the common
+path, not an edge case: urgent cases have no topic picker, so they file under the
+same general category as every ordinary Contact Support case.
 
-**A code cannot be recovered.** It is consumed at step 5, before the teacher
-writes anything. A teacher who takes longer than 6 hours to reply loses it and
-must ask the admin for a new one.
+**If the code will not spend, the case is still filed** — as an ordinary case,
+with the teacher told plainly that the escalation did not apply and an alarm
+raised. The only explanations are an expiry straddle or two chats holding one
+code, and both want a person. Throwing away an emergency a teacher has just
+typed, because of our timing, is not one of the options.
+
+**A spent code always names its case.** `case_reference` is written in the same
+statement as `used_at`, so a code spent for nothing is a queryable condition —
+the heartbeat job alerts on any that appear, which under this design means
+something has consumed a code outside the one write path.
 
 ---
 
@@ -496,11 +533,30 @@ validates and notifies, `/mycases` and `/cases unassigned` read it.
 `PREFIX-YYYY-NNNNN`. Prefix by category: `VISA`, `TRAVEL`, `CONTRACT`, `ACCOM`,
 `SUPPORT`, `DOCS`, else `CASE`.
 
-The sequence counter lives in Script Properties (`CASE_SEQ_<PREFIX>_<YEAR>`), not
-derived from a sheet scan. This is deliberate: a scan-derived sequence
-under-counts the moment archiving removes current-year rows, and would reissue an
-already-used reference. On first use for a prefix/year it seeds from the sheet's
-current maximum, then never scans again.
+The counter lives in the **`case_sequences`** table, one row per prefix and year,
+and a reference is taken in a single statement:
+
+```sql
+INSERT INTO case_sequences (prefix, year, last_value) VALUES (…, …, 1)
+ON CONFLICT (prefix, year) DO UPDATE SET last_value = case_sequences.last_value + 1
+RETURNING year, last_value
+```
+
+Twenty teachers tapping confirm at once get twenty distinct numbers: the
+conflicting inserts queue on the row lock and each returns its own incremented
+value. `maxExistingSequence_` scanned every case ever filed, under a global lock,
+so the cost of filing a case grew with the number of cases — and the correctness
+rested entirely on that lock being held.
+
+**Gaps are acceptable; reuse is not.** A rolled-back case has still consumed its
+number, and a reference nobody holds costs nothing. A reissued reference is a
+teacher quoting a number that now belongs to somebody else's case, so the counter
+is never tidied downwards.
+
+**The year comes from PostgreSQL in Tashkent**, not from the Node clock. A case
+filed at 00:30 on 1 January belongs to the new year; a UTC clock would file it
+under the old one, and that error would sit undetected for twelve months before
+producing a duplicate-looking run of numbers.
 
 ### 7.3 Deduplication
 
@@ -522,25 +578,41 @@ day are two distinct cases — they no longer collapse into one.
 
 ### 8.1 State machine
 
-One consolidated `CacheService` entry per chat (`chat_state_<chatId>`), so there
-is a single TTL and no risk of two flags disagreeing.
+One row per chat in **`conversation_states`**, so a teacher can only ever be in
+one place, and the state survives a restart. The payload is parsed rather than
+cast on every read: a row written by a newer build, or by an older one whose
+payload differed, is an ordinary consequence of forward-only migrations and must
+never throw.
 
 | State | Set by | Next text message is treated as | TTL |
 |---|---|---|---|
-| *(none)* | default | Unrecognised → topic picker (`QTOPIC:`), question remembered | — |
-| `CATEGORY` | Entering a topic | An FAQ query scoped to that topic | 30 min |
-| `AWAITING_TOPIC_FOR_QUERY` | Typing a question with no topic | *(buttons, not text — carries `pendingQuery`)* | 30 min |
-| `AWAITING_IDENTIFIER` | Gated feature, unverified | A roster identifier (max 5 attempts) | 30 min |
-| `AWAITING_CASE_DETAIL` | Contact Support topic pick / valid urgent code | The case description — carries `category` from the picker | 30 min *(6 h if urgent)* |
-| `AWAITING_URGENT_CODE` | Urgent Case | A single-use urgent code | 30 min |
+| *(none)* | default | A question → topic picker (`QT:`), question remembered | — |
+| `AwaitingQuestionTopic` | Typing a question with no topic | A newer question, replacing the remembered one | 30 min |
+| `AwaitingIdentifier` | Gated feature, unverified | A roster identifier (max 5 attempts) | 30 min |
+| `AwaitingCaseTopic` | Contact Support | *(buttons, not text — the prompt is repeated)* | 30 min |
+| `AwaitingCaseDetail` | A filing topic chosen | The case description — carries `category` | 30 min |
+| `AwaitingUrgentCode` | Urgent Case | A single-use urgent code | 30 min |
+| `AwaitingUrgentDetail` | A code accepted | The emergency description — carries the accepted code | **24 h** |
 
-The urgent-detail state gets the longest TTL `CacheService` permits, because by
-that point the teacher's 48-hour admin-issued code has already been consumed.
+**Expiry is enforced when the state is read, never by a sweeper.** The read
+filters on the stored deadline, so an expired state is indistinguishable from no
+state at all. Without that, Stage 3 would be quietly incorrect until the Stage 5
+clean-up job shipped: an abandoned case from two days ago would capture the
+teacher's next FAQ question as its description. The clean-up job is a disk-space
+job, not a correctness one.
 
-Note the first row: **with no state, typed text is never matched against the
-FAQ** — but it is no longer a dead end. The question is logged
-(`QUERY_WITHOUT_TOPIC`), remembered, and answered in whichever topic the teacher
-then taps. See §9.0 — the one-topic constraint stands.
+**The urgent-detail state gets 24 hours** because a teacher who takes longer no
+longer loses anything — the code is not spent until the case is filed (§6.6).
+
+**With no state, typed text is still never matched against the FAQ directly.**
+The question is logged, remembered in `AwaitingQuestionTopic`, and answered in
+whichever topic the teacher then taps. See §9.0 — the one-topic constraint
+stands.
+
+**Every state carries its own redaction.** The interaction log reads the state
+*before* any handler mutates it, so an address typed at the identifier prompt is
+masked whether or not sign-in has since completed. Reading it afterwards is how
+the original leak came back.
 
 ### 8.1.1 Non-standard inbound messages
 
@@ -578,21 +650,37 @@ hub, become valid in `isKnownCategory_`, and route correctly — no other edit.
 
 ### 8.3 Callback protocol
 
+Every prefix in this table changed in the rebuild — the ones below are the ones
+the code actually emits, and the suite asserts the worst realistic payload
+against the byte ceiling with real values rather than trusting an estimate.
+
 | Prefix | Meaning |
 |---|---|
 | `MENU:MAIN` / `MENU:FAQ` | Main menu / topic hub |
-| `MENU:<ACTION>` | `SUBMIT_DOCS`, `CHECK_CASE`, `CONTACT_SUPPORT`, `CHANGE_LANGUAGE`, `URGENT_CASE` |
-| `MENU:<TOPIC_KEY>` | Enter an FAQ topic |
-| `CASETOPIC:<key>` | Contact Support topic chosen (`VISA`/`TRAVEL`/`CONTRACT`/`ACCOMMODATION`/`OTHER`) — re-checks maintenance and verification before prompting for detail |
-| `QTOPIC:<key>` | Topic chosen for a remembered typed question — answers it there without retyping |
-| `FAQOK:<CODE>` / `FAQBAD:<CODE>` | ✅/❌ answer feedback — logged as `FAQ_HELPFUL` / `FAQ_NOT_HELPFUL`; ❌ offers Contact Support |
-| `CAT:<label>` | Back to a topic (validated against `FAQ_TOPICS`) |
-| `FAQPG:<page>:<label>` | Paged topic browsing |
-| `FAQANS:<CODE>` | Send one FAQ answer |
-| `DOC:<key>` | Send a document form link |
+| `MENU:<ACTION>` | `CHECK_CASE`, `CONTACT_SUPPORT`, `URGENT_CASE` |
+| `CAT:<CODE>` | Enter an FAQ topic (`VISA`, `LIVING`, …) |
+| `PG:<CODE>:<page>` | Paged topic browsing |
+| `ANS:<CODE>` | Send one approved answer |
+| `OK:<CODE>` / `BAD:<CODE>` | ✅/❌ answer feedback — logged as `ANSWER_HELPFUL` / `ANSWER_UNHELPFUL`; ❌ offers Contact Support |
+| `CASE:<key>` | Filing topic chosen (`VISA`/`TRAVEL`/`CONTRACT`/`ACCOMMODATION`/`OTHER`) — re-checks maintenance and verification before prompting for detail |
+| `QT:<CODE>` | Topic chosen for a remembered typed question — answers it there without retyping |
+| `DOC:<key>` | Reserved for Stage 6; nothing emits it yet |
 
-`callback_data` is capped at **64 bytes** by Telegram. Unknown callbacks fall
-back to the main menu rather than doing nothing.
+**Topic codes travel, never display labels.** The Apps Script version embedded
+the human-readable label, which tied the payload's size to translated text — in
+Cyrillic, at two bytes a character, the promised Russian and Uzbek menus would
+have silently grown every button past the limit. Translating the interface is now
+a display change with no effect on routing.
+
+`callback_data` is capped at **64 bytes** by Telegram, measured in one place.
+Building an over-long payload throws rather than truncating — silent truncation
+routes a tap somewhere else — except when listing answers, where a single
+over-long content code hides one button and raises an alarm instead of taking
+down the whole listing.
+
+Unknown and malformed callbacks fall back to the main menu rather than doing
+nothing. Both are ordinary: the payload arrives from the network, so it can be
+hand-crafted, and a teacher's scrollback keeps every button they were ever sent.
 
 ---
 
@@ -645,15 +733,26 @@ Typo tolerance scales with word length: ≥8 chars → 2 edits, ≥5 → 1, shor
 the top score **and** that score is ≥ 2. Anything else — a tie, or evidence that
 was only fuzzy — produces a picker. The bot never guesses.
 
-### 9.2 Caching
+### 9.2 There is no FAQ cache — ✅ rebuilt
 
-The FAQ sheet is cached for **6 hours**, split across numbered chunk keys
-because `CacheService` has a hard 100 KB per-value limit and the answer bank
-exceeds it. A partial chunk set is treated as a miss. Every cache operation
-degrades to a direct sheet read on failure — a slow bot beats a silent one.
+The chunked six-hour cache is gone, along with the edit watcher that existed to
+invalidate it. Answers are read from `faq_entries` on every query.
 
-Editing the FAQ tab fires `onEdit` → `clearFaqCache()`, so approved corrections
-reach teachers immediately rather than after up to 6 hours.
+What replaces the six-hour delay is a **ten-minute sync**: an edit in the
+spreadsheet reaches teachers at the next sync, not immediately. That is slower
+than the old edit-watcher path and faster than its cache expiry, and it is the
+single most likely thing for staff to report as a bug on day one — it is called
+out in the runbook for that reason.
+
+Rows are ordered explicitly, by the sheet row the content owner arranged, with
+the code breaking ties. Both were implicit in the spreadsheet and both broke in
+the move: SQL without an `ORDER BY` returns rows arbitrarily, so paging through a
+topic could repeat and skip answers between taps.
+
+Withdrawn answers are filtered on every read, not just at listing time. The sync
+deactivates rather than deletes, and a teacher's scrollback keeps yesterday's
+buttons forever — so tapping one must not deliver an answer that content owners
+have since withdrawn.
 
 ### 9.3 Keyboard safety
 
@@ -728,43 +827,56 @@ twice for the same change. Multi-row edits are handled up to a 50-row cap.
 
 ## 12. Concurrency model
 
-Google Sheets has no row-level locking, and webhook executions run concurrently.
-Every read-then-write path takes `LockService.getScriptLock()`.
+**The lock table that stood here is obsolete.** It listed eleven paths, four of
+them deliberately unlocked, because the only tool available was one global mutex
+and taking it was expensive. None of that survives.
 
-Every path that writes **teacher-facing or high-frequency** data takes
-`LockService.getScriptLock()`. Coverage is not universal — see the unlocked rows
-below and the rationale that follows.
+**One lock, taken in one place.** Every update runs inside
+`pg_advisory_xact_lock(hashtext(chat_id))`, acquired at the top of the pipeline
+and released when the transaction ends, however it ends. A handler that throws or
+a process that is killed cannot strand it.
 
-| Path | Lock | Timeout |
-|---|---|---|
-| `createCase` (dedup → append) | ✅ | 5 s (throws on failure) |
-| `updateCaseFields_` (find row → write) | ✅ | 5 s (throws on failure) |
-| `attemptVerify_` (roster match → bind) | ✅ | 5 s |
-| `logInteraction` (append) | ✅ | 3 s (drops the row on failure) |
-| `setSettingValue_` (find row → write/append) | ✅ | 5 s (throws on failure) |
-| `updateAnnouncementStatus_` | ✅ | 10 s |
-| Archive sweeps | ✅ per sheet | 30 s (skips the pass) |
-| `upsertAdminRow_` (`/add_admin`) | ❌ | — |
-| `setAdminTierQueue_` (`/set_role`) | ❌ | — |
-| `appendAnnouncementRow_` | ❌ | — |
-| `consumeUrgentCode_` (get → delete) | ❌ | — |
+```
+claim the update → take the chat's lock → read the state once
+                 → log the interaction → dispatch → COMMIT → speak
+```
 
-**The unlocked paths are a deliberate, bounded exception, not an oversight.** All
-four are low-frequency and human-paced: admin-role writes happen a handful of
-times in the system's life and only a System Admin can trigger them, and an
-urgent code is typed once by one teacher. The theoretical races are a lost
-role-write when two System Admins edit the same admin in the same second, and a
-code consumed twice if two chats submit the same 6-character code simultaneously
-— the latter also requires guessing a UUID-derived code inside its window. If
-either path ever becomes concurrent, wrap it the way `setSettingValue_` is.
+**Per chat, not global.** Two teachers can never block each other. Apps Script's
+own notes named the global script lock as the throughput ceiling of the whole
+bot; that ceiling is gone rather than raised.
 
-**Locks are never nested.** `logInteraction` takes the same script lock, so it
-must never be called from inside another critical section — the inner
-`releaseLock()` would drop the outer caller's protection early. `attemptVerify_`
-performs all logging and messaging *after* releasing.
+**Exactly one lock, on purpose.** Case dedup and conversation state are two
+tables that both need serialising for the same chat. Locking them separately
+would mean two locks acquired in different orders on different paths, which is
+the classic deadlock recipe. Nothing below the pipeline takes a lock of its own —
+`createCase`, `verifyIdentifier` and `fileUrgentCase` are all read-then-write and
+all documented as requiring the caller's transaction.
 
-**This is a global mutex, not per-row.** It is the throughput ceiling of the
-whole bot (see §15).
+**Correctness that used to rest on holding a lock now rests on the statement.**
+Three cases where a single statement replaced a critical section entirely:
+
+| Guarantee | How |
+|---|---|
+| An update is processed once | `INSERT … ON CONFLICT DO NOTHING RETURNING` |
+| A reference is never reissued | `INSERT … ON CONFLICT DO UPDATE … RETURNING` |
+| A code is spent once | `UPDATE … WHERE used_at IS NULL AND expires_at > now()` |
+
+**Commit before you speak.** The transaction commits and *then* Telegram is
+called. A send that fails after a good commit is recoverable — the case exists,
+Check My Case will show it — and it raises an alarm, because the teacher believes
+nothing happened. A commit that fails after a confirmation message has gone out
+is not recoverable by anything: the teacher is holding a reference for a case
+that does not exist.
+
+For the same reason nothing announces from inside the transaction. The
+duplicate-identity alarm is returned to the router and sent afterwards, rather
+than announcing a binding that can still roll back.
+
+**Logging never rolls anything back.** The interaction log is best-effort and
+swallows its own errors: a failure to write a log row must not undo a case a
+teacher has just filed. Apps Script took the global lock to append a log row and
+gave up after three seconds, discarding entries exactly when the system was
+busiest — which is when you most want to read them back.
 
 ---
 
@@ -772,27 +884,43 @@ whole bot (see §15).
 
 | Control | Implementation |
 |---|---|
-| Webhook authenticity | Shared secret required as a URL query parameter; mismatches are dropped silently with no explanation |
-| Update replay | `update_id` deduplicated for 10 minutes |
-| Identity | Roster match required before any case action |
-| Brute force | 5 verification attempts per session |
+| Webhook authenticity | Shared secret in the **`X-Telegram-Bot-Api-Secret-Token` header**, compared on every request; mismatches are rejected with no explanation. It is no longer in the URL, where it leaked into every proxy log, access log and `getWebhookInfo` output in the path |
+| Update replay | `update_id` claimed in `processed_updates` with one statement, before the chat lock, and kept for 24 hours — Telegram gives up retrying long before that |
+| Identity | Roster match required before any case action, checked in the program as well as by the foreign key: the key proves a `teachers` row exists, not that its state is `Verified` |
+| Brute force — sign-in | 5 attempts, counted in the conversation state so they expire with it. Deliberately self-healing: no Stage 3 command exists to release a teacher, so a durable counter would strand one |
+| Brute force — urgent codes | 5 wrong codes per chat per rolling hour, counted in `urgent_code_attempts`. Durable against clearing the conversation state, which tapping Main Menu does. Required because making a code genuinely single-use also made guessing free |
 | Group exposure | Non-private chats rejected; the bot actively leaves groups it is added to |
 | Injection | No `parse_mode` is ever sent, so teacher text cannot break message formatting |
-| Callback forgery | `CAT:` and `FAQPG:` categories validated against `FAQ_TOPICS`; `DOC:` keys resolved with `hasOwnProperty` so a crafted `DOC:constructor` cannot reach an inherited prototype member; `FAQANS:` codes resolve to a real row or a clean "no longer available" reply; unknown callbacks fall back to the main menu |
-| Secret storage | Script Properties only — no secrets in source |
+| Callback forgery | `CAT:`, `PG:` and `QT:` codes resolved through a fixed map, never used as a lookup key on an object; `CASE:` keys likewise; `ANS:` codes resolve to a real active row or a clean "no longer available" reply; unknown and malformed callbacks fall back to the main menu |
+| Secret storage | Environment only, validated at start-up — the web process refuses to run with a placeholder support contact rather than serving teachers a number nobody answers. No secrets in source; `.env` is `chmod 600` and gitignored |
+| Database exposure | PostgreSQL is published on loopback only and is not reachable from outside the host; administration is over an SSH tunnel |
+| Transport | TLS terminated by Caddy with an automatically renewed certificate; port 80 carries only the ACME challenge and the redirect |
 | Data minimisation | Identifiers stored once; failed attempts logged redacted |
 | Internal data | `DETAIL` never surfaced to teachers; `getCasesForChatId` strips it structurally; excluded from `/export` and from new-case notifications |
 | Privilege probing | **Every** authorization denial — queue, region, capability, or system — logs `ADMIN_DENIED` with the command and the caller's permission shape |
 | Impersonation visibility | A second chat verifying an already-held identifier alerts System Admins and the prior holder (`IDENTITY_DUPLICATE_BINDING`) — detected, not blocked |
-| Permission-boundary bypass | The ADMINS sheet is the real access boundary (Drive sharing). Hand edits cannot be prevented from Apps Script, but they alert every System Admin and are logged (`ADMINS_SHEET_EDITED`) |
+| Permission-boundary bypass | The `staff` table is the access boundary, and it is inside the database rather than in a shared spreadsheet — so granting yourself staff access now requires server access, not edit access to a document. The spreadsheet is read-only to the bot and holds only the roster and the answer bank; nothing about permissions is reachable from it |
 | Bulk exfiltration | `/export` requires a recorded reason (≥10 chars) and notifies the other System Admins; mass sends require an explicit `/announce confirm` after a preview |
 
-**Not protected against:** an admin with sheet access seeing everything (by
-design — they are staff); Telegram itself; a teacher forwarding their own form
-link to someone else (mitigated by verification-on-submit, not prevented);
-identity impersonation via a known roster email (made visible by the
-duplicate-binding alert, prevented only by per-person one-time codes — an open
-product decision).
+**Not protected against:** staff with database access seeing everything (by
+design — they are staff); Telegram itself; identity impersonation via a known
+roster email (made visible by the duplicate-binding alert, prevented only by
+per-person one-time codes — an open product decision that gets cheaper to change
+now than at any later point).
+
+**Two things the rebuild made worse, both open:**
+
+- **Erasure is blocked by the database.** `cases.teacher_chat_id` is
+  `ON DELETE RESTRICT`, which is what guarantees no case can exist without a real
+  teacher behind it. It also means a teacher who has ever opened a case cannot be
+  deleted — and the privacy notice promises removal on request. That promise now
+  needs a deliberate anonymisation route; it is not merely unbuilt, it is
+  refused by a constraint we added on purpose.
+- **Data is collected before the notice is shown.** FAQ browsing is open to
+  anyone and every inbound message writes a `messages` row. Apps Script had the
+  identical flaw. The difference is that `privacy_notice_accepted_at` now makes
+  it *auditable*: messages whose chat has a null acceptance are a directly
+  queryable list.
 
 ---
 

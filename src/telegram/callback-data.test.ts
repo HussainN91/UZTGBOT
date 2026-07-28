@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CALLBACK_DATA_MAX_BYTES, FAQ_TOPICS } from '../config/constants.js';
+import { CALLBACK_DATA_MAX_BYTES, CASE_TOPIC_CHOICES, FAQ_TOPICS } from '../config/constants.js';
 import {
   CALLBACK,
   CallbackDataTooLongError,
@@ -21,11 +21,21 @@ describe('callback data stays inside Telegram’s 64-byte limit', () => {
     for (const topic of FAQ_TOPICS) {
       emitted.push(encodeCallback(CALLBACK.TOPIC, topic.code));
       emitted.push(encodeCallback(CALLBACK.TOPIC_PAGE, topic.code, '99'));
-      emitted.push(encodeCallback(CALLBACK.CASE_TOPIC, topic.code));
+      emitted.push(encodeCallback(CALLBACK.QUERY_TOPIC, topic.code));
+    }
+    /**
+     * Only the five filing options, not all eleven FAQ topics. A case cannot be
+     * opened against "Living in Uzbekistan" — there is no queue behind it — and
+     * a test asserting a wider surface than the design allows is a test that
+     * will not notice the design breaking.
+     */
+    for (const choice of CASE_TOPIC_CHOICES) {
+      emitted.push(encodeCallback(CALLBACK.CASE_TOPIC, choice.key));
     }
     // FAQ answer codes come from the answer bank: three letters, dash, three digits.
     emitted.push(encodeCallback(CALLBACK.ANSWER, 'PLACEMENT-999'));
     emitted.push(encodeCallback(CALLBACK.ANSWER_UNHELPFUL, 'PLACEMENT-999'));
+    emitted.push(encodeCallback(CALLBACK.ANSWER_HELPFUL, 'PLACEMENT-999'));
     emitted.push(encodeCallback(CALLBACK.DOC_TYPE, 'REIMBURSEMENT'));
 
     const worst = emitted.reduce((a, b) => (byteLength(a) >= byteLength(b) ? a : b));

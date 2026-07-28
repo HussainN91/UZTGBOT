@@ -1,0 +1,49 @@
+# PostgreSQL for the test suite. Nothing else.
+#
+#   docker compose -f docker-compose.test.yml up -d
+#   TEST_DATABASE_URL=postgres://mopse:mopse@localhost:5432/mopse_test npm test
+#   docker compose -f docker-compose.test.yml down
+#
+# This exists because the production compose file cannot be used for it.
+# Compose interpolates the whole file before it starts anything, so
+# `docker compose up -d postgres` trips over caddy's BOT_HOSTNAME and over
+# POSTGRES_PASSWORD and starts nothing at all — on a fresh checkout there is no
+# .env for either. That strictness is right for the server, where a missing
+# BOT_HOSTNAME means Caddy holds a certificate for the wrong name, so this file
+# stands beside it rather than loosening it.
+#
+# The credentials are fixed and public on purpose. They reach a throwaway
+# database bound to loopback that the tests TRUNCATE, so there is nothing here
+# worth protecting and nothing to copy into a real .env.
+
+# Its own project name. Without one, Compose derives it from the directory, so
+# this stack and the production stack would own the same containers and a `down`
+# on either would tear down the other.
+name: mopse-test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mopse
+      POSTGRES_PASSWORD: mopse
+      # Created by the image on first start, so there is no createdb step. The
+      # name says test: it must never be mistaken for the live database, which
+      # is called mopse.
+      POSTGRES_DB: mopse_test
+      # Must stay identical to docker-compose.yml. Collation decides sort order,
+      # and ordering is load-bearing here — FAQ pagination returns rows in a
+      # fixed order, and that broke once already. Tests passing under a
+      # collation the server does not run would hide exactly that class of bug.
+      LANG: C.UTF-8
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    # No volume. Every `down` throws the data away, which is what a test
+    # database should do.
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mopse -d mopse_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s

@@ -11,7 +11,8 @@
  * raises an alert. That is what turns silence into an alarm instead of an
  * assumption.
  */
-import { sql } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
+import { TIMEZONE } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import { jobRuns } from '../db/schema.js';
 import { log } from '../log.js';
@@ -74,7 +75,22 @@ const REALERT_AFTER_SECONDS = 3600;
 
 export interface StaleJob {
   readonly jobName: string;
-  readonly lastSuccessAt: Date | null;
+  /**
+   * Already formatted, in Tashkent, and a string rather than a `Date`.
+   *
+   * Two reasons, and the second one is a fault this shape prevents. It is read
+   * by a person on the operations chat, for whom a UTC instant is five hours
+   * wrong and needs converting in their head at the moment they are least
+   * inclined to. And `db.execute` returns a timestamp as the raw string
+   * PostgreSQL sent — drizzle installs its own type parsers, so unlike
+   * `pool.query` it does not hand back a `Date`. This field was typed as one and
+   * had `.toISOString()` called on it, which throws.
+   *
+   * The path that throws is the one where a job succeeded once and then stopped,
+   * which is the commonest real failure and the entire reason this function
+   * exists. The alarm for silence was itself silent.
+   */
+  readonly lastSuccessAt: string | null;
   readonly expectedIntervalSeconds: number;
   readonly consecutiveFailures: number;
   readonly lastError: string | null;
@@ -86,20 +102,31 @@ export interface StaleJob {
  * Deliberately driven by last *success*, not by last failure. A job that throws
  * is noisy and will be noticed; a job that stopped being scheduled at all is
  * silent, and silence is what this exists to detect.
+ *
+ * On the `::float8` cast in the grace period: without it PostgreSQL infers the
+ * parameter's type from `expected_interval_seconds`, which is an integer column,
+ * and then refuses 1.5 as invalid input for an integer. The statement threw on
+ * every call, so this function had never once completed — the alarm for silence
+ * was itself silent, and nothing was watching it because it is the thing that
+ * watches. Found the first time it was pointed at a real database.
  */
 export async function checkHeartbeats(db: Database, alerter: Alerter): Promise<StaleJob[]> {
   const result = await db.execute<{
     job_name: string;
-    last_success_at: Date | null;
+    last_success_at: string | null;
     expected_interval_seconds: number;
     consecutive_failures: number;
     last_error: string | null;
   }>(sql`
-    SELECT job_name, last_success_at, expected_interval_seconds, consecutive_failures, last_error
+    SELECT job_name,
+           to_char(last_success_at AT TIME ZONE ${TIMEZONE}, 'YYYY-MM-DD HH24:MI') AS last_success_at,
+           expected_interval_seconds, consecutive_failures, last_error
     FROM job_runs
     WHERE (
       last_success_at IS NULL
-      OR last_success_at < now() - make_interval(secs => expected_interval_seconds * ${GRACE_MULTIPLIER})
+      -- The ::float8 cast is load-bearing; see the note above this function.
+      OR last_success_at
+         < now() - make_interval(secs => expected_interval_seconds) * ${GRACE_MULTIPLIER}::float8
     )
     AND (alerted_at IS NULL OR alerted_at < now() - make_interval(secs => ${REALERT_AFTER_SECONDS}))
   `);
@@ -113,13 +140,13 @@ export async function checkHeartbeats(db: Database, alerter: Alerter): Promise<S
   }));
 
   for (const job of stale) {
-    const since = job.lastSuccessAt ? job.lastSuccessAt.toISOString() : 'never — it has not succeeded once';
+    const since = job.lastSuccessAt ?? 'never — it has not succeeded once';
     await alerter.send({
       severity: 'critical',
       title: `Scheduled job "${job.jobName}" has stopped`,
       body: [
         `Expected to succeed every ${job.expectedIntervalSeconds} seconds.`,
-        `Last success: ${since}.`,
+        `Last success (Tashkent time): ${since}.`,
         job.consecutiveFailures > 0
           ? `${job.consecutiveFailures} consecutive failures. Last error: ${job.lastError ?? 'unknown'}`
           : 'No failures recorded — it is not being scheduled at all, rather than failing.',
@@ -131,10 +158,17 @@ export async function checkHeartbeats(db: Database, alerter: Alerter): Promise<S
   }
 
   if (stale.length > 0) {
+    /**
+     * `inArray`, not `ANY(${array})`. Interpolating a JavaScript array into raw
+     * SQL binds it as one parameter, and PostgreSQL then reads the value as an
+     * array literal and rejects it — so marking the alarm as sent threw, which
+     * would have re-alerted on every pass and buried the operations chat. It was
+     * never reached, because the query above it never completed either.
+     */
     await db
       .update(jobRuns)
       .set({ alertedAt: new Date() })
-      .where(sql`job_name = ANY(${stale.map((j) => j.jobName)})`);
+      .where(inArray(jobRuns.jobName, stale.map((j) => j.jobName)));
   }
 
   return stale;

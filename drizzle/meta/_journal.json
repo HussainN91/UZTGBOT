@@ -29,6 +29,20 @@
       "when": 1785223225420,
       "tag": "0003_processed_updates",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785240534778,
+      "tag": "0004_privacy_notice_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785245393356,
+      "tag": "0005_urgent_code_case_and_attempts",
+      "breakpoints": true
     }
   ]
 }

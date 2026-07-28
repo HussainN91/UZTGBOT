@@ -82,7 +82,11 @@ const schema = z.object({
   OPS_ALERT_CHAT_ID: z
     .string()
     .trim()
-    .regex(/^\d+$/, 'OPS_ALERT_CHAT_ID must be a numeric Telegram chat id')
+    // Negative is the normal case here, not an edge case: groups are negative
+    // and supergroups and channels are the -100… form. Only a private chat with
+    // a single person is positive, and an alarm that can only reach one person
+    // is the thing two named administrators exist to avoid.
+    .regex(/^-?\d+$/, 'OPS_ALERT_CHAT_ID must be a numeric Telegram chat id')
     .optional(),
 
   /** Google Sheet the FAQ and roster are read from. Read-only; the bot never writes to it. */

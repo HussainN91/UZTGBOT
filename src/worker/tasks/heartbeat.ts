@@ -11,6 +11,7 @@
  * reporting its own success into the same table.
  */
 import type { Task } from 'graphile-worker';
+import { checkStrandedUrgentCodes } from '../../cases/urgent.js';
 import { getDb } from '../../db/index.js';
 import { log } from '../../log.js';
 import { telegramAlerter } from '../../telegram/alerter.js';
@@ -20,6 +21,18 @@ import { checkHeartbeats } from '../job-run.js';
 export const HEARTBEAT_TASK = 'heartbeat';
 
 export const heartbeatTask: Task = async () => {
-  const stale = await checkHeartbeats(getDb(), telegramAlerter(createApi()));
+  const db = getDb();
+  const alerter = telegramAlerter(createApi());
+
+  const stale = await checkHeartbeats(db, alerter);
   if (stale.length === 0) log.debug('heartbeat: all scheduled jobs are current');
+
+  /**
+   * Also watch for a spent urgent code that bought no case.
+   *
+   * It belongs here rather than in its own job because it is the same kind of
+   * problem: a failure that raises no error and produces no symptom anybody will
+   * report. It should always find nothing — see `checkStrandedUrgentCodes`.
+   */
+  await checkStrandedUrgentCodes(db, alerter);
 };

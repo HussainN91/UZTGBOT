@@ -29,10 +29,27 @@ export const CALLBACK = {
   ANSWER: 'ANS',
   /** "That did not answer my question", e.g. BAD:LIV-004 */
   ANSWER_UNHELPFUL: 'BAD',
+  /**
+   * "That answered it", e.g. OK:LIV-004.
+   *
+   * BOT-SPEC.md:589 requires the ✅/❌ pair as the content feedback loop. Only
+   * the ❌ half existed, which meant the answer bank could only ever learn what
+   * was failing, never what was working — so a badly-worded answer and a
+   * well-used one looked identical in the record.
+   */
+  ANSWER_HELPFUL: 'OK',
   /** Choose the topic a new case is filed under, e.g. CASE:VISA */
   CASE_TOPIC: 'CASE',
   /** Choose which document is being uploaded, e.g. DOC:PASSPORT */
   DOC_TYPE: 'DOC',
+  /**
+   * Ask a free-text question against one topic, e.g. QT:VISA.
+   *
+   * BOT-SPEC.md:588. The recovery path for a teacher who types a question
+   * without picking a topic first — which is the most natural thing they can do,
+   * and previously had nowhere to go.
+   */
+  QUERY_TOPIC: 'QT',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];

@@ -102,6 +102,33 @@ describe('start-up configuration', () => {
     it('refuses an @username, which the Bot API cannot message reliably', () => {
       expect(() => loadEnv({ ...valid, OPS_ALERT_CHAT_ID: '@ops_channel' })).toThrow(/numeric/);
     });
+
+    /**
+     * Only a private chat with one person has a positive id. Groups are
+     * negative and supergroups and channels are the `-100…` form, so a rule of
+     * digits alone quietly restricts every operational alarm to one
+     * individual's direct messages.
+     *
+     * That contradicts the launch requirement for two named administrators,
+     * whose whole point is that one person leaving cannot take the alarm with
+     * them — and it would have surfaced on launch day, when somebody first
+     * pasted a staff group id in and the bot refused to start.
+     */
+    it('accepts a supergroup id, so alarms reach a staff group rather than one person', () => {
+      expect(loadEnv({ ...valid, OPS_ALERT_CHAT_ID: '-1001234567890' }).OPS_ALERT_CHAT_ID).toBe(
+        '-1001234567890',
+      );
+    });
+
+    it('accepts a basic group id', () => {
+      expect(loadEnv({ ...valid, OPS_ALERT_CHAT_ID: '-98765432' }).OPS_ALERT_CHAT_ID).toBe(
+        '-98765432',
+      );
+    });
+
+    it('still refuses a minus sign with no digits behind it', () => {
+      expect(() => loadEnv({ ...valid, OPS_ALERT_CHAT_ID: '-' })).toThrow(/numeric/);
+    });
   });
 
   it('refuses a bot token that is not shaped like one', () => {
