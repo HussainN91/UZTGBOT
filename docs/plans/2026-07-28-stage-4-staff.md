@@ -26,18 +26,18 @@ Continuing D1–D6 from the Stage 3 plan. These were open questions; they are se
 
 **Revised 29 July** after the design session. The original decision carried Apps Script's four working ranks and no observer; the head of project asked for one, and named a real use — senior ministry staff, auditors, and new hires in their first week.
 
-**Decision:** Authorization uses `staff_role` as `src/db/schema.ts:85` defines it, ranked by index in `STAFF_ROLE_ORDER`, with **one value added below `Support`**: `Observer < Support < Regional < Program < System`. The capability table from `BOT-SPEC.md` §6.1 is re-expressed against these names.
+**Decision:** Authorization uses `staff_role` as `src/db/schema.ts:85` defines it, ranked by index in `STAFF_ROLE_ORDER`, with **one value added below `Support`** and **one renamed**: `Observer < Support < Lead < Program < System`. The capability table from `BOT-SPEC.md` §6.1 is re-expressed against these names.
+
+**Settled 29 July, by the head of project.** The observer rank is called `Observer` — "Jstaff" was considered and dropped, because the word says what the person can do to anyone who reads it, including the auditors and first-week hires it exists for. And the rank formerly called `Regional` is renamed **`Lead`**, for the reason set out below. Both were free to change at the moment they were answered: the `staff` table has never held a row. Neither is free now, and Task 42 is where they become permanent.
 
 **Why an observer, when Apps Script's `ReadOnly` is not being carried over:** they are not the same thing. `roleForAdmin_` (`AdminCommands.gs:185-193`) returned `ReadOnly` when `ROLE` was blank *and* the row was not a System Admin *and* the Tier matched none of three known values — the "we do not know what this row is" bucket, produced by a migration fallback for spreadsheet rows written before the column existed. That bucket has nothing to hold here, because every `staff` row is created by a command requiring an explicit rank. An observer chosen on purpose is a different object with the same permissions, and it is added because somebody asked for it rather than because a fallback needed somewhere to land.
 
-> ⚠️ **The name is not settled.** "Jstaff" was asked for; this plan uses `Observer`. The value goes into a database enum and is expensive to change afterwards. **Confirm before Task 23 is written.**
-
 The table, which becomes the single source of truth in `src/staff/roles.ts`:
 
-| Capability | Observer | Support | Regional | Program | System |
+| Capability | Observer | Support | Lead | Program | System |
 |---|---|---|---|---|---|
 | `case.view` — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `case.update` — `/reply` `/close` `/reopen` `/note` | | ✅ | ✅ | ✅ | ✅ |
+| `case.update` — `/reply` `/await` `/close` `/reopen` `/note` | | ✅ | ✅ | ✅ | ✅ |
 | `case.mark` — `/mark` (D22) | | ✅ | ✅ | ✅ | ✅ |
 | `case.assign` — `/assign` | | | ✅ | ✅ | ✅ |
 | `urgent.issue` — `/generate_urgent_code` | | ✅ | ✅ | ✅ | ✅ |
@@ -47,7 +47,9 @@ The table, which becomes the single source of truth in `src/staff/roles.ts`:
 | `maintenance` — `/maintenance` | | | | | ✅ |
 | `announce`, `export` | | | | ✅ | ✅ |
 
-**The rank named `Regional` has nothing to do with regions**, and region is a separate setting on every row. A MoPSE "regional admin" is usually `Support` rank with a region set. Renaming the rank — `Lead` was suggested — is raised in the open items and **not yet answered**; it is free before there are rows and a migration afterwards.
+**The rank formerly named `Regional` had nothing to do with regions**, and region is a separate setting on every row. A MoPSE "regional admin" is usually `Support` rank with a region set — which is to say, a regional admin did not hold the rank called Regional, and the rank called Regional did not imply a region. One word meant two unrelated things, in a system where getting the two confused is how the old bot ended up making everybody a full administrator.
+
+**Settled: the rank is `Lead`.** Region stays the separate setting it always was. The teacher-facing phrase "Regional admin" — in `src/cases/urgent.ts`, `src/telegram/handlers/urgent.ts` and `RUNBOOK.md` — is MoPSE's job title for a person and is **left exactly as it is**; it was never the enum, and disentangling the two is the entire point of the rename.
 
 `announce` and `export` are in the table but have no command in this stage. They are listed so Stage 5 adds a command rather than a permission model, and so `/whoami` — which reads this table — does not have to change twice.
 
@@ -212,7 +214,7 @@ The second is cheaper: one migration instead of two.
 
 **What is deliberately not built:** nothing arrives unasked. `overdueCases()` is written in Task 28 and returns cases whose `due_at` has passed and whose `snoozed_until` is null or past. Stage 5 gives it a trigger.
 
-> **Open, and it blocks Task 34.** The four working states described in the design session — *not yet opened / under review / approved or processing / done* — are close to but not the same as the eight statuses in `caseStatusEnum`. The mapping has to be agreed before the mutation commands are written, because they are what move a case between statuses.
+> **Settled 29 July. See D25**, which is the mapping. Task 34 is unblocked.
 
 ### D24 — Documents stay in Google Forms, and this reverses a planned direction
 
@@ -221,6 +223,27 @@ The second is cheaper: one migration instead of two.
 **Why it is recorded in the Stage 4 plan when it is Stage 6 work:** because it contradicts documents this stage is already correcting, and because one line of it constrains this stage. `RUNBOOK.md` Part 6 calls Telegram upload *"the only genuinely new feature in the rebuild"*; `BOT-SPEC.md` §1 says the opposite of both, describing the Apps Script Forms flow as current. Task 41 corrects all of it in one pass rather than leaving a third drift for somebody to find.
 
 **The line that constrains this stage:** the forward table already says not to reintroduce the `UNRESOLVED:` sentinel, and this decision is why that holds. Matching on the roster identifier is stronger than the mechanism it replaces — the Apps Script version pre-filled the chat id into a *visible, editable* form field and could therefore never trust it as identity. An email matched against the roster is the same identity check as sign-in. Commands written in this stage must not carry a branch for an unidentifiable submitter, because the schema cannot store one and now nothing will produce one.
+
+### D25 — The eight statuses stay; four of them are the only ones a staff member ever types
+
+**Settled 29 July**, answering the question D23 left open.
+
+**Decision:** `caseStatusEnum` is unchanged. Staff type four words, which are the four the mutation commands write. The other four are written by the system or not at all, and no command asks a staff member to choose from a list of eight.
+
+| What staff call it | Status written | Who writes it | When |
+|---|---|---|---|
+| not yet opened | `New` | `createCase` | Automatically, at filing. Nobody types it |
+| under review | `Under review` | `/reply`, `/reopen` | A staff member has the case and is working it |
+| approved or processing | `Action required` | `/await <ref> <message>` | Replied, and the case is accepted and in progress |
+| done | `Completed` | `/close` | The teacher's problem is resolved |
+
+The four nobody types: `Received` is written by Task 32 when a new-case notification actually reaches at least one staff member — which gives it a real writer for the first time and makes "filed but seen by nobody" distinguishable from "filed and picked up" without asking anyone to maintain it. `Escalated` is set by the urgent-code path and already is. `Duplicate` is set by the duplicate rule. `Closed` is left for Stage 5's retention pass, so "resolved" and "shut without resolution" do not collapse into one word.
+
+**The judgement call, stated because it is the weak joint.** *Approved or processing* has no exact home among the eight — `Received` is too early, `Escalated` is wrong, and `Action required` reads as "somebody must act" without saying who. It is mapped to `Action required` and **the runbook defines it as "accepted and being worked"**. If MoPSE reads that phrase as *the teacher* must act, this is the one row of the table to change, and it is cheap: the status value does not move, only which command writes it.
+
+**Why not trim the enum to four.** Two things would be lost that cost nothing to keep, and both are load-bearing later: `Duplicate` is what the 24-hour duplicate window writes, and `Escalated` is how an emergency is visible while it is open. D22 already establishes that a *status* cannot carry the memory of an emergency once it resolves — that is what `importance` is for — but while a case is open, `Escalated` is what puts it in `/urgent`.
+
+**Why not show all eight.** Eight words written for a proposal document, offered to a staff member mid-conversation, is a vocabulary nobody asked for. Four verbs that each write one status is the same information with nothing to learn.
 
 ---
 
@@ -295,7 +318,7 @@ Layer 4  seams and pipeline ends
               │                          │                     │
 Layer 3  commands (the thin part)                    · teacher-facing: region confirmation
          /cases /mycases /urgent /case /search       ← case.view
-         /reply /close /reopen /note                 ← case.update
+         /reply /await /close /reopen /note           ← case.update
          /mark /due /snooze                          ← case.update
          /assign                                     ← case.assign
          /generate_urgent_code                       ← urgent.issue
@@ -431,7 +454,7 @@ New case → recipients computed → an observer holds `case.view` and matches t
 | `src/cases/notify.ts` | Who should be told about a new case, and what they are told |
 | `src/telegram/commands/parse.ts` | Command word, arguments, reference validation. Pure |
 | `src/telegram/commands/index.ts` | The dispatcher and the deny path |
-| `src/telegram/commands/cases.ts` | `/cases` `/mycases` `/urgent` `/case` `/search` `/reply` `/close` `/reopen` `/assign` `/note` |
+| `src/telegram/commands/cases.ts` | `/cases` `/mycases` `/urgent` `/case` `/search` `/reply` `/await` `/close` `/reopen` `/assign` `/note` |
 | `src/telegram/commands/staff.ts` | `/staff` `/staff_add` `/staff_role` `/staff_remove` `/whoami` `/revoke` |
 | `src/telegram/commands/ops.ts` | `/maintenance` `/generate_urgent_code` |
 | `src/teachers/region.ts` | `regionFor`, `setRegionOverride`, `clearRegionOverride`, `flagRegionMismatch`, `listRegionFlags` (D20, D21) |
@@ -493,7 +516,7 @@ describe('the capability table', () => {
 
   it('does not let Support assign cases', () => {
     expect(can({ role: 'Support', active: true }, 'case.assign')).toBe(false);
-    expect(can({ role: 'Regional', active: true }, 'case.assign')).toBe(true);
+    expect(can({ role: 'Lead', active: true }, 'case.assign')).toBe(true);
   });
 
   it('lets an Observer see a case and change nothing', () => {
@@ -537,8 +560,10 @@ describe('the capability table', () => {
 export const CAPABILITY = {
   CASE_VIEW: 'case.view',
   CASE_UPDATE: 'case.update',
+  CASE_MARK: 'case.mark',
   CASE_ASSIGN: 'case.assign',
   URGENT_ISSUE: 'urgent.issue',
+  TEACHER_REGION: 'teacher.region',
   TEACHER_REVOKE: 'teacher.revoke',
   STAFF_MANAGE: 'staff.manage',
   MAINTENANCE: 'maintenance',
@@ -547,10 +572,12 @@ export const CAPABILITY = {
 } as const;
 
 const GRANTS: Readonly<Record<Capability, readonly StaffRole[]>> = {
-  'case.view':      ['Support', 'Regional', 'Program', 'System'],
-  'case.update':    ['Support', 'Regional', 'Program', 'System'],
-  'case.assign':    ['Regional', 'Program', 'System'],
-  'urgent.issue':   ['Support', 'Regional', 'Program', 'System'],
+  'case.view':      ['Observer', 'Support', 'Lead', 'Program', 'System'],
+  'case.update':    ['Support', 'Lead', 'Program', 'System'],
+  'case.mark':      ['Support', 'Lead', 'Program', 'System'],
+  'case.assign':    ['Lead', 'Program', 'System'],
+  'urgent.issue':   ['Support', 'Lead', 'Program', 'System'],
+  'teacher.region': ['Lead', 'Program', 'System'],
   'teacher.revoke': ['Program', 'System'],
   'staff.manage':   ['System'],
   'maintenance':    ['System'],
@@ -1244,7 +1271,9 @@ it('caps recipients at twenty', async () => { /* R9 */ });
 
 ---
 
-### Task 34: Case mutation — `/reply` `/close` `/reopen` `/note`
+### Task 34: Case mutation — `/reply` `/await` `/close` `/reopen` `/note`
+
+The four status-writing verbs of D25. `/reply` moves an open case to `Under review`; `/await` replies *and* moves it to `Action required`; `/close` writes `Completed`; `/reopen` returns it to `Under review`. `/note` writes no status at all — it is internal, and a note is not progress.
 
 **Files:** Modify `src/telegram/commands/cases.ts`
 
@@ -1585,16 +1614,16 @@ Then add the second one with `/staff_add`, from the first one's account. Two nam
 
 ---
 
-## Four answers this plan needs before parts of it can be built
+## Four answers this plan needed — three are now given
 
-These came out of the 29 July design session and were not settled in it. Each names the task it blocks, so nobody discovers it mid-build.
+These came out of the 29 July design session and were not settled in it. Three were answered on 29 July, before Task 23 was written; the fourth belongs to Stage 5 and is still open.
 
-| # | Question | Blocks | Cost of deciding late |
+| # | Question | Blocks | Answer |
 |---|---|---|---|
-| 1 | **The observer rank's name** — "Jstaff" was asked for, `Observer` is the placeholder | Task 42, Task 23 | It is a database enum value. Changing it after launch is a migration and a retraining |
-| 2 | **Whether to rename the `Regional` rank** (to `Lead` or similar) so one word does not mean two things | Task 42 | Free while there are no rows. A migration and a documentation pass afterwards |
-| 3 | **How the four working states map to the eight case statuses** — *not yet opened / under review / approved or processing / done* against `New, Received, Under review, Action required, Escalated, Completed, Closed, Duplicate` | Task 34 | The mutation commands are what move a case between statuses. Getting it wrong means staff learn a vocabulary that then changes |
-| 4 | **Retention for ordinary cases, and for the message log** — six months covers urgent and critical only | Stage 5, not this stage | `CONCERNS` A10 stays red. The message log is the one filling up now |
+| 1 | **The observer rank's name** — "Jstaff" was asked for, `Observer` was the placeholder | Task 42, Task 23 | ✅ **`Observer`.** The word states the permission to anyone who reads it. See D7 |
+| 2 | **Whether to rename the `Regional` rank** so one word does not mean two things | Task 42 | ✅ **Renamed to `Lead`.** Region remains a separate setting; the teacher-facing job title "Regional admin" is untouched. See D7 |
+| 3 | **How the four working states map to the eight case statuses** | Task 34 | ✅ **The eight stay; four commands write four of them.** See D25, including the one row that is a judgement call |
+| 4 | **Retention for ordinary cases, and for the message log** — six months covers urgent and critical only | Stage 5, not this stage | ⬜ **Still open.** `CONCERNS` A10 stays red. The message log is the one filling up now |
 
 One more, raised and unanswered, that blocks nothing: **should the bot tell a teacher who their regional manager is**, by name and possibly by phone? It would answer "teachers who do not know who to call" directly, and it publishes staff contact details to 1,800 people. A MoPSE decision.
 

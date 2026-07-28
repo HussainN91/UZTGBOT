@@ -63,6 +63,25 @@ export const caseStatusEnum = pgEnum('case_status', [
   'Duplicate',
 ]);
 
+/**
+ * How serious a case is, as a person judged it — not as its status says.
+ *
+ * Separate from `status` because status moves. An escalated case that gets
+ * resolved becomes `Completed`, and with it goes every trace of its having been
+ * an emergency. Stage 5 keeps urgent and critical cases for six months, so a
+ * retention job reading `status` would delete exactly the cases most worth
+ * keeping (plan D22).
+ *
+ * `Urgent` is what a teacher's one-time code buys and is set by the flow.
+ * `Critical` is a judgement a person makes after reading the case. Collapsing
+ * the two would mean either every code-holder's case is critical, or no staff
+ * member can mark one.
+ */
+export const caseImportanceEnum = pgEnum('case_importance', ['Normal', 'Urgent', 'Critical']);
+
+export const CASE_IMPORTANCE_ORDER = ['Normal', 'Urgent', 'Critical'] as const;
+export type CaseImportance = (typeof CASE_IMPORTANCE_ORDER)[number];
+
 /** Statuses that count as still open, for the 24-hour duplicate window. */
 export const OPEN_CASE_STATUSES = [
   'New',
@@ -78,14 +97,36 @@ export const OPEN_CASE_STATUSES = [
  * The Apps Script version carried a yes/no "system admin" flag, a TIER
  * category, and a ROLE column, plus a fallback that tried all three in order.
  * That fallback existed purely to keep older spreadsheet rows working, and
- * there are no rows. Roles are ordered here, so "at least Regional" is a
+ * there are no rows. Roles are ordered here, so "at least Lead" is a
  * comparison rather than the exact-match check that made Program-tier staff
- * mysteriously unable to do Regional-tier things.
+ * mysteriously unable to do Lead-tier things.
+ *
+ * Two changes in stage 4, both made while the table was still empty and both
+ * permanent afterwards (plan D7):
+ *
+ * `Observer` was added at the bottom — sight of cases with no power to change
+ * one. It is not Apps Script's `ReadOnly`, which was the bucket an unrecognised
+ * spreadsheet row fell into; this is a rank somebody is deliberately given, for
+ * senior ministry staff, auditors, and new hires in their first week.
+ *
+ * `Regional` was renamed `Lead`, because it had nothing to do with regions.
+ * A region is a separate column on this same table, and a MoPSE "regional
+ * admin" is usually `Support` rank with a region set — so the old name meant
+ * one thing in the ladder and a different thing in the org chart. Confusing
+ * those two axes is how the Apps Script version ended up making everybody a
+ * full administrator. The teacher-facing phrase "Regional admin" is a job
+ * title, not this enum, and is deliberately left alone.
  */
-export const staffRoleEnum = pgEnum('staff_role', ['Support', 'Regional', 'Program', 'System']);
+export const staffRoleEnum = pgEnum('staff_role', [
+  'Observer',
+  'Support',
+  'Lead',
+  'Program',
+  'System',
+]);
 
 /** Ascending authority. Index in this array is the rank. */
-export const STAFF_ROLE_ORDER = ['Support', 'Regional', 'Program', 'System'] as const;
+export const STAFF_ROLE_ORDER = ['Observer', 'Support', 'Lead', 'Program', 'System'] as const;
 export type StaffRole = (typeof STAFF_ROLE_ORDER)[number];
 
 /** How far a teacher has got through identifying themselves. */
@@ -214,7 +255,40 @@ export const teachers = pgTable(
       onDelete: 'restrict',
     }),
     name: text('name'),
+    /**
+     * The roster's region, copied at sign-in.
+     *
+     * Kept, but it is no longer read directly: `regionFor` resolves it against
+     * the override below and against the live roster row. Reading this column
+     * on its own is the bug described at `regionOverride` — it is a snapshot
+     * taken once, and a teacher who has signed in never signs in again.
+     */
     region: text('region'),
+    /**
+     * A region set by a named person, which beats the roster.
+     *
+     * The roster is recruitment's copy and it goes stale — teachers are moved.
+     * The bot cannot write back to the spreadsheet (it holds Viewer access to
+     * one document, and edit access would reach the confidential answer bank),
+     * so a correction is recorded here and `regionFor` resolves the precedence
+     * in one place. Clearing it returns the teacher to whatever the roster says,
+     * which is also how a mistyped region is undone.
+     *
+     * NOT written by `bindTeacher`. A teacher who signs in again — a new phone,
+     * the commonest legitimate reason — would otherwise have a manager's
+     * correction silently reverted by the roster's value.
+     */
+    regionOverride: text('region_override'),
+    regionSetBy: chatId('region_set_by'),
+    regionSetAt: tsz('region_set_at'),
+    /**
+     * Raised when a teacher says the region we hold is wrong. Cleared when staff act.
+     *
+     * A flag, not a value: the teacher is the best source of the signal and the
+     * worst source of the record, because region decides who receives their
+     * emergency. A menu of regions is a menu of whose problem this becomes.
+     */
+    regionFlaggedAt: tsz('region_flagged_at'),
     language: text('language').notNull().default('EN'),
     firstSeen: tsz('first_seen').notNull().defaultNow(),
     lastSeen: tsz('last_seen').notNull().defaultNow(),
@@ -319,6 +393,15 @@ export const cases = pgTable(
     detail: text('detail').notNull().default(''),
     /** The only case text a teacher ever sees back. Written by staff, deliberately. */
     publicUpdate: text('public_update').notNull().default(''),
+    /**
+     * How serious this case is. See `caseImportanceEnum` for why it is not the
+     * status. Set by `/mark`, and by the urgent-code path at creation.
+     */
+    importance: caseImportanceEnum('importance').notNull().default('Normal'),
+    /** When whoever holds this case said it would be done. */
+    dueAt: tsz('due_at'),
+    /** Suppresses chasing until this passes. Never suppresses the case itself. */
+    snoozedUntil: tsz('snoozed_until'),
     lastActor: chatId('last_actor'),
     createdAt: tsz('created_at').notNull().defaultNow(),
     updatedAt: tsz('updated_at').notNull().defaultNow(),
@@ -330,6 +413,55 @@ export const cases = pgTable(
     index('cases_dedup_idx').on(t.teacherChatId, t.category, t.status, t.createdAt),
     index('cases_status_idx').on(t.status, t.createdAt),
     index('cases_owner_idx').on(t.owner),
+    /**
+     * Serves stage 5's chasing query, which is written against these three
+     * columns together: open, past its promised date, not snoozed.
+     */
+    index('cases_chasing_idx').on(t.status, t.dueAt, t.snoozedUntil),
+  ],
+);
+
+/**
+ * Staff writing about a case, kept apart from the teacher's own words.
+ *
+ * The Apps Script version appended notes into `cases.detail` itself
+ * (`AdminCommands.gs:788`), which is why `handleCaseDetail_` carries a comment
+ * about the message outgrowing Telegram's 4096-character limit: an internal
+ * thread was accumulating inside a field that also holds a teacher's original
+ * description, with the author and the time encoded as text somebody would
+ * eventually have to parse.
+ *
+ * Three things a table gives that a text append does not — the author is a
+ * column, so "who said this" survives; the time is a column, in the database's
+ * clock rather than a formatted string; and `/case` can show the last few and
+ * say how many more there are, instead of growing until it must be split.
+ *
+ * `ON DELETE CASCADE` is what lets stage 5's retention pass reach these rows.
+ * They hold staff writing about teachers and must not outlive the case.
+ */
+export const caseNotes = pgTable(
+  'case_notes',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    caseReference: text('case_reference')
+      .notNull()
+      .references(() => cases.reference, { onDelete: 'cascade' }),
+    /**
+     * Who wrote it. Not a foreign key to `staff`: a note is a historical record
+     * and must stay readable after its author's row is deactivated or, in some
+     * later stage, removed. The same argument `teachers` makes about keeping a
+     * log entry readable.
+     */
+    authorChatId: chatId('author_chat_id').notNull(),
+    body: text('body').notNull(),
+    createdAt: tsz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('case_notes_author_chat_id_digits', CHAT_ID_IS_DIGITS('author_chat_id')),
+    /** `/case` reads the most recent few for one case. */
+    index('case_notes_case_idx').on(t.caseReference, t.createdAt),
   ],
 );
 

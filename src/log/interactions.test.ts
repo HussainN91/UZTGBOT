@@ -105,6 +105,63 @@ describe('addresses are scrubbed whatever the state', () => {
   });
 });
 
+describe('staff commands', () => {
+  it('logs a command and its first argument, and nothing else', () => {
+    expect(
+      redactDetail('/note VISA-2026-00001 she is still waiting on the embassy', null),
+    ).toBe('/note VISA-2026-00001');
+  });
+
+  it('applies to a command this build has never heard of', () => {
+    // Stage 5 adds /announce ALL <message to 1,800 teachers>. The rule is on the
+    // prefix, not on a list, so it covers that the day it is written.
+    expect(redactDetail('/announce ALL the airport transfer has moved', null)).toBe(
+      '/announce ALL',
+    );
+  });
+
+  it('leaves an ordinary question alone', () => {
+    // An unanswered question is the most valuable content signal there is.
+    expect(redactDetail('how long does a visa take', null)).toBe('how long does a visa take');
+  });
+
+  it('logs an argument-less command exactly as it was typed', () => {
+    // /start, /privacy and /help must keep logging as they do today.
+    expect(redactDetail('/help', null)).toBe('/help');
+    expect(redactDetail('/privacy', null)).toBe('/privacy');
+  });
+
+  it('applies whatever the conversation state says', () => {
+    // A staff member has no conversation state, but a teacher part-way through
+    // describing a case can still type something beginning with a slash — and
+    // under D9 that falls through to ordinary handling. The stricter of the two
+    // redactions must win, and here the case-detail rule is the stricter.
+    expect(redactDetail('/note VISA-2026-00001 secret', CASE_DETAIL)).not.toContain('secret');
+  });
+
+  it('never lets a reply body survive in the second argument position', () => {
+    // The failure this rule exists to prevent: /reply is a message to a teacher
+    // and would otherwise be written into `messages` almost verbatim.
+    const logged = redactDetail('/reply VISA-2026-00001 your visa was approved today', null);
+    expect(logged).toBe('/reply VISA-2026-00001');
+    expect(logged).not.toContain('approved');
+  });
+
+  it('masks an address that appears in a command argument', () => {
+    // /staff_add takes an id, but /revoke and future commands may carry one.
+    expect(redactDetail('/revoke nodira@school.uz', null)).not.toContain('nodira@school.uz');
+  });
+
+  it('is not fooled by leading whitespace', () => {
+    expect(redactDetail('   /note VISA-2026-00001 secret', null)).not.toContain('secret');
+  });
+
+  it('does not treat a mid-sentence slash as a command', () => {
+    const text = 'my contract w/ the school is wrong';
+    expect(redactDetail(text, null)).toBe(text);
+  });
+});
+
 describe('housekeeping', () => {
   it('truncates a very long detail, because this column is not a transcript', () => {
     const long = 'x'.repeat(1000);

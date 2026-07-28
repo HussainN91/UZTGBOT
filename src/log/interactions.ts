@@ -65,6 +65,39 @@ export function redactDetail(detail: string, state: ConversationState | null): s
   }
 
   /**
+   * A command is logged as its name and first argument. The rest is dropped.
+   *
+   * Staff have no conversation state, so without this rule the default branch
+   * below applies and `/note VISA-2026-00001 <the internal note>` and
+   * `/reply VISA-2026-00001 <the message to the teacher>` would be written into
+   * `messages` almost verbatim — internal case content copied into a table with
+   * a different retention story from the one it belongs to.
+   *
+   * The rule is on the leading slash rather than on a list of staff commands,
+   * because a list is a thing somebody forgets to extend. Stage 5 adds
+   * `/announce ALL <message to 1,800 teachers>` and stage 6 adds document
+   * commands; the prefix covers them the day they are written. `/start`,
+   * `/privacy` and `/help` carry no arguments and so are logged exactly as they
+   * are today.
+   *
+   * It sits after the switch deliberately. A teacher part-way through describing
+   * a case can type something beginning with a slash — under the router's
+   * fall-through that is still their case detail, and the stricter redaction
+   * must win.
+   *
+   * The first argument is kept because it is what makes the row worth having: it
+   * is the case reference, and "who touched which case, and when" is the
+   * question this table gets asked. It is still scrubbed for addresses, since
+   * nothing guarantees an argument is a reference.
+   */
+  const trimmed = detail.trim();
+  if (trimmed.startsWith('/')) {
+    const [word, firstArgument] = trimmed.split(/\s+/);
+    const kept = firstArgument === undefined ? word! : `${word!} ${firstArgument}`;
+    return kept.replace(EMAIL_PATTERN, maskAddress);
+  }
+
+  /**
    * No state, or a state that carries nothing sensitive.
    *
    * Addresses are still scrubbed. A teacher whose sign-in state expired and who
