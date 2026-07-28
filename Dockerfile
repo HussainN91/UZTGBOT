@@ -6,7 +6,11 @@ FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig.json ./
+# Both configs. tsconfig.build.json extends tsconfig.json, so copying only the
+# latter makes `npm run build` fail with TS5058 — and because dist/ is
+# gitignored there is no compiled tree to fall back on. The image simply would
+# not build.
+COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build
 
