@@ -6,9 +6,20 @@
  * reply comes back. The real teacher and staff handlers arrive in stages 3 and 4
  * and replace the placeholder below.
  */
-import { Bot } from 'grammy';
+import { Bot, type Api } from 'grammy';
 import { env } from '../config/env.js';
 import { log } from '../log.js';
+
+/**
+ * A Telegram client with no handlers, for processes that only ever send.
+ *
+ * The worker needs to send — alerts now, announcements and digests later — but
+ * it must never receive: two processes polling or handling the same updates
+ * would double-process every message.
+ */
+export function createApi(): Api {
+  return new Bot(env().TELEGRAM_BOT_TOKEN).api;
+}
 
 export function createBot(): Bot {
   const bot = new Bot(env().TELEGRAM_BOT_TOKEN);

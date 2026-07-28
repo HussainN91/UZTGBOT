@@ -76,6 +76,34 @@ describe('start-up configuration', () => {
     });
   });
 
+  describe('the operational alert recipient', () => {
+    it('is required in production, because it is the only place alarms can go', () => {
+      expect(() => loadEnv({ ...valid, NODE_ENV: 'production' })).toThrow(/OPS_ALERT_CHAT_ID/);
+    });
+
+    it('explains why, rather than just naming the variable', () => {
+      let message = '';
+      try {
+        loadEnv({ ...valid, NODE_ENV: 'production' });
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+      expect(message).toMatch(/only impersonation control/);
+    });
+
+    it('is optional in development, where the log is in front of you', () => {
+      expect(() => loadEnv({ ...valid, NODE_ENV: 'development' })).not.toThrow();
+    });
+
+    it('accepts a numeric chat id', () => {
+      expect(loadEnv({ ...valid, OPS_ALERT_CHAT_ID: '123456789' }).OPS_ALERT_CHAT_ID).toBe('123456789');
+    });
+
+    it('refuses an @username, which the Bot API cannot message reliably', () => {
+      expect(() => loadEnv({ ...valid, OPS_ALERT_CHAT_ID: '@ops_channel' })).toThrow(/numeric/);
+    });
+  });
+
   it('refuses a bot token that is not shaped like one', () => {
     expect(() => loadEnv({ ...valid, TELEGRAM_BOT_TOKEN: 'not-a-token' })).toThrow(/bot token/);
   });

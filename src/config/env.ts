@@ -67,6 +67,24 @@ const schema = z.object({
    */
   SUPPORT_CONTACT: notPlaceholder('SUPPORT_CONTACT'),
 
+  /**
+   * Where operational alarms go.
+   *
+   * Every alert this system raises currently lands in a log, which is exactly
+   * the failure the concerns register names — errors going somewhere nobody
+   * opens. It has to be an environment variable rather than a database setting
+   * because it must work before any staff exist to notify.
+   *
+   * Required in production: duplicate identity bindings are detected rather than
+   * blocked, deliberately, which makes this alarm the only impersonation control
+   * there is. An alarm nobody receives is the same as no alarm.
+   */
+  OPS_ALERT_CHAT_ID: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, 'OPS_ALERT_CHAT_ID must be a numeric Telegram chat id')
+    .optional(),
+
   /** Google Sheet the FAQ and roster are read from. Read-only; the bot never writes to it. */
   GOOGLE_SHEET_ID: z.string().trim().min(1).optional(),
   /** Service-account JSON key, as a single line. Needs read access to that sheet only. */
@@ -93,6 +111,22 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
         `See .env.example for every required value.`,
     );
   }
+  /**
+   * Checked after parsing because it depends on another field's value, which a
+   * flat schema cannot express. Kept out of production only — a developer
+   * running locally has the log in front of them.
+   */
+  if (parsed.data.NODE_ENV === 'production' && parsed.data.OPS_ALERT_CHAT_ID === undefined) {
+    throw new Error(
+      'Configuration is not valid, so the bot will not start.\n' +
+        '  - OPS_ALERT_CHAT_ID: required in production.\n\n' +
+        'Without it every alarm goes to a log file, including the duplicate-identity alarm — ' +
+        'which, because duplicate bindings are detected rather than blocked, is the only ' +
+        'impersonation control there is. Set it to the Telegram chat id that should receive ' +
+        'operational alerts.',
+    );
+  }
+
   return parsed.data;
 }
 

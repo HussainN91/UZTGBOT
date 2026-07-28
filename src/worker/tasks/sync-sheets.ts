@@ -13,18 +13,23 @@ import { getDb } from '../../db/index.js';
 import { log } from '../../log.js';
 import { createSheetReader } from '../../sheets/client.js';
 import { syncFaq, syncRoster, type SyncReport } from '../../sync/sheets-sync.js';
+import { telegramAlerter } from '../../telegram/alerter.js';
+import { createApi } from '../../telegram/bot.js';
 
 export const SYNC_SHEETS_TASK = 'sync_sheets';
 
 export const syncSheetsTask: Task = async () => {
   const db = getDb();
   const reader = createSheetReader();
+  // A refused sync and a rejected FAQ row both need a person to act. Until this
+  // was wired up, both were written to a log and reached nobody.
+  const alerter = telegramAlerter(createApi());
 
   // Settled, not all: one failing sync must not prevent the other from running,
   // and both record their own outcome regardless.
   const [faq, roster] = await Promise.allSettled([
-    syncFaq(db, reader),
-    syncRoster(db, reader),
+    syncFaq(db, reader, { alerter }),
+    syncRoster(db, reader, { alerter }),
   ]);
 
   const outcomes = [describe('FAQ', faq), describe('ROSTER', roster)];
