@@ -28,7 +28,6 @@ import {
   primaryKey,
   text,
   timestamp,
-  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -213,15 +212,26 @@ export const teachers = pgTable(
   (t) => [
     check('teachers_chat_id_digits', CHAT_ID_IS_DIGITS('chat_id')),
     /**
-     * One roster identity, one Telegram account.
+     * Deliberately NOT unique.
      *
-     * The Apps Script version looked up by chat id only, so two different
-     * Telegram accounts could both bind to the same roster identifier and both
-     * read as verified, with nothing detecting it. This constraint makes that
-     * impossible rather than merely noticed — the second attempt fails, and the
-     * duplicate-identity alarm fires on the failure.
+     * BOT-SPEC.md: "Duplicate identity bindings are detected, not blocked."
+     * Identity here is a recruitment email that colleagues routinely know, so a
+     * second binding is a signal for a human to judge, not something to refuse —
+     * a teacher switching phones produces exactly this signal, and the original
+     * design chose detection knowing that.
+     *
+     * A unique index would lock that teacher out permanently, with no command to
+     * release the identifier until staff management exists. Worse, it would let
+     * anyone holding a leaked recruitment email sign in first and lock the real
+     * teacher out for good — turning an impersonation risk into a denial of
+     * service. It also collides with revocation: a revoked teacher still holds
+     * the identifier, so revoking someone would burn that roster identity unless
+     * revocation also cleared the column, destroying the history link this table
+     * exists to preserve.
+     *
+     * The index serves the duplicate-holder lookup that raises the alarm.
      */
-    uniqueIndex('teachers_identifier_unique').on(t.identifier),
+    index('teachers_identifier_idx').on(t.identifier),
     index('teachers_state_idx').on(t.verificationState),
   ],
 );
