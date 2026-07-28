@@ -133,6 +133,18 @@ export const faqEntries = pgTable(
      * error anywhere) into a message someone can act on.
      */
     topicCode: text('topic_code').notNull(),
+    /**
+     * The row this answer occupies in the spreadsheet, used only for ordering.
+     *
+     * The sheet had an implicit order that pagination relied on. SQL without an
+     * ORDER BY returns rows arbitrarily, so paging through a topic could repeat
+     * and skip answers between taps — and because the sync refreshes every ten
+     * minutes, the underlying rows can change mid-page too. Ordering by code
+     * instead would reorder the bank against the content owner's intent; they
+     * arrange the sheet deliberately, and the order teachers see should be the
+     * order staff chose.
+     */
+    sheetRow: integer('sheet_row').notNull().default(0),
     buttonText: text('button_text').notNull(),
     /** The sheet's comma-separated KEYWORDS, split once here rather than on every query. */
     keywords: text('keywords').array().notNull().default(sql`ARRAY[]::text[]`),
@@ -145,7 +157,9 @@ export const faqEntries = pgTable(
     syncedAt: tsz('synced_at').notNull().defaultNow(),
   },
   (t) => [
-    index('faq_entries_topic_idx').on(t.topicCode, t.active),
+    // Ordered by sheet row so the per-topic listing is served straight from the
+    // index, in the order the content owner arranged, with no sort step.
+    index('faq_entries_topic_idx').on(t.topicCode, t.active, t.sheetRow),
     index('faq_entries_active_idx').on(t.active),
   ],
 );

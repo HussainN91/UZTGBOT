@@ -78,6 +78,7 @@ export async function syncFaq(
             .values(
               batch.map((r) => ({
                 code: r.code,
+                sheetRow: r.sheetRow,
                 topicCode: r.topicCode,
                 buttonText: r.buttonText,
                 keywords: [...r.keywords],
@@ -92,6 +93,7 @@ export async function syncFaq(
             .onConflictDoUpdate({
               target: faqEntries.code,
               set: {
+                sheetRow: sql`excluded.sheet_row`,
                 topicCode: sql`excluded.topic_code`,
                 buttonText: sql`excluded.button_text`,
                 keywords: sql`excluded.keywords`,

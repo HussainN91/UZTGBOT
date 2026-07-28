@@ -15,6 +15,13 @@
       "when": 1785222924805,
       "tag": "0001_identifier_detect_not_block",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785223142272,
+      "tag": "0002_faq_sheet_row",
+      "breakpoints": true
     }
   ]
 }

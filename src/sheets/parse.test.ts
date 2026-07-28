@@ -125,6 +125,32 @@ describe('FAQ values are normalised once, here, rather than on every query', () 
     expect(result.rows[0]?.keywords).toEqual(['gross', 'net', 'after tax']);
   });
 
+  it('records the spreadsheet row so listings have a stable order', () => {
+    // The sheet had an implicit order that pagination relied on. SQL without an
+    // ORDER BY returns rows arbitrarily, so paging a topic could repeat and skip
+    // answers between taps. Ordering by code instead would reorder the bank
+    // against the content owner's intent — they arrange the sheet deliberately.
+    const result = parseFaqTab([FAQ_HEADER, faqRow({ CODE: 'A-1' }), faqRow({ CODE: 'A-2' })]);
+    expect(result.rows.map((r) => r.sheetRow)).toEqual([2, 3]);
+  });
+
+  it('keeps the sheet row of surviving entries when a row above them is rejected', () => {
+    const result = parseFaqTab([
+      FAQ_HEADER,
+      faqRow({ CODE: 'A-1', CATEGORY: 'Nonsense Topic' }),
+      faqRow({ CODE: 'A-2' }),
+    ]);
+    expect(result.rows[0]?.sheetRow).toBe(3);
+  });
+
+  it('normalises keyword punctuation the same way a query is normalised', () => {
+    // The scorer strips punctuation from what a teacher types, so a stored
+    // keyword that keeps its hyphen is compared against a token stream that can
+    // never contain it. Every keyword with - / ' or ? was silently dead.
+    const result = parseFaqTab([FAQ_HEADER, faqRow({ KEYWORDS: "e-visa, teacher's contract, work/permit" })]);
+    expect(result.rows[0]?.keywords).toEqual(['e visa', 'teacher s contract', 'work permit']);
+  });
+
   it('defaults a blank language to EN', () => {
     expect(parseFaqTab([FAQ_HEADER, faqRow({ LANGUAGE: '' })]).rows[0]?.language).toBe('EN');
   });

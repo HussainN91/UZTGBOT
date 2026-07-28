@@ -18,6 +18,7 @@
  * unreachable with no error anywhere.
  */
 import { faqTopicByLabel, faqTopicLabels } from '../config/constants.js';
+import { normaliseText } from '../faq/normalise.js';
 
 /** One row that could not be used, and why — reported to whoever owns the content. */
 export interface Rejection {
@@ -49,6 +50,14 @@ export class HeaderMismatchError extends Error {
 }
 
 export interface FaqRow {
+  /**
+   * The 1-based row this answer occupies in the spreadsheet.
+   *
+   * Carried through purely so listings can be ordered the way the content owner
+   * arranged them. It is also what the rejection messages quote, so the two
+   * cannot drift apart.
+   */
+  readonly sheetRow: number;
   readonly code: string;
   readonly topicCode: string;
   readonly buttonText: string;
@@ -179,12 +188,15 @@ export function parseFaqTab(raw: readonly string[][]): ParseResult<FaqRow> {
     const approvedBy = cell(raw_row, headers.get('LAST_APPROVED_BY'));
     const approvedDate = cell(raw_row, headers.get('LAST_APPROVED_DATE'));
     rows.push({
+      sheetRow: rowNumber,
       code,
       topicCode: topic.code,
       buttonText,
+      // Normalised exactly as a teacher's query will be — see faq/normalise.ts.
+      // Lowercasing alone left every keyword containing punctuation unmatchable.
       keywords: cell(raw_row, headers.get('KEYWORDS'))
         .split(',')
-        .map((k) => k.trim().toLowerCase())
+        .map((k) => normaliseText(k))
         .filter((k) => k.length > 0),
       officialAnswer: answer,
       language: cell(raw_row, headers.get('LANGUAGE')) || 'EN',
