@@ -14,6 +14,7 @@ import { run, type RunnerOptions, type Task } from 'graphile-worker';
 import { env } from '../config/env.js';
 import { assertDatabaseReachable, closePool } from '../db/client.js';
 import { log } from '../log.js';
+import { HEARTBEAT_TASK, heartbeatTask } from './tasks/heartbeat.js';
 import { SYNC_SHEETS_TASK, syncSheetsTask } from './tasks/sync-sheets.js';
 
 /**
@@ -29,6 +30,7 @@ const ping: Task = async (_payload, helpers) => {
 export const taskList = {
   ping,
   [SYNC_SHEETS_TASK]: syncSheetsTask,
+  [HEARTBEAT_TASK]: heartbeatTask,
 } satisfies Record<string, Task>;
 
 /**
@@ -46,6 +48,12 @@ export const CRONTAB = `
 # is the promise made to staff: an edited answer reaches teachers within ten
 # minutes, rather than the up-to-six-hours the Apps Script cache allowed.
 */10 * * * * ${SYNC_SHEETS_TASK}
+
+# Watch the other jobs. A job that fails is noisy and will be noticed; a job
+# that stops being scheduled at all is silent, and silence is what this
+# detects. Five minutes so a stopped ten-minute job is reported promptly
+# without the check itself becoming the noisiest thing in the logs.
+*/5 * * * * ${HEARTBEAT_TASK}
 `.trim();
 
 async function main(): Promise<void> {

@@ -15,10 +15,20 @@ import { createSheetReader } from '../../sheets/client.js';
 import { syncFaq, syncRoster, type SyncReport } from '../../sync/sheets-sync.js';
 import { telegramAlerter } from '../../telegram/alerter.js';
 import { createApi } from '../../telegram/bot.js';
+import { recordJobRun } from '../job-run.js';
 
 export const SYNC_SHEETS_TASK = 'sync_sheets';
 
-export const syncSheetsTask: Task = async () => {
+/**
+ * Ten minutes, matching the schedule. If a run has not succeeded within half
+ * again that, the heartbeat says so.
+ */
+export const SYNC_SHEETS_INTERVAL_SECONDS = 600;
+
+export const syncSheetsTask: Task = async () =>
+  recordJobRun(getDb(), SYNC_SHEETS_TASK, SYNC_SHEETS_INTERVAL_SECONDS, runSync);
+
+async function runSync(): Promise<void> {
   const db = getDb();
   const reader = createSheetReader();
   // A refused sync and a rejected FAQ row both need a person to act. Until this
