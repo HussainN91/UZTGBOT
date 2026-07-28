@@ -496,6 +496,32 @@ export const announcementRecipients = pgTable(
 );
 
 /**
+ * Updates already handled.
+ *
+ * Telegram resends any update it does not receive a 2xx for, backing off but
+ * never giving up. The web process is configured to return 200 on timeout while
+ * the handler keeps running, so a redelivery can overlap an original that is
+ * still executing — and a crash between writing a case and replying gets the
+ * update redelivered too.
+ *
+ * The two things a replay corrupts are exactly the teacher-facing ones: a case
+ * filed twice, and a one-time urgent code consumed twice. The Apps Script
+ * version had this control and the rebuild lost it; the specification still
+ * lists it as shipped.
+ *
+ * Pruned on the retention schedule — a day is far longer than Telegram will
+ * retry for.
+ */
+export const processedUpdates = pgTable(
+  'processed_updates',
+  {
+    updateId: text('update_id').primaryKey(),
+    at: tsz('at').notNull().defaultNow(),
+  },
+  (t) => [index('processed_updates_at_idx').on(t.at)],
+);
+
+/**
  * Proof that a scheduled job ran.
  *
  * "Nobody notices when something breaks" is on the concerns list because errors
