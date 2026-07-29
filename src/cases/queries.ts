@@ -50,6 +50,16 @@ export interface StaffCaseList {
   readonly total: number;
 }
 
+/**
+ * Every read in this module returns this shape, including the ones that cannot
+ * currently exceed the cap.
+ *
+ * Uniformity is the point. A module where some functions return a list and
+ * others return `{ cases, total }` is one where a caller writes `.map` on the
+ * wrong one, and the commands in layer 3 call all five.
+ */
+const EMPTY_LIST: StaffCaseList = { cases: [], total: 0 };
+
 const COLUMNS = {
   reference: cases.reference,
   category: cases.category,
@@ -162,25 +172,22 @@ export async function casesOwnedBy(
  * thing (`AdminCommands.gs:551`). The rule lives in here rather than in the
  * caller because a caller is a thing that forgets.
  */
-export async function staleCases(db: Database, scope: StaffScope): Promise<StaffCaseRow[]> {
+export async function staleCases(db: Database, scope: StaffScope): Promise<StaffCaseList> {
   const raw = await getSetting(db, SETTING.OVERDUE_DAYS);
-  if (raw === null || raw.trim() === '') return [];
+  if (raw === null || raw.trim() === '') return EMPTY_LIST;
 
   const days = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(days) || days <= 0) return [];
+  if (!Number.isFinite(days) || days <= 0) return EMPTY_LIST;
 
-  const rows = await scoped(db)
-    .where(
-      and(
-        visibleToStaff(scope),
-        inArray(cases.status, [...OPEN_CASE_STATUSES]),
-        sql`${cases.updatedAt} < now() - make_interval(days => ${days})`,
-      )!,
-    )
-    .orderBy(cases.updatedAt)
-    .limit(STAFF_CASE_LIST_CAP);
+  const where = and(
+    visibleToStaff(scope),
+    inArray(cases.status, [...OPEN_CASE_STATUSES]),
+    sql`${cases.updatedAt} < now() - make_interval(days => ${days})`,
+  )!;
 
-  return rows as StaffCaseRow[];
+  // Oldest first: the case nobody has touched for longest is the one to look at.
+  const rows = await scoped(db).where(where).orderBy(cases.updatedAt).limit(STAFF_CASE_LIST_CAP);
+  return { cases: rows as StaffCaseRow[], total: await countMatching(db, where) };
 }
 
 /**
@@ -199,20 +206,17 @@ export async function staleCases(db: Database, scope: StaffScope): Promise<Staff
  * Nothing calls this on a schedule until stage 5. It exists now so that stage
  * adds a trigger rather than a trigger and a query.
  */
-export async function casesPastDue(db: Database, scope: StaffScope): Promise<StaffCaseRow[]> {
-  const rows = await scoped(db)
-    .where(
-      and(
-        visibleToStaff(scope),
-        inArray(cases.status, [...OPEN_CASE_STATUSES]),
-        sql`${cases.dueAt} IS NOT NULL AND ${cases.dueAt} < now()`,
-        or(isNull(cases.snoozedUntil), sql`${cases.snoozedUntil} < now()`),
-      )!,
-    )
-    .orderBy(cases.dueAt)
-    .limit(STAFF_CASE_LIST_CAP);
+export async function casesPastDue(db: Database, scope: StaffScope): Promise<StaffCaseList> {
+  const where = and(
+    visibleToStaff(scope),
+    inArray(cases.status, [...OPEN_CASE_STATUSES]),
+    sql`${cases.dueAt} IS NOT NULL AND ${cases.dueAt} < now()`,
+    or(isNull(cases.snoozedUntil), sql`${cases.snoozedUntil} < now()`),
+  )!;
 
-  return rows as StaffCaseRow[];
+  // Longest-missed first: the promise broken furthest back is the one to answer.
+  const rows = await scoped(db).where(where).orderBy(cases.dueAt).limit(STAFF_CASE_LIST_CAP);
+  return { cases: rows as StaffCaseRow[], total: await countMatching(db, where) };
 }
 
 /**

@@ -416,6 +416,8 @@ A new case notifies up to twenty staff → `deliver` sends sequentially inside t
 `bot.ts:70-77` hardcodes *"This was a notice about somebody else's action (a duplicate sign-in)"* for every message after the first → new-case notification adds a second kind of non-first message → a failed staff notification would be alerted as a duplicate sign-in.
 **Terminates at:** `OutgoingMessage` carrying a short `purpose`, used in the alert text. Small, and the kind of thing that silently misleads an operator at three in the morning.
 
+✅ **Done ahead of Task 39, deliberately.** The fix was originally scheduled at Task 39, seven tasks after Task 32 creates the second kind of message — which would have left a window where a failed staff notification alerted as a duplicate sign-in. `purpose` is now on `OutgoingMessage`, the duplicate-holder notice sets it, and `deliver` reads it with a deliberately vague fallback: an alarm that admits it does not know beats one that confidently names the wrong thing. **Task 32 must set `purpose` on every notification it emits.**
+
 *R11–R15 trace the decisions added on 29 July.*
 
 ### R11 — Signing in again wipes a staff-set region
@@ -1043,7 +1045,11 @@ Every caller joins `teachers` on `cases.teacher_chat_id`, and then LEFT joins `r
 
 - [ ] **Step 1: The query set**
 
-`listCases({ openOnly | status | unassigned })`, `casesOwnedBy(chatId)`, `staleCases(overdueDays)`, `searchCases(term)`, `findCase(reference)` — each taking the staff scope and applying `visibleToStaff`.
+`listCases({ openOnly | status | unassigned })`, `casesOwnedBy(chatId)`, `staleCases()`, `searchCases(term)`, `findCase(reference)` — each taking the staff scope and applying `visibleToStaff`.
+
+**Every list-returning function returns `{ cases, total }`**, including the ones that cannot currently exceed the cap, and `casesPastDue` in Task 44 does too. `findCase` returns one row or null. Uniformity is the point: a module where some functions return a bare array and others return an object is one where a command writes `.map` on the wrong one, and layer 3 calls all five.
+
+`staleCases` reads `OVERDUE_DAYS` itself rather than taking it as an argument, so "omit entirely when unset" cannot be forgotten by a caller — the same reasoning that keeps redaction inside `redactDetail`.
 
 `staleCases` is the "nobody has touched it" half of `/urgent`, and it is the name used everywhere in this plan — see the table in D23. `casesPastDue` is a different function about a missed promise, and it is written in Task 44.
 
@@ -1300,6 +1306,8 @@ it('caps recipients at twenty', async () => { /* R9 */ });
 ```
 
 - [ ] **Step 2: Implement as a returned message list**, computed inside the transaction, delivered after the commit. Carries the reference, category, time in Tashkent, and ready-to-tap `/case` and `/assign` lines. Capped at `NEW_CASE_NOTIFY_CAP` (R9).
+
+  **Set `purpose` on every message** — `'a new case notification'` and `'an urgent case notification'`. The field already exists (R10, done early); an unset one falls back to wording that names nothing, which is correct but wastes the alarm.
 
 - [ ] **Step 2a: Move the case to `Received` when at least one recipient is found** (D25). This is what gives `Received` a writer — it has never had one — and it makes "filed, and somebody can see it" distinguishable from "filed, and nobody could" without asking any staff member to maintain the difference by hand. Zero recipients leaves the case at `New` and raises the critical alert below, so the two states cannot both be true.
 

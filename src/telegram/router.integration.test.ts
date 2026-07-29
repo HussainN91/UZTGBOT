@@ -164,6 +164,19 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       expect(outcome.messages[1]?.text).toContain('Security notice');
       expect(outcome.alerts[0]?.title).toContain('more than one chat');
     });
+
+    it('says what a message to somebody else is, for the alert if it fails to send', async () => {
+      // R10. `deliver` alerts when a send fails, and it used to describe every
+      // message after the first as a duplicate sign-in notice — true while that
+      // was the only one, and wrong the moment new-case notification exists.
+      // The reply to the sender carries no purpose: it is always messages[0].
+      await verify(CHAT);
+      await text('/start', SECOND_CHAT);
+      const outcome = await text(IDENTIFIER, SECOND_CHAT);
+
+      expect(outcome.messages[0]?.purpose).toBeUndefined();
+      expect(outcome.messages[1]?.purpose).toBe('a duplicate sign-in notice');
+    });
   });
 
   describe('the FAQ', () => {

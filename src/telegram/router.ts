@@ -85,6 +85,20 @@ export interface OutgoingMessage {
   readonly chatId: string;
   readonly text: string;
   readonly keyboard?: Reply['keyboard'];
+  /**
+   * A few words naming what this message is, used only when it fails to send.
+   *
+   * `deliver` alerts on a failed send, and until this existed it described every
+   * message after the first as "a notice about somebody else's action (a
+   * duplicate sign-in)" — true while that was the only such message, and about
+   * to stop being true the moment new-case notification is built. An operator
+   * reading an alarm at three in the morning is the last person who should be
+   * told the wrong thing about what did not arrive.
+   *
+   * Optional, and the answer to the sender does not set it: `messages[0]` is
+   * always the reply to whoever wrote in, and `deliver` says so.
+   */
+  readonly purpose?: string;
 }
 
 /**
@@ -92,8 +106,8 @@ export interface OutgoingMessage {
  *
  * Messages and alerts are returned rather than sent so that every one of them
  * happens after the transaction commits. `messages[0]` is the answer to the
- * teacher who wrote in; anything after it goes to somebody else — today only the
- * prior holder of a duplicated identity.
+ * teacher who wrote in; anything after it goes to somebody else, and carries a
+ * `purpose` saying what it was.
  */
 export interface RouterOutcome {
   readonly messages: readonly OutgoingMessage[];
@@ -310,6 +324,7 @@ async function handleIdentifier(
   for (const holder of outcome.priorHolders) {
     messages.push({
       chatId: holder,
+      purpose: 'a duplicate sign-in notice',
       text:
         '⚠️ Security notice\n\n' +
         'Your teacher identity has just been used to sign in from another Telegram ' +

@@ -169,7 +169,7 @@ describe.skipIf(!TEST_DATABASE_URL)('staff-facing case queries', () => {
       // A fallback here would be the bot deciding MoPSE's service standard.
       await seedCase('VISA-2026-00001', { ageDays: 99 });
 
-      expect(await staleCases(db, scope())).toEqual([]);
+      expect((await staleCases(db, scope())).cases).toEqual([]);
     });
 
     it('returns cases untouched for longer than OVERDUE_DAYS', async () => {
@@ -178,7 +178,7 @@ describe.skipIf(!TEST_DATABASE_URL)('staff-facing case queries', () => {
       await seedCase('VISA-2026-00001', { ageDays: 10 });
       await seedCase('VISA-2026-00002', { ageDays: 2 });
 
-      const rows = await staleCases(db, scope());
+      const rows = (await staleCases(db, scope())).cases;
       expect(rows.map((c) => c.reference)).toEqual(['VISA-2026-00001']);
     });
 
@@ -187,7 +187,7 @@ describe.skipIf(!TEST_DATABASE_URL)('staff-facing case queries', () => {
       clearSettingsCache();
       await seedCase('VISA-2026-00001', { ageDays: 30, status: 'Completed' });
 
-      expect(await staleCases(db, scope())).toEqual([]);
+      expect((await staleCases(db, scope())).cases).toEqual([]);
     });
 
     it('applies visibility', async () => {
@@ -198,7 +198,7 @@ describe.skipIf(!TEST_DATABASE_URL)('staff-facing case queries', () => {
         ageDays: 30,
       });
 
-      expect(await staleCases(db, scope({ queue: QUEUE.VISA }))).toEqual([]);
+      expect((await staleCases(db, scope({ queue: QUEUE.VISA }))).cases).toEqual([]);
     });
   });
 

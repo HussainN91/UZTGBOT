@@ -63,18 +63,33 @@ async function deliver(
       });
     } catch (err) {
       log.error({ err, chatId: message.chatId }, 'could not deliver a reply after committing');
+      /**
+       * What this message was, in the operator's words.
+       *
+       * `messages[0]` is always the answer to whoever wrote in. Everything after
+       * it goes to somebody else and says what it is — before `purpose` existed
+       * this branch asserted "a duplicate sign-in notice" for every such
+       * message, which was true only while that was the only one. The fallback
+       * is deliberately vague rather than a guess: an alarm that admits it does
+       * not know beats one that confidently names the wrong thing.
+       */
+      const what =
+        index === 0
+          ? 'This was the answer to something they had just done. Whatever it was\n' +
+            'succeeded — the database has committed — but they have been told nothing,\n' +
+            'so from their side the bot ignored them.'
+          : `This was ${message.purpose ?? 'a notice about somebody else\'s action'}.\n` +
+            'It happened, but the person who needed to know has not been told.';
+
       await alerter.send({
         severity: 'critical',
-        title: 'A teacher was not told what happened',
+        title:
+          index === 0
+            ? 'A teacher was not told what happened'
+            : 'Somebody was not told about something that happened',
         body: [
           `Chat: ${message.chatId}`,
-          index === 0
-            ? 'This was the answer to something they had just done. Whatever it was'
-            : 'This was a notice about somebody else\'s action (a duplicate sign-in).',
-          index === 0
-            ? 'succeeded — the database has committed — but they have been told nothing,'
-            : 'It happened, but the person who needed to know has not been told.',
-          index === 0 ? 'so from their side the bot ignored them.' : '',
+          what,
           '',
           `Reason: ${err instanceof Error ? err.message : String(err)}`,
           '',

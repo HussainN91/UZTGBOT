@@ -172,19 +172,19 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
       const reference = await openCase();
       await setDue(db, reference, new Date(Date.now() - 86_400_000), ACTOR);
 
-      expect((await casesPastDue(db, scope)).map((c) => c.reference)).toEqual([reference]);
+      expect((await casesPastDue(db, scope)).cases.map((c) => c.reference)).toEqual([reference]);
     });
 
     it('does not list a case whose date is still ahead', async () => {
       const reference = await openCase();
       await setDue(db, reference, new Date(Date.now() + 86_400_000), ACTOR);
 
-      expect(await casesPastDue(db, scope)).toEqual([]);
+      expect((await casesPastDue(db, scope)).cases).toEqual([]);
     });
 
     it('does not list a case with no promised date at all', async () => {
       await openCase();
-      expect(await casesPastDue(db, scope)).toEqual([]);
+      expect((await casesPastDue(db, scope)).cases).toEqual([]);
     });
 
     it('suppresses chasing while a snooze is running, without closing the case', async () => {
@@ -192,7 +192,7 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
       await setDue(db, reference, new Date(Date.now() - 86_400_000), ACTOR);
       await setSnooze(db, reference, 7, ACTOR);
 
-      expect(await casesPastDue(db, scope)).toEqual([]);
+      expect((await casesPastDue(db, scope)).cases).toEqual([]);
 
       // The case is still open and still owned — a snooze suppresses the
       // chasing, not the work.
@@ -207,7 +207,7 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
         sql`UPDATE cases SET snoozed_until = now() - make_interval(days => 1) WHERE reference = ${reference}`,
       );
 
-      expect((await casesPastDue(db, scope)).map((c) => c.reference)).toEqual([reference]);
+      expect((await casesPastDue(db, scope)).cases.map((c) => c.reference)).toEqual([reference]);
     });
 
     it('does not chase a closed case', async () => {
@@ -215,7 +215,7 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
       await setDue(db, reference, new Date(Date.now() - 86_400_000), ACTOR);
       await updateCase(db, reference, { status: 'Completed' }, ACTOR);
 
-      expect(await casesPastDue(db, scope)).toEqual([]);
+      expect((await casesPastDue(db, scope)).cases).toEqual([]);
     });
 
     it('refuses a snooze longer than the cap', async () => {
@@ -238,14 +238,14 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
       await setDue(db, reference, new Date(Date.now() - 86_400_000), ACTOR);
       await setDue(db, reference, null, ACTOR);
 
-      expect(await casesPastDue(db, scope)).toEqual([]);
+      expect((await casesPastDue(db, scope)).cases).toEqual([]);
     });
 
     it('applies visibility to the past-due list', async () => {
       const reference = await openCase();
       await setDue(db, reference, new Date(Date.now() - 86_400_000), ACTOR);
 
-      expect(await casesPastDue(db, { ...scope, queue: QUEUE.ACCOMMODATION })).toEqual([]);
+      expect((await casesPastDue(db, { ...scope, queue: QUEUE.ACCOMMODATION })).cases).toEqual([]);
     });
   });
 });
