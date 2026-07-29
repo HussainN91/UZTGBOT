@@ -12,11 +12,11 @@
 
 ---
 
-## ▶ Where this stands — 29 July 2026, third session
+## ▶ Where this stands — 29 July 2026, fourth session
 
-**Layers 1 and 2 are complete. Layer 3 is eight tasks of nine done: 31, 32, 33, 34, 35, 45 and 46.**
+# ✅ **STAGE 4 IS COMPLETE. Every task in this plan is built, tested and committed.**
 
-`694 tests across 42 files, none skipped. Typecheck, build and deps:check clean.` Every number in this section was verified by a full run against a live database, not inferred.
+`778 tests across 47 files, none skipped. Typecheck, build and deps:check clean.` Every number in this section was verified by a full run against a live database, not inferred. The working tree is clean at `807284c`.
 
 | Task | What | State |
 |---|---|---|
@@ -40,19 +40,31 @@
 | 35 | `/assign` | ✅ same file; both R3 checks before the write, plus a `CASE_ASSIGNED` audit row |
 | 45 | `/region` `/regions` `/mark` `/due` `/snooze` | ✅ `cases.ts` + `staff.ts`; `/region` checks **both ends** of the move, and refuses a region the system has never heard of |
 | 46 | Asking the teacher about their region | ✅ `router.ts` + `keyboards.ts` + `handlers/menu.ts`; needed **a second migration**, `0007_region_asked_at.sql` |
-| **36–39, 41** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
+| 36 | Staff management — `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke` `/restore` | ✅ `ecbf624`, `staff.ts` + `restoreTeacher`; found the revocation hole below |
+| 37 | `/maintenance` and `/generate_urgent_code` | ✅ `064911c`, new `commands/ops.ts` |
+| 38 | The group gate | ✅ `064911c`, new `telegram/chat-gate.ts` + `bot.ts` |
+| 39 | Staff fan-out alerter, honest delivery failures | ✅ `064911c` — **step 2 was already done**, pulled forward as R10 in the first session |
+| 41 | Correct every document this stage makes wrong | ✅ `807284c`, all three documents |
 
-**All four audit faults are now closed.** Revocation revokes, a corrected region reaches the visibility rule, the staff table has a reader and a writer, and — as of Task 32 — a case that is filed reaches the people who can work it. `Received` has a writer for the first time, and a case nobody can act on raises a critical alert instead of sitting unseen.
+**All four audit faults are closed, and the stage's own build found three more.** Revocation revokes, a corrected region reaches the visibility rule, the staff table has a reader and a writer, and a filed case reaches the people who can work it. `Received` has a writer for the first time, and a case nobody can act on raises a critical alert instead of sitting unseen.
 
-**Next is Task 36**, staff management — `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke` `/restore`. It is the last of layer 3, and it is where D13's "refuse to deactivate the last active System member" and D27's `/restore` land.
+### The three faults this stage found in code that was already committed
 
-**What the last two tasks changed outside their own files** — departures 13 to 20, and none of them optional to know: the case-status vocabulary was collapsed into one list; `/case` bounds its own output because `send.ts` does not split messages; `updateCase` now clears `closed_at` when a case leaves a terminal status, which was a live fault against D28's retention; `StaffCaseRow` carries where a region came from; `listRegionFlags` takes a region scope; and `knownRegions` and `clearSnooze` are new.
+Each was found by running something or by needing to use it. None was found by reading.
 
-**All three remaining questions were answered on 29 July** and are recorded as **D26** (`Action required` means the teacher must act, and `Closed` gets a writer), **D27** (`/restore`, added to Task 36) and **D28** (retention: unresolved cases kept indefinitely, resolved ones 7 days, urgent and critical 6 months, the interaction log 3 days). No question in this plan is open.
+1. **A revoked teacher could give themselves their access back** (`a37fef8`). `/start` from a revoked chat offered the sign-in prompt, and binding clears the revoked mark as a side effect — so `/revoke` was undone by typing an email address. The gate had been closed on `requireSignIn` (departure 6) and not on `/start`. **Found by Task 36's own prescribed test**, three tasks after the hole was opened. Closed in three places; a committed test that asserted the old behaviour was inverted, with the reason recorded at the site.
+2. **A reopened case kept its `closed_at`** (`8f2b84c`). Harmless when written, and not harmless after D28 — stage 5's retention measures its seven days from exactly that column.
+3. **The status vocabulary existed three times** (`5df3f92`), with two definitions of `OPEN_CASE_STATUSES` reached by different importers, agreeing only by luck.
 
-**Nothing is open.** Both follow-ups were answered the same day: `/close <ref> unresolved <reason>` exists, with the reason as required free text written to a case note (D26); and the three retention periods are **settings**, which makes rendering the privacy notice from those settings mandatory rather than optional (D28).
+### One hole the plan did not name, found by building Task 36
 
-**Read `docs/plans/2026-07-29-stage-4-handoff.md` before starting.** It records what is built, what is deliberately different from this plan, and the three open questions.
+**D13's last-System guard was on one door and not the other.** The plan asks `/staff_remove` to refuse to deactivate the last active System member. `/staff_role` could *demote* them, which empties the rank exactly as thoroughly, with the same recovery — SSH and SQL. Guarded, and recorded as departure 25.
+
+Working it backwards produced a second finding: **the guard the plan did ask for is unreachable**, because `staff.manage` floors at System, so the caller is always an active System member and the only way to reach a count of one is to be that one — which the self-check refuses first. It is kept anyway, and the *property* is tested rather than the branch, so a later change to either rule fails a test rather than emptying the staff table.
+
+**Nothing is open.** All four original questions and both follow-ups were answered on 29 July, recorded as **D26**, **D27** and **D28**.
+
+**Read `docs/plans/2026-07-29-stage-4-handoff.md` first.** It records what is built, the twenty-six deliberate departures from this plan, and what stage 5 inherits.
 
 ---
 
@@ -1676,7 +1688,7 @@ Implements D14, D18, the second half of D17, and **D27**.
 
 **Files:** Modify `src/telegram/commands/staff.ts`
 
-- [ ] **Step 1: The refusals, tested first**
+- [x] **Step 1: The refusals, tested first**
 
 ```ts
 it('refuses to deactivate the last active System member', async () => {
@@ -1698,9 +1710,9 @@ it('writes an audit row in the same transaction as the grant', async () => {
 it('notifies the person whose access changed', async () => { /* … */ });
 ```
 
-- [ ] **Step 2: Implement.** `/staff_add` adds only — an existing target is refused and pointed at `/staff_role`. Role and queue are required arguments, not defaulted.
+- [x] **Step 2: Implement.** `/staff_add` adds only — an existing target is refused and pointed at `/staff_role`. Role and queue are required arguments, not defaulted.
 
-- [ ] **Step 3: `/revoke <chat_id>` and `/restore <chat_id>`**, both at `teacher.revoke` — D17's command half and D27. `restoreTeacher` joins `revokeTeacher` in `src/teachers/repository.ts`; the commands are thin over both.
+- [x] **Step 3: `/revoke <chat_id>` and `/restore <chat_id>`**, both at `teacher.revoke` — D17's command half and D27. `restoreTeacher` joins `revokeTeacher` in `src/teachers/repository.ts`; the commands are thin over both.
 
   The same rank on purpose. Whoever can make the mistake can undo it without escalating, because a recovery that needs a second person is a recovery that waits until Monday.
 
@@ -1755,7 +1767,7 @@ it('reports the teacher’s open cases both ways', async () => {
 
   `/restore` writes `verification_state = 'Verified'`, clears `revoked_at` and `revoked_by`, and records `TEACHER_RESTORED` (D18). It touches **nothing else** — not `identifier`, not `region_override`, not the privacy-acceptance columns. Restoring somebody undoes one act; it does not re-run their sign-in.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** — `ecbf624`, with the revocation fault it found as `a37fef8`
 
 ---
 
@@ -1763,9 +1775,9 @@ it('reports the teacher’s open cases both ways', async () => {
 
 **Files:** Create `src/telegram/commands/ops.ts` and its test
 
-- [ ] **Step 1: `/maintenance on|off`** through `setSetting`, which clears the cache. The confirmation must state R6 plainly — in-flight submissions still complete, so a trickle of cases for a few hours is correct behaviour and not a bug.
+- [x] **Step 1: `/maintenance on|off`** through `setSetting`, which clears the cache. The confirmation must state R6 plainly — in-flight submissions still complete, so a trickle of cases for a few hours is correct behaviour and not a bug.
 
-- [ ] **Step 2: `/generate_urgent_code`**
+- [x] **Step 2: `/generate_urgent_code`**
 
 ```ts
 it('issues a code that the teacher flow will accept', async () => {
@@ -1782,7 +1794,7 @@ it('records who issued it', async () => {
 
 Six characters, upper case, from a cryptographic source rather than a UUID slice. `URGENT_CODE_TTL_HOURS = 48`, moved into `constants.ts` with its provenance (`AdminCommands.gs:77`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** — `064911c`, together with tasks 38 and 39
 
 ---
 
@@ -1794,7 +1806,7 @@ Implements D15 and R8. **A control the specification lists as shipped and which 
 
 **Files:** Modify `src/telegram/bot.ts`; test
 
-- [ ] **Step 1: Tests**
+- [x] **Step 1: Tests**
 
 ```ts
 it('ignores a message from a group', async () => { /* … */ });
@@ -1808,9 +1820,9 @@ it('never leaves the operations chat', async () => {
 });
 ```
 
-- [ ] **Step 2: Implement** as a gate before `run`, plus a `my_chat_member` handler. The gate is in `bot.ts` rather than the router because a non-private update should not consume an update claim or take a chat lock.
+- [x] **Step 2: Implement** as a gate before `run`, plus a `my_chat_member` handler. The gate is in `bot.ts` rather than the router because a non-private update should not consume an update claim or take a chat lock.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** — `064911c`
 
 ---
 
@@ -1820,13 +1832,13 @@ Implements D12 and R10.
 
 **Files:** Modify `src/telegram/alerter.ts`, `src/telegram/router.ts`, `src/telegram/bot.ts`
 
-- [ ] **Step 1: Fan out to System staff in addition to `OPS_ALERT_CHAT_ID`**, never instead of it. `trySend`, not `send` — a failure to deliver an alarm must not abort the operation that raised it.
+- [x] **Step 1: Fan out to System staff in addition to `OPS_ALERT_CHAT_ID`**, never instead of it. `trySend`, not `send` — a failure to deliver an alarm must not abort the operation that raised it.
 
-- [ ] **Step 2: Give `OutgoingMessage` a `purpose`** and use it in `deliver`'s failure alert, which currently describes every non-first message as a duplicate sign-in.
+- [x] **Step 2: Give `OutgoingMessage` a `purpose`** and use it in `deliver`'s failure alert, which currently describes every non-first message as a duplicate sign-in.
 
-- [ ] **Step 3: Test that an empty staff table still alerts** — the bootstrap case, and the case where the staff table is the thing that is wrong.
+- [x] **Step 3: Test that an empty staff table still alerts** — the bootstrap case, and the case where the staff table is the thing that is wrong.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** — `064911c`. **Step 2 was already done** — `OutgoingMessage.purpose` was pulled forward from here in the first session (departure 1, R10)
 
 ---
 
@@ -1868,7 +1880,7 @@ it('leaves an ordinary question alone', () => {
 
 Not optional, and larger than Stage 3's equivalent because this stage corrects two documented behaviours that were never true.
 
-- [ ] **Step 1: `BOT-SPEC.md`**
+- [x] **Step 1: `BOT-SPEC.md`**
   - §6.1 — the capability table, re-expressed against the five ranks `Observer/Support/Lead/Program/System`, recording that the rank once called `Regional` is now `Lead` precisely because it was never the region axis, and that a MoPSE "regional admin" is usually `Support` with a region set (D7). The teacher-facing job title "Regional admin" stays as it is, and §6.1 should say so, or the next reader will "correct" it
   - §6.4, §6.5 — command names (D14), and the command list: nineteen becomes eighteen, minus two deferred (D19), plus `/mark` `/due` `/snooze` `/region` `/regions` (D20, D22, D23) and `/restore` (D27)
   - **§6.5 — define `Action required` as "the teacher must do something" (D26)**, in those words, next to the command that writes it. This is the row D25 flagged as the weak joint; it has been answered and the document is where the answer has to live, because the phrase is ambiguous to anyone reading it cold and the wrong reading routes work to the wrong person
@@ -1882,7 +1894,7 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
   - §8.1.1, §13 — the group gate, now true
   - §16 — move `/announce` and `/export` into the deferred list with D19's reasoning
 
-- [ ] **Step 2: `RUNBOOK.md`**
+- [x] **Step 2: `RUNBOOK.md`**
   - §1.2 — the launch gate moves: the staff half exists
   - §2.4 — `/maintenance` replaces the SQL, and the launch settings insert gains the three retention keys seeded at 7, 180 and 3 (D28). Unseeded, the job deletes nothing — which is the safe direction, and is also why it will look like it is not working
   - **new §2.5** — bootstrapping the first System member (D13)
@@ -1899,7 +1911,7 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
   - **The retention entry states the four rules and their consequence.** An unresolved case is kept for ever; a resolved one goes after seven days, or six months if it was marked urgent or critical; the interaction log goes after three days. Say plainly what the first consequence is, because an operator will meet it in week two: **a week after a case is closed, its reference stops resolving.** A teacher telephoning about `VISA-2026-00123` gets "no such case", and there is nothing for `/reopen` to reopen
   - **A note for whoever owns the spreadsheet:** the bot reads two tabs. If the original document is reused, the other six are inert and should be deleted — especially `ADMINS`, which used to grant administrator rights and now does nothing at all. A tab that looks like it works and does not is worse than no tab
 
-- [ ] **Step 3: `CONCERNS-AND-IT-ACTIONS.md`**
+- [x] **Step 3: `CONCERNS-AND-IT-ACTIONS.md`**
   - A2 — correct the revocation sentence
   - A4 — two System members, now with the commands to manage them
   - A7 — close the "left for you" half; the ops chat is still required (D12)
@@ -1908,7 +1920,7 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
   - **A10 — close it.** All four periods are decided (D28). Record the two consequences rather than only the numbers: the monthly content review does not survive three days (R18), and publishing the periods requires re-consent from every teacher who accepted the current notice (R17)
   - **new B11 — regions were never correctable.** Recruitment's spreadsheet edits reached nobody who had already signed in, and no command existed. Recorded as closed by Task 43, because the lesson is the one B4 already teaches: a column with a writer and no reader looks exactly like a working feature
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** — `807284c`
 
 ---
 
