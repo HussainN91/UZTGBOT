@@ -1611,7 +1611,7 @@ The commands over Tasks 43 and 44. **Built after Task 35.**
 
 - [x] **Step 5: Tests.** 19 in `region.integration.test.ts`, 20 added to `mutate.integration.test.ts`, 12 added to `parse.test.ts`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit** — `48f5636`
 
 **Three things the sketch did not say, each of which is a hole the sketch's own reasoning opens.**
 
@@ -1666,7 +1666,7 @@ it('never interrupts a teacher part-way through a case', async () => { /* … */
 
 - [x] **Step 4: Run the full router suite.** This adds a branch to the teacher path, which is finished and working; the router tests are what will catch a mistake. **694 tests across 42 files, none skipped.** The migration was additionally applied to an empty database to prove the deploy path, not only the incremental one.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — `c9ce8dc`
 
 ---
 

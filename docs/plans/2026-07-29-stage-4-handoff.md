@@ -13,8 +13,7 @@ which opens with a "Where this stands" table naming every task and its state.
 Stage 3 (teachers) shipped as `d743d72`. Stage 4's layers 1 and 2 are complete. **Layer 3 is eight
 tasks of nine done: 31, 32, 33, 34, 35, 45 and 46.** All four of the audit faults this stage set out
 to close are closed, and **every question that was open is answered** — there is nothing waiting on
-the head of project. Tasks 45 and 46 are built and green but **not yet committed**: the last commit
-is `7514e56` and the working tree carries both.
+the head of project. The working tree is clean at `c9ce8dc`.
 
 ```
 694 tests, 42 files, none skipped · typecheck clean · build clean · deps:check clean
@@ -34,8 +33,8 @@ Verify it yourself before trusting it — see §7.
 | `260f7c1` | Task 35: `/assign` |
 | `340966f` | The dependency graph, built rather than installed — see §8 |
 | `7514e56` | Docs: why `dependency-cruiser` is waiting on TypeScript, not behind |
-| *uncommitted* | **Task 45**: `/region` `/regions` `/mark` `/due` `/snooze` |
-| *uncommitted* | **Task 46**: asking the teacher about their region, and **migration `0007`** |
+| `48f5636` | Task 45: `/region` `/regions` `/mark` `/due` `/snooze` |
+| `c9ce8dc` | Task 46: asking the teacher about their region, and **migration `0007`** |
 
 ## 3. The three answers given this session, because they change what gets built
 
