@@ -13,7 +13,7 @@ which opens with a "Where this stands" table naming every task and its state.
 Stage 3 (teachers) shipped as `d743d72`. Stage 4's layers 1 and 2 are complete. **Layer 3 is eight
 tasks of nine done: 31, 32, 33, 34, 35, 45 and 46.** All four of the audit faults this stage set out
 to close are closed, and **every question that was open is answered** — there is nothing waiting on
-the head of project. The working tree is clean at `c9ce8dc`.
+the head of project. The working tree is clean, and everything through task 46 is committed — run `git log --oneline -5` for where that is.
 
 ```
 694 tests, 42 files, none skipped · typecheck clean · build clean · deps:check clean
