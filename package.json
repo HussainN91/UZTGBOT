@@ -19,6 +19,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "lint": "tsc -p tsconfig.json",
+    "deps": "node scripts/dependency-tree.mjs > docs/dependency-tree.md",
+    "deps:check": "node scripts/dependency-tree.mjs --check",
     "sync": "tsx src/scripts/sync-sheets.ts",
     "set-webhook": "tsx src/scripts/set-webhook.ts"
   },
