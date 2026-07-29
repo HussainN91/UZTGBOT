@@ -210,12 +210,23 @@ The architecture rests on one rule — **nothing may import from a layer above i
 rule is enforced by whoever is reading carefully. Everything else load-bearing in this project is a
 compile error when it breaks; this is not.
 
-**`dependency-cruiser` was tried on 29 July and does not work here.** It supports
-`typescript >=2.0.0 <7.0.0`; this project is on `typescript ^7.0.2`. It installs, initialises, and
-then cruises **0 modules while printing a green tick** — which is the exact "looks configured and
-does nothing" failure this rebuild exists to remove, so it was uninstalled rather than left in
-place. Do not reach for it again until it supports TypeScript 7, and **do not downgrade TypeScript
-to suit a linting tool.**
+**`dependency-cruiser` was tried on 29 July and cannot work here yet.** It installs, initialises,
+then cruises **0 modules while printing a green tick** — the exact "looks configured and does
+nothing" failure this rebuild exists to remove, so it was uninstalled rather than left in place.
+
+**Nobody is behind, and there is a precise trigger for retrying.** `dependency-cruiser@18.1.0` — the
+latest, and the version that was installed — already supports TypeScript 7. Its release note says
+the first usable version is **`typescript@7.1.0`**, because 7.0.x exposes no public API for tools to
+hook into. As of 29 July 2026 `typescript@latest` is **7.0.2** and 7.1.0 exists only as nightly
+builds (`7.1.0-dev.20260728.1`). So this project is on the newest stable TypeScript there is, and
+the tool is waiting on a release that has not shipped.
+
+```bash
+npm view typescript version   # when this reads 7.1.0 or above, dependency-cruiser can work here
+```
+
+**Do not install a nightly TypeScript to make a linting tool run, and do not downgrade TypeScript
+either.** The compiler the whole build depends on does not move to suit a linter.
 
 **The graph itself now exists, built rather than installed** (`340966f`):
 
