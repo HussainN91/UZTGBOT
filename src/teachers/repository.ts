@@ -9,6 +9,7 @@
 import { and, eq, isNotNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { rosterEntries, teachers } from '../db/schema.js';
+import { recordAudit } from '../log/audit.js';
 
 export interface RosterMatch {
   readonly identifier: string;
@@ -126,7 +127,63 @@ export async function revokeTeacher(
     .where(eq(teachers.chatId, chatId))
     .returning({ chatId: teachers.chatId });
 
-  return result.length > 0;
+  if (result.length === 0) return false;
+
+  await recordAudit(db, { actor, action: 'TEACHER_REVOKED', subject: chatId });
+  return true;
+}
+
+/**
+ * Give a wrongly revoked teacher their access back — D27.
+ *
+ * The counterpart `/revoke` never had. Revoking the wrong person is an ordinary
+ * mistake; the recovery before this was a database session over the SSH tunnel,
+ * which is not an ordinary recovery.
+ *
+ * **Three conditions in the `WHERE`, and the last two are the point.** Only a
+ * `Revoked` row is touched, so restoring somebody who was never revoked writes
+ * nothing and the command can say so rather than inventing an audit row for an
+ * event that did not happen (R16, second order). And `identifier IS NOT NULL`
+ * refuses to promote a chat that never signed in: `/revoke` cannot reach one
+ * either, but a restore that could write `Verified` onto a chat with no roster
+ * identity would be this command granting access rather than returning it.
+ *
+ * It touches nothing else — not `identifier`, not `region_override`, not the
+ * privacy-acceptance columns. Restoring somebody undoes one act; it does not
+ * re-run their sign-in.
+ *
+ * One statement, like every other case and teacher write in this stage, because
+ * the chat lock is the *sender's* and two staff members acting at once hold two
+ * different locks (R2).
+ */
+export async function restoreTeacher(
+  db: Database,
+  chatId: string,
+  actor: string,
+): Promise<boolean> {
+  const result = await db
+    .update(teachers)
+    .set({ verificationState: 'Verified', revokedAt: null, revokedBy: null })
+    .where(
+      and(
+        eq(teachers.chatId, chatId),
+        eq(teachers.verificationState, 'Revoked'),
+        isNotNull(teachers.identifier),
+      ),
+    )
+    .returning({ chatId: teachers.chatId });
+
+  /**
+   * The audit row is written here rather than by the command, and only when the
+   * statement above actually changed a row. That is what makes R16's second
+   * order structural instead of something a caller has to remember: a restore
+   * that did nothing cannot leave a `TEACHER_RESTORED` row behind, whoever calls
+   * it and however the command's branches are later rearranged.
+   */
+  if (result.length === 0) return false;
+
+  await recordAudit(db, { actor, action: 'TEACHER_RESTORED', subject: chatId });
+  return true;
 }
 
 /**

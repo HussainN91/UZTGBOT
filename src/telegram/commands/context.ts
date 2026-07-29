@@ -193,7 +193,13 @@ export const CAPABILITY_INTERFACE: Readonly<Record<Capability, CapabilityInterfa
     commands: ['/generate_urgent_code'],
   },
   'teacher.region': { summary: 'Correct a teacher’s region', commands: ['/region', '/regions'] },
-  'teacher.revoke': { summary: 'End a teacher’s access', commands: ['/revoke'] },
+  /**
+   * `/restore` is listed beside `/revoke` on purpose, and at the same rank (D27).
+   * Whoever can make the mistake can undo it without escalating, and a person who
+   * has just revoked the wrong teacher needs to find the way back on the same
+   * line, not by asking somebody.
+   */
+  'teacher.revoke': { summary: 'End and return a teacher’s access', commands: ['/revoke', '/restore'] },
   'staff.manage': {
     summary: 'Add, rank and remove staff',
     commands: ['/staff', '/staff_add', '/staff_role', '/staff_remove'],

@@ -130,6 +130,17 @@ export interface ListCasesOptions {
   readonly status?: CaseStatus;
   /** Only cases with no owner — the intake backlog. */
   readonly unassigned?: boolean;
+  /**
+   * One teacher's cases — what `/revoke` and `/restore` report (R5).
+   *
+   * Scoped like everything else in this file, and that is a deliberate choice
+   * rather than an oversight. A Program member holding one queue is told how
+   * many of the teacher's open cases *they* can see, not how many exist, because
+   * this module's whole guarantee is that no question asked of it returns a case
+   * the asker may not have — and a count is the cheapest possible way to lose
+   * that guarantee. The commands say "you can see" rather than implying a total.
+   */
+  readonly teacherChatId?: string;
 }
 
 /**
@@ -153,6 +164,7 @@ export async function listCases(
     visibleToStaff(scope),
     status,
     options.unassigned === true ? isNull(cases.owner) : undefined,
+    options.teacherChatId === undefined ? undefined : eq(cases.teacherChatId, options.teacherChatId),
   )!;
 
   return listWhere(db, where);
