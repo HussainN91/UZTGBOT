@@ -1,6 +1,6 @@
 # Engineering Concerns and Actions Needed from IT
 
-**Version:** 2.0 · **Date:** 2026-07-28 — updated after Stage 3 of the rebuild
+**Version:** 3.0 · **Date:** 2026-07-29 — updated after Stage 4 of the rebuild
 
 > Items marked **✅ closed by the rebuild** were true of the Apps Script version
 > and are not true of what runs now. They are kept rather than deleted, because
@@ -47,6 +47,15 @@ takes effect on their next message rather than up to thirty minutes later
 alarm within minutes** rather than being silently absent — `job_runs` records
 every run and the heartbeat alerts on any job that misses its interval.
 
+> **Corrected 2026-07-29.** The sentence above about revocation was written
+> before it was true. Until Stage 4, deactivating a roster row did **nothing at
+> all** to a teacher who had already signed in: the roster's active flag was read
+> only when somebody signed in, and a teacher who has signed in never signs in
+> again. It is true now — every gated action re-checks the roster live, and there
+> is a `/revoke` command with `/restore` beside it. The claim is left in place
+> with this note rather than quietly rewritten, because a document that has been
+> wrong about something is worth knowing about.
+
 **Nothing to do.** The equivalent deployment step is applying migrations before
 serving, which is in the runbook and in `deploy/README.md`.
 
@@ -66,19 +75,36 @@ mistaken for authoritative. `BOT-SPEC.md`, `RUNBOOK.md`,
 documentation, with no overlap between them.
 **Owner:** IT · **When:** ✅ complete
 
-## 🟠 A4. Add a second System Administrator
+## 🟠 A4. Add a second System member
 
-`/add_admin` requires an existing System Admin. If the single seeded row is
-deleted or that person leaves, **no one can administer the bot** and the only
-recovery is editing the ADMINS sheet by hand.
+**Built in Stage 4, and still needs you to do it.** The commands exist now and
+they are the ones below, not the Apps Script names this item used to give:
 
-The lifecycle around this improved with the upgrade plan: `/admins` lists
-everyone with provenance, `/remove_admin` deactivates safely (it **refuses to
-deactivate the last active System Admin**), `/set_role` restores, and
-`/add_admin` can no longer accidentally strip an existing System Admin's flag.
-None of that changes the underlying need for a second person.
+- `/staff` — everyone, with their rank, queue and regions, and deactivated people
+  listed separately rather than hidden.
+- `/staff_add <chat id> <rank> <queue> [regions]` — adds somebody. It refuses to
+  guess the rank or the queue, because guessing gives a person more than you
+  asked for and nothing in what you typed would show it.
+- `/staff_role <chat id> <rank>` — changes a rank, and is also how somebody who
+  was removed is put back.
+- `/staff_remove <chat id>` — deactivates. The row always stays, so notes and
+  audit entries can still name the person.
 
-**Action:** seed at least two System Admins in different people's names.
+**The first System member cannot be created by any of them**, deliberately: they
+all require System rank, so the first row is a hand-written line of SQL over the
+server connection, written out in `RUNBOOK.md` §2.5. Every automated alternative
+is a permanent back door — an environment variable granting System access to
+whoever can edit a file, or a "first caller wins" rule that is a race with the
+public internet.
+
+**Which is exactly why a second person matters.** `/staff_remove` refuses to
+deactivate the last active System member, and `/staff_role` refuses to demote
+them, so the bot will not let you paint yourself into that corner by accident.
+But if the one account is lost — a phone, a person leaving — the recovery is
+another trip to the database.
+
+**Action:** seed the first System member with the SQL in `RUNBOOK.md` §2.5, then
+add the second from that account with `/staff_add`. Two different people.
 **Owner:** Head of project · **When:** at deployment
 
 ## 🔴 A5. Prove the backup and the restore, and own the spreadsheet properly
@@ -127,13 +153,30 @@ recommended:
   no error of its own, which is exactly why something has to look for its
   absence.
 
+- **Alarms now also reach every System member individually**, added to the
+  operations chat and never instead of it. That ordering is the point: the
+  environment variable is what still works when the staff table is empty, wrong,
+  or unreachable — and "the staff table is wrong" is a state whose alarm must not
+  depend on the staff table.
+
 **What is left for you:** create the operations group, add the bot to it, and put
 its chat id in `OPS_ALERT_CHAT_ID`. Use a **group**, not one person's private
 chat — one person on leave should not mean nobody is watching. Group ids are
 negative; the setting accepts them.
 
-Without it, alarms fall back to the log and the concern above is exactly as true
-as it ever was.
+**The operations chat is the one group the bot will stay in.** As of Stage 4 it
+refuses to work in group chats and leaves any it is added to — a control the
+specification has always described and which did not exist until now. That group
+is exempt by chat id, so putting the id in `OPS_ALERT_CHAT_ID` is what keeps the
+bot in it. **Add the bot to the group after the id is configured**, or it will
+leave, correctly, and you will have to add it again.
+
+The bot will not answer anything typed in that group. It is there to speak, not
+to listen.
+
+Without it, alarms fall back to the log and to System members' private chats —
+and before the first System row exists, only to the log, which is the concern
+above exactly as true as it ever was.
 **Owner:** IT · **When:** at deployment
 
 ## 🟠 A8. Restrict spreadsheet access — narrowed, not closed
@@ -164,31 +207,74 @@ proxy log, access log and `getWebhookInfo` output in the path.
 `getWebhookInfo` output is no longer sensitive, so the awareness this item asked
 for is no longer needed.
 
-## 🔴 A10. Decide how long records are kept — **new, and now dated**
+## ✅ A10. How long records are kept — **decided 2026-07-29**
 
-`RETENTION_DAYS` is unset, and Stage 3 is what starts filling `messages`: every
-inbound message writes a row. The privacy notice shown to every teacher before
-they sign in already promises their data can be removed.
+Answered, in time: before the bot has served a single teacher.
 
-There is a test that fails if anybody writes a number in before you have chosen
-one, so this cannot be closed by a developer picking something reasonable.
+| What | Kept |
+|---|---|
+| A case that is **not resolved** | **For ever** |
+| A resolved case | **7 days** after it was closed |
+| A resolved case marked **Urgent** or **Critical** | **180 days** after it was closed |
+| The message log | **3 days** |
+| The audit trail | **Never removed** |
 
-**Answering before the first deployment is a decision about a design. Answering
-after is a decision about data that already exists.**
-**Owner:** Head of project · **When:** before the bot serves a single teacher
+The three periods are **settings**, not numbers written into the program, so
+MoPSE can change them without a deployment. That was your explicit choice against
+the opposite recommendation, and it turned out to make one thing cleaner rather
+than harder: the privacy notice is generated *from* those settings, so a period
+and the sentence teachers read about it cannot disagree.
 
-## 🔴 A11. Decide how a removal request is honoured — **new**
+**Nothing built in Stage 4 deletes anything.** The job, the settings and the new
+privacy notice ship together in Stage 5, because a notice promising deletion that
+nothing performs is false in the same way the revocation claim above was.
 
-`cases.teacher_chat_id` is `ON DELETE RESTRICT`, deliberately: it guarantees no
-case can exist without a real teacher behind it. It also means a teacher who has
-ever opened a case **cannot be deleted**, and the privacy notice promises removal
-on request.
+Two consequences, both real, and neither obvious:
 
-The promise is now blocked by a constraint we added on purpose, not merely
-unimplemented. Honouring it needs a deliberate anonymisation route — replace the
-identifying columns, keep the case — which is Stage 4 or later work but is a
-policy decision first.
-**Owner:** Head of project · **When:** before launch
+**The monthly content review does not survive a three-day log.** `RUNBOOK.md`
+§4.7 ran two thirty-day queries over the message table to find out what teachers
+were asking that the answer bank could not cover, and which confident answers
+they were rejecting — described in that document as the strongest signal
+available. At three days both return nothing, and **an empty result from a review
+reads exactly like a system with no problems.** The section has been deleted
+rather than left to quietly stop working. If you want the signal back, it comes
+from a nightly count taken *before* the delete — no teacher's words kept, just
+"this answer was rejected fourteen times in October". That is a Stage 5 task and
+it is your call, not a reason to lengthen the period.
+
+**Publishing these periods requires asking 1,800 teachers to read the notice
+again.** The current notice tells every teacher who has signed in that no period
+is set and that *"when one is set, this notice will be updated and you will be
+asked to read it again"*. That is a commitment already made. Stage 5 ships the
+new wording, the version bump and the re-consent flow in the same release as the
+job.
+
+**One rule worth knowing before you ever change a period:** *lengthening* one —
+keeping data longer than teachers were told — asks everybody to re-consent.
+*Shortening* one does not, because deleting sooner than promised breaks no
+commitment to anybody, and putting 1,800 people through a re-consent to be told
+their data goes sooner is a cost with no beneficiary.
+
+## ✅ A11. How a removal request is honoured — **closed, and this item was wrong**
+
+Closed by A10, and the correction matters more than the closure.
+
+**This item said the constraint blocks deleting a case. It does not.**
+`ON DELETE restrict` on `cases.teacher_chat_id` refuses the deletion of a
+**teacher** who still has cases. Deleting the *case* was never obstructed, and
+the notes attached to it are removed with it automatically. The two were blurred
+here, and the blur is what made retention look like it needed anonymisation.
+
+So the retention job deletes cases outright, which is what "removed after seven
+days" means. **Anonymisation is what a teacher's own removal request needs** —
+their name and identifier replaced, the case history kept — and that is a
+different, smaller job than this item implied. It stays a Stage 5 item alongside
+the retention work.
+
+**The consequence you will meet in week two**, stated here so nobody reports it
+as a fault: a week after a case is closed, its reference stops working. A teacher
+telephoning about `VISA-2026-00123` gets "no such case", and there is nothing
+left to reopen.
 
 ---
 
@@ -223,13 +309,17 @@ for a reply, and the audience is frozen into a table the moment the sender
 confirms, so a paced send is resumable rather than restartable.
 
 Nothing here is a risk today, because the feature is absent rather than broken.
-Re-read this item when Stage 5 is planned.
+Re-read this item when Stage 5 is planned — which is now the next stage, and it
+carries the retention job and the privacy re-consent with it.
+
+Stage 4 left the permission for announcements in place with no command behind it,
+so Stage 5 adds a command rather than a permission model.
 
 ## B4. The tests now run, and finding out cost four faults — 🟡 Low
 
-Not closed, rewritten. There is a suite — 332 tests, of which the ones that
-matter run against a real PostgreSQL, on a schema built by the migrations
-themselves, so the migrations are proven too.
+Not closed, rewritten. There is a suite — 778 tests as of Stage 4, of which the
+ones that matter run against a real PostgreSQL, on a schema built by the
+migrations themselves, so the migrations are proven too.
 
 The honest form of this concern is now **"code that no test has ever executed is
 not known to work"**, and Stage 3 produced the evidence. Four faults surfaced
@@ -249,6 +339,30 @@ invisible to reading:
 The first three were in code committed a day earlier and reviewed. The lesson is
 not "write more tests" but **"run the thing against the real dependency"** — all
 four are shaped so that no amount of reading finds them.
+
+**Stage 4 produced three more of exactly the same shape, and the worst of them is
+worth reading in full**, because it is the clearest example this project has
+produced of why a test that has never run proves nothing:
+
+- **A revoked teacher could give themselves their access back.** Somebody whose
+  access a staff member had deliberately ended could type `/start`, then their
+  recruitment email, and be fully signed in again — because signing in clears the
+  "access ended" mark as a side effect, which is correct for a teacher who bought
+  a new phone and catastrophic for one who was revoked on purpose. The gate had
+  been closed on the route through the menu buttons and not on the route through
+  `/start`. Nothing anywhere reported it, and it survived three tasks of review.
+  Found the moment a test was written for it.
+- **A reopened case kept the date it was closed**, so a case somebody was actively
+  working carried an end date from its previous life. Harmless when it was
+  written, and not harmless once the retention decision above was made: the job
+  measures its seven days from exactly that column, so a reopened case would have
+  been deleted a week later, silently.
+- **The vocabulary of case statuses existed in three places**, two of which
+  defined the same list separately and were reached by different code. They
+  agreed by luck.
+
+Every one was found by running something or by needing to use it. None would have
+been found by reading.
 
 **What is still uncovered:** delivery to Telegram itself, and the deploy path.
 Both are covered by the smoke test in the runbook rather than by the suite.
@@ -335,6 +449,35 @@ entries… The team will advise…"* — correct in substance, but odd coming fr
 bot talking **to** that candidate. Left as-is per your approval. One-line fix
 whenever you want it.
 
+## ✅ B11. A teacher's region was never correctable — **new, and closed by Stage 4**
+
+Recorded because the lesson is B4's, arriving from a different direction.
+
+Region decides which staff see a teacher's case. It was read once, when the
+teacher signed in, and copied into their record — and **a teacher who has signed
+in never signs in again**. So when recruitment corrected a region on the
+spreadsheet, that correction reached nobody who was already using the bot, for
+ever. There was also no command to correct one, so a teacher who moved province
+had no route at all: their emergencies kept routing to their old region's staff.
+
+Everything about it looked like a working feature. The column existed, it was
+populated, the spreadsheet was authoritative, and edits to it were applied
+nightly. Nothing failed. Nothing was logged. The only symptom was staff in one
+province occasionally seeing a case from another, which reads as somebody having
+moved rather than as a fault.
+
+Closed three ways in Stage 4: the roster is now read live rather than from the
+sign-in copy, so a spreadsheet correction reaches everybody on the next sync;
+`/region` lets a manager set one directly, with the spreadsheet left alone; and
+the bot asks a teacher, rarely, whether the region it holds is still right —
+their "no" raises a flag a manager sees on `/regions`, and never changes the
+record itself, because a menu of regions is a menu of whose emergency this
+becomes and a wrong tap sends it to the wrong province.
+
+**The lesson, which is B4's:** a column with a writer and no reader looks exactly
+like a working feature, and so does a column read in one place that nothing ever
+updates.
+
 ## B10. No per-chat rate limiting — 🟢 Low
 
 Beyond the 5-attempt verification cap, a single chat can send unlimited messages,
@@ -350,23 +493,40 @@ own flood limits provide some protection.
 list of things Google Sheets could not do. B1, B2 and B8 are gone; B6 is nearly
 gone; B4 has been rewritten into something more useful than it was.
 
-**What it did not close, it made sharper.** Three items are now *more* pressing
-than before, and all three are yours rather than IT's:
+**Two of the three sharp items are now answered.** How long records are kept
+(A10) was decided on 29 July, in time — before the bot has served anybody — and
+answering it also closed how a removal request is honoured (A11), which turned
+out to rest on a misreading of our own database rather than on a real
+obstruction.
 
-1. **How long records are kept (A10).** Previously half a performance argument.
-   The performance half is gone, so what remains is a promise made to every
-   teacher in the privacy notice, with nothing technical left to hide behind.
-   Stage 3 is what starts filling the table.
-2. **How a removal request is honoured (A11).** The database now actively refuses
-   to delete a teacher who has ever opened a case. That is a guarantee we added
-   deliberately, and it blocks a promise we also made deliberately.
-3. **Whether to reconsider sign-in (B7).** Unchanged in substance, but this is
-   the cheapest it will ever be to change. It expires at launch.
+**One is still open, and it expires by itself:**
+
+- **Whether to reconsider sign-in (B7).** Unchanged in substance. Identity is
+  still "types a string that appears on the roster", so anyone holding a
+  teacher's recruitment email can sign in as them. It is detected and reported
+  rather than blocked, deliberately. This is the cheapest it will ever be to
+  change, and **it expires at launch** — not because it becomes wrong, but
+  because after launch it is a change to how every teacher has already signed in,
+  plus a migration, plus telling all of them.
+
+**Two things follow from the retention decision and neither is optional**, both
+in Stage 5: the monthly content review is gone and needs replacing if you want
+that signal (A10), and every teacher has to be asked to read the privacy notice
+again before any period is published.
 
 **Still needed, unchanged from the last version:** a real support contact — the
 bot now *refuses to start* without one, so it can no longer be forgotten — the
-teacher roster, and at least two named administrators so one person leaving
-cannot lock everyone out (**A1**, **A4**).
+teacher roster, and at least two named System members so one person leaving
+cannot lock everyone out (**A1**, **A4**). The commands to manage staff exist as
+of Stage 4; the very first System member is still one line of SQL, on purpose,
+and `RUNBOOK.md` §2.5 has it.
+
+**One thing for whoever owns the spreadsheet.** The bot reads **two tabs** — the
+roster and the FAQ — and nothing else. If the original document is being reused,
+the other tabs are inert. **Delete `ADMINS` in particular:** it used to grant
+administrator rights to whoever was typed into it, and it now does nothing at
+all. A tab that looks like it works and does not is worse than no tab, and this
+one looks like the place you would go to give somebody access.
 
 **And one that is only a launch blocker because it has never been done:** prove
 the backup restores (**A5**). The scripts are written and have never been run

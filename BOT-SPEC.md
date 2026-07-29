@@ -1,10 +1,30 @@
 # MoPSE Teacher Support Bot — System Specification
 
-**Version:** 1.2 · **Date:** 2026-07-27 · **Status:** Pre-launch — reflects the executed UPGRADE-PLAN v1.1 (Phases 0–6.1)
+**Version:** 1.3 · **Date:** 2026-07-29 · **Status:** Pre-launch — updated after the staff stage of the rebuild
 
 This document describes what the bot is, how it is built, and how every layer
 behaves. It superseded `bot_spec.md`, which described an architecture that was
 never built; that file has since been deleted (see §16).
+
+> ### Read this before trusting any section
+>
+> **This document is being converted stage by stage, and parts of it still
+> describe the Google Apps Script system that is being replaced.** The rebuilt
+> sections are the ones that have been rewritten as each stage landed —
+> §1, §5, §6, §7.1, §8.1.1, §10, §13 and §16 are current as of 29 July 2026.
+>
+> **§2 (platform), §4.1–§4.5 (the spreadsheet tabs), §11 (triggers) and §12
+> still describe Apps Script**: script locks, `CacheService`, `PropertiesService`,
+> spreadsheet triggers and an eight-tab data model. None of that exists in what
+> runs now — it is TypeScript on a rented server against PostgreSQL, with two
+> spreadsheet tabs read and never written. Those sections are kept because the
+> reasoning in them is still the reasoning behind the replacement, and they are
+> flagged here rather than half-corrected, because a document that is wrong in
+> places nobody has marked is worse than one that says where it is wrong.
+>
+> **Where a rewritten section and an old one disagree, the rewritten one is
+> right.** The clearest case is permissions: §4.5 describes an `ADMINS`
+> spreadsheet tab that **no longer grants anything at all** — see §6.
 
 ---
 
@@ -21,17 +41,21 @@ Uzbekistan (MoPSE) for the September 2026 intake.
    across the whole bank; see §9.0, which is the constraint most likely to
    surprise a stakeholder.
 2. **Opens and tracks support cases** for teachers whose identity is confirmed
-   against an official roster.
-3. **Routes document submissions** to the correct Google Form and files a case
-   when one is submitted.
+   against an official roster, and gives staff the commands to work them.
+3. **Will route document submissions** to the correct Google Form — planned, not
+   built; see §10, where the direction has been settled and reversed.
 
 **Explicit non-goals:**
 
-- Not a chat relay to human staff — admins act through commands, not live chat.
-- Not a file store. The bot never accepts uploads in chat; all documents go
-  through Google Forms.
+- Not a chat relay to human staff — staff act through commands, not live chat.
+- **Not a file store.** The bot never accepts uploads in chat; all documents go
+  through Google Forms. This is now a settled decision rather than an
+  interim state — see §10, which reverses a planned move to Telegram upload.
 - Not multilingual at launch. English only; the language button exists and says so.
-- Not a group-chat bot. Private chats only; it leaves any group it is added to.
+- **Not a group-chat bot.** Private chats only; it leaves any group it is added
+  to, except the operations chat. **Built in this stage** — this line described
+  the control for two versions of this document while nothing implemented it
+  (§8.1.1, §13).
 
 ---
 
@@ -145,7 +169,19 @@ of who a chat belongs to.
 Seeded by hand or CSV import from official recruitment records. **A teacher who
 is not in ROSTER cannot verify, and therefore cannot open a case.**
 
-### 4.5 `ADMINS`
+### 4.5 `ADMINS` — **this tab no longer grants anything**
+
+> **Nothing below is live.** Permissions are in the `staff` table on the server
+> and the bot reads two spreadsheet tabs — the roster and the FAQ. **Typing a
+> Telegram id into this tab gives that person no access whatsoever**, which is
+> the single most important correction in this document: it was the route by
+> which anybody who could edit the spreadsheet could make themselves a full
+> administrator. See §6, and `RUNBOOK.md` §1.3, which says to delete the tab if
+> the original document is being reused. A tab that looks like it works and does
+> not is worse than no tab, and this is the one somebody will reach for.
+>
+> Kept below because the *shape* of it is what §6 replaced, and the reasoning for
+> each column is the reasoning for its replacement.
 
 `TELEGRAM_ID` · `IS_SYSTEM_ADMIN` · `TIER` · `QUEUE` · `NAME` · `ACTIVE` ·
 `ADDED_BY` · `ADDED_AT` · `REGIONS` · `ROLE` — see §6.
@@ -167,23 +203,36 @@ writes keep working. Semantics of the appended columns:
 
 | Key | Effect |
 |---|---|
-| `RETENTION_DAYS` | Archive age threshold. **Archiving is a no-op until set** |
-| `OVERDUE_DAYS` | Enables the overdue half of `/urgent` **and** the daily overdue digest (§7.1.2) |
-| `MAINTENANCE_MODE` | When `TRUE`, pauses Contact Support, Urgent Case and Submit Documents. FAQ browsing **and Check My Case** stay live — pausing submissions is not the same as locking teachers out of their own case status |
+| `MAINTENANCE_MODE` | When truthy, pauses Contact Support, Urgent Case and Submit Documents. FAQ browsing **and Check My Case** stay live — pausing submissions is not the same as locking teachers out of their own case status |
+| `OVERDUE_DAYS` | Enables the overdue half of `/urgent` **and** the daily digest (§7.1.2). **Unset, `/urgent` says the feature is switched off** rather than showing an empty list |
+| `CASE_RETENTION_DAYS` | Days a resolved ordinary case is kept (§7.1.3) |
+| `URGENT_CASE_RETENTION_DAYS` | Days a resolved Urgent or Critical case is kept |
+| `MESSAGE_RETENTION_DAYS` | Days the interaction log is kept |
+
+`RETENTION_DAYS` is replaced by the three keys above, because one number cannot
+carry three different promises. **Unset means delete nothing**, for every one of
+them, and for the same reason `OVERDUE_DAYS` reports itself as switched off: a job
+that invents a retention period deletes real records against a number nobody
+chose, and there is no undo.
 
 Settings are read through a **60-second cache**, because the maintenance gate is
-checked on every case-feature tap. `/maintenance` invalidates it immediately, but a
-value changed **by hand in the sheet** takes up to a minute to take effect.
+checked on every case-feature tap. Every write clears it, so `/maintenance` takes
+effect on the next message; a value changed by hand in the database takes up to a
+minute.
 
 ### 4.7 `MESSAGES` and `ANNOUNCEMENTS`
 
 `MESSAGES`: `TIMESTAMP` · `CHAT_ID` · `ACTION` · `DETAIL` — the interaction log.
 `ANNOUNCEMENTS`: `ID` · `CONTENT` · `AUDIENCE` · `STATUS` · `CREATED_BY` · `CREATED_AT`.
 
-### 4.8 Archive tabs
+### 4.8 Archive tabs — **gone**
 
-`CASES_ARCHIVE` and `MESSAGES_ARCHIVE` are created on first use, with headers
-copied from the source tab.
+`CASES_ARCHIVE` and `MESSAGES_ARCHIVE` do not exist. They were a Google Sheets
+artefact: rows were moved out of the live tab to keep it small enough to read
+quickly, which is not a problem an indexed table has.
+
+**Old rows are now deleted rather than moved** (§7.1.3), and "archive" is the
+wrong word for what happens throughout this document.
 
 ---
 
@@ -238,17 +287,67 @@ sync deactivates roster rows, it never deletes them, so sign-in reads
 which every administrator will assume revokes access, would do nothing at all. A
 row restored by accident restores access silently within ten minutes.
 
+> **Corrected.** The paragraph above was true only of *signing in*, and this
+> document, `RUNBOOK.md` §4.3 and `CONCERNS` A2 all read it as being true of
+> access generally. It was not. A teacher who has signed in **never signs in
+> again**, and nothing else read that column — so deactivating or deleting a
+> roster row changed nothing at all for anybody already using the bot,
+> indefinitely, while three documents said otherwise.
+
+**Access is now re-checked on every gated action, and there are two ways to lose
+it.** One function answers both questions, because before it existed there were
+two answers and they disagreed:
+
+- **`/revoke <chat id>`** writes a revoked state with a name and a time against
+  it, which a spreadsheet edit cannot record. **`/restore <chat id>`** is its
+  counterpart at the same rank (§6.5).
+- **The roster row** being deactivated or removed, which is the route an operator
+  will actually use, and which now takes effect on the teacher's next message.
+
+**A missing roster row counts as revoked**, and that risk is accepted
+deliberately: the sync refuses any run that would deactivate more than a fifth of
+active rows, so a cleared or filtered tab cannot cut everybody off, and a single
+row removed by mistake affects one teacher, is visible in the sync history, and is
+undone by putting the row back.
+
+> **A revoked teacher cannot sign in again to undo it**, and this is load-bearing
+> rather than incidental. Binding a chat to a roster identity clears the revoked
+> mark as a side effect — which is correct for a teacher who changed phone, and
+> would otherwise make `/revoke` reversible by anybody it was used on. So the
+> sign-in prompt is not offered to a revoked chat, and the binding itself refuses
+> one. `/restore` is that door being opened by somebody with the authority to open
+> it.
+>
+> **The two causes have one symptom, and only one has an undo in the bot.** A
+> teacher whose roster row went is *not* revoked — their record still says
+> verified — so `/restore` cannot help them and recruitment has to put the row
+> back. `/restore` reads the roster before it reports anything and names which of
+> the two situations it found, because a command that reports success while the
+> teacher stays locked out is worse than having no command.
+
 ### 5.2 Privacy
 
 **A privacy notice is shown before any data is collected.** `PRIVACY_NOTICE_TEXT`
 (Config.gs — flagged for manual review before go-live) is embedded in the
 verification prompt, and replying with an identifier is treated as
 acknowledgement. It is retrievable at any time with `/privacy`, which is
-teacher-facing and handled in `Webhook.gs` ahead of the admin dispatcher (same
-pattern as `/help`). The notice names the data held, its use, its audience, and
-the contact route for access/removal requests. `RETENTION_DAYS` remains unset
-until the head of project decides it — until then data is retained indefinitely,
-which the notice wording must not contradict.
+teacher-facing and handled ahead of the staff dispatcher (same pattern as
+`/help`). The notice names the data held, its use, its audience, and the contact
+route for access/removal requests.
+
+**The retention periods are decided (§7.1.3) and the notice does not yet state
+them.** That is deliberate and the ordering matters: the notice currently tells
+every teacher who has signed in that no period is set, and that *when one is set
+they will be asked to read the notice again*. Publishing the periods without that
+re-consent would break a commitment made in the one document teachers were
+required to read. So the wording, the version bump, the re-consent flow and the
+deletion job all ship in one release — any three without the fourth is a false
+statement in one direction or the other.
+
+**When it is rewritten, the notice must be generated from the settings rather
+than have the numbers typed into its text.** A settings row and a hard-coded
+sentence can disagree; a sentence generated from the row cannot, and it cannot
+disagree silently the next time somebody edits a period.
 
 The identifier is an email address. It is written **once**, to the teacher's
 USERS row. Failed attempts log only a redacted hint (`j***@school.uz`);
@@ -268,164 +367,336 @@ where the message body is sensitive:
 Without this the redaction above was decorative: the raw email was logged in full
 by the webhook a few lines before `attemptVerify_` redacted it, and the free-text
 case description that §4.2 keeps out of Check My Case was logged in full too.
-MESSAGES is *archived*, not deleted, so anything written there persists.
+
+**One rule was added for staff, and it is on the prefix rather than on a list.**
+Any message beginning with `/` is logged as its command word and its first
+argument only; the rest is dropped. Staff have no conversation state, so the table
+above does not apply to them, and `/note VISA-2026-00001 <the internal note>`
+would otherwise be written almost verbatim into a table with a different retention
+story from the one that text belongs to. A *list* of commands to redact is a thing
+somebody forgets to extend; the prefix covers a command added later on the day it
+is written, and leaves `/start`, `/privacy` and `/help` — which carry no arguments
+— logged exactly as they were.
+
+**This log is deleted, not archived**, on the schedule in §7.1.3. Anything written
+there lasts three days.
 
 FAQ queries and everything else are logged verbatim — they carry no identity.
 
 ---
 
-## 6. Identity model — administrators
+## 6. Identity model — staff
 
 Completely separate from teacher verification. The two gates must never be
-merged: a verified teacher has no admin rights, and an admin's tier says nothing
-about whether they are a verified teacher.
+merged: a verified teacher has no staff rights, and a staff member's rank says
+nothing about whether they are a verified teacher.
+
+**Permissions live in the `staff` table on the server**, and there is no other
+route to them. In the Apps Script version they lived in a spreadsheet tab, so
+anybody who could edit the spreadsheet could make themselves a full
+administrator. That tab is now inert; if the original document is reused it
+should be deleted (`RUNBOOK.md` §1.3).
 
 ### 6.1 The dimensions
 
-**Authorization is decided by an ordered ROLE and a capability table** (`can_`,
-`CAPABILITIES_` in AdminCommands.gs). The legacy Tier remains as a migration
-fallback: `roleForAdmin_` uses `ROLE` when set, otherwise derives one from the
-old Tier/IS_SYSTEM_ADMIN pair, so both models work simultaneously and rows can
-be migrated at leisure.
+**Authorization is decided by an ordered rank and a capability table**
+(`src/staff/roles.ts`). One table is read both by the gates and by `/whoami`, so
+what the bot reports can never disagree with what it enforces — the Apps Script
+version drifted precisely because those were two lists.
 
 | Dimension | Values | Meaning |
 |---|---|---|
-| `ROLE` | `ReadOnly` < `Agent` < `Manager` < `SystemAdmin` | What class of action is permitted (capability table below) |
-| `QUEUE` | `Visa`, `Contract`, `Travel`, `Accommodation`, `Recruitment`, `Technical`, `All`, `None` | Which cases are visible (one axis of two — see §6.2) |
-| `REGIONS` | comma-separated, `All`, or blank (= all) | Which teachers' cases are visible (the other axis) |
-| `ACTIVE` | blank/`TRUE` vs `FALSE` | A deactivated admin is not an admin; history is preserved |
-| `IS_SYSTEM_ADMIN` | truthy cell (`TRUE`/`YES`/`Y`/`1`/checkbox) | Legacy fallback → `SystemAdmin` role when `ROLE` is blank |
-| `TIER` | `Program`, `Finance`, `Regional`, `None` | Legacy fallback: `Program`→`Manager`, `Regional`/`Finance`→`Agent`, else `ReadOnly` |
+| `role` | `Observer` < `Support` < `Lead` < `Program` < `System` | What class of action is permitted (table below) |
+| `queue` | `Visa`, `Travel`, `Contract`, `Accommodation`, `All`, `None` | Which kinds of case are visible (one axis of two — §6.2) |
+| `regions` | a list; **empty means every region**, never none | Which teachers' cases are visible (the other axis) |
+| `active` | true / false | A deactivated member is not staff; the row stays so history is readable |
 
-Capability table (single source of truth — `/whoami` reads it too, so what it
-reports can never disagree with what the gates enforce):
+| Capability | Observer | Support | Lead | Program | System |
+|---|---|---|---|---|---|
+| `case.view` — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `case.update` — `/reply` `/await` `/close` `/reopen` `/note` `/due` `/snooze` | | ✅ | ✅ | ✅ | ✅ |
+| `case.mark` — `/mark` | | ✅ | ✅ | ✅ | ✅ |
+| `case.assign` — `/assign` | | | ✅ | ✅ | ✅ |
+| `urgent.issue` — `/generate_urgent_code` | | ✅ | ✅ | ✅ | ✅ |
+| `teacher.region` — `/region` `/regions` | | | ✅ | ✅ | ✅ |
+| `teacher.revoke` — `/revoke` `/restore` | | | | ✅ | ✅ |
+| `staff.manage` — `/staff` `/staff_add` `/staff_role` `/staff_remove` | | | | | ✅ |
+| `maintenance` — `/maintenance` | | | | | ✅ |
+| `announce`, `export` | | | | ✅ | ✅ |
 
-| Capability | ReadOnly | Agent | Manager | SystemAdmin |
-|---|---|---|---|---|
-| `case.view` (`/cases` `/urgent` `/case` `/search` `/mycases`) | ✅ | ✅ | ✅ | ✅ |
-| `case.update` (`/reply` `/close` `/note` `/reopen`) | | ✅ | ✅ | ✅ |
-| `case.assign` (`/assign`) | | | ✅ | ✅ |
-| `urgent.issue` (`/generate_urgent_code`) | | ✅ | ✅ | ✅ |
-| `announce` / `export` | | | ✅ | ✅ |
-| `admin.manage` (`/add_admin` `/set_role` `/remove_admin` `/admins`) | | | | ✅ |
-| `maintenance` | | | | ✅ |
+A `System` member bypasses every capability, queue and region check.
 
-### 6.2 Case visibility — queue AND region
+`announce` and `export` are in the table with no command behind them, so the
+stage that builds them adds a command rather than a permission model, and
+`/whoami` does not have to change twice. `/whoami` lists such a capability as
+"no command for this yet" rather than hiding it — hiding it would make the bot
+describe a smaller permission model than the one in force.
 
-`adminCanSeeCase_()` is the single visibility rule used by every case-facing
-command and by new-case notification: a System Admin sees everything; anyone
-else must match the case's queue (`queueForCategory_` → exact queue or `All`)
-**and** cover the teacher's region (`REGIONS` blank/`All`, or containing the
-region from the teacher's USERS row). Sentinel `UNRESOLVED:` cases have no
-region and are never hidden on that axis. The teacher-region lookup is memoized
-per execution (`caseRegionMap_`) — a correctness requirement against the
-6-minute limit, not an optimisation.
+**Two ranks are worth explaining.**
 
-Contact Support asks the teacher what their case is about (Visa / Travel /
-Contract / Accommodation / Something else), so cases now file under real
-categories and queue-scoped admins see real traffic. The seven newer FAQ topics
-are mapped onto the closest existing queue in `queueForCategory_` — deliberately
-not given queues of their own. Urgent Case skips the picker and files generic
-(routes to `All`), which is the correct destination for an emergency.
+**`Observer` is the look-but-do-not-touch rank**, added on request for senior
+ministry staff, auditors, and new hires in their first week. It is not the Apps
+Script `ReadOnly` rank carried over: that was the "we do not know what this row
+is" bucket produced by a migration fallback, and it has nothing to hold here,
+because every staff row is created by a command that requires an explicit rank.
 
-### 6.3 Bootstrapping
+**The rank once called `Regional` is now `Lead`, and this is not cosmetic.** That
+rank had nothing to do with regions — region is, and always was, a separate
+setting on every row. A MoPSE "regional admin" is usually `Support` rank with a
+region set, which is to say a regional admin did not hold the rank called
+Regional, and the rank called Regional did not imply a region. One word meant two
+unrelated things, in a system where confusing the two is how the old bot ended up
+making everybody a full administrator.
 
-`/add_admin` requires an existing System Admin. **The first System Admin must be
-created by hand** in the ADMINS sheet — it cannot be bootstrapped through the bot.
-(Hand edits of ADMINS now alert every System Admin — §11, §13.)
+> **The teacher-facing phrase "Regional admin" is MoPSE's job title for a person
+> and is left exactly as it is**, in the bot's own words to teachers and in the
+> runbook. It was never the rank name, and disentangling the two is the entire
+> point of the rename. Do not "correct" it.
 
-### 6.4 Role assignment and lifecycle
+**One consequence of the observer rank, which is where it will go wrong if it
+goes wrong.** `case.view` is not the same question as "should this person be told
+when a case arrives". An observer paged about every new case is being paged about
+work they cannot do. New-case notification therefore filters on `case.update`,
+not on `case.view`.
 
-- `/add_admin <telegram_id> [tier] [queue] [true|false] [role] [name]` — System
-  Admin only. **Adds only**: an existing target is refused and pointed at
-  `/set_role`. (It used to upsert, and the defaulting fourth argument silently
-  stripped `IS_SYSTEM_ADMIN` from existing rows — including the caller's own.)
-  The target must be all digits. Provenance (`ADDED_BY`, `ADDED_AT`) is recorded.
-- `/set_role <telegram_id> <tier> <queue> [role]` — System Admin only. Writes
-  tier/queue (still needed by the fallback) and optionally the new `ROLE`. It
-  can never change `IS_SYSTEM_ADMIN`. Run against a deactivated admin it also
-  **reactivates** them — the one obvious way back from `/remove_admin`. The
-  target is notified of the change.
-- `/remove_admin <telegram_id>` — System Admin only. Sets `ACTIVE=FALSE`; never
-  deletes the row, so the identity behind historical log entries survives.
-  Refuses self-deactivation and refuses to deactivate the **last active System
-  Admin**. The target is notified.
-- `/admins` — System Admin only. Lists every row with flags (`SYSTEM`,
-  `DEACTIVATED`), provenance, and the active-System-Admin count.
+### 6.2 Case visibility — queue AND region, as one SQL predicate
 
-**System Admin can be granted two ways:** by editing the ADMINS sheet directly
-(now noisy by design), or by passing `true` as the optional **fourth** argument
-to `/add_admin` — **new rows only**. Changing the flag on an existing row is a
-deliberate sheet edit; no command does it, so it can never happen by accident.
-There is likewise no command to *revoke* System Admin.
+`visibleToStaff` (`src/staff/visibility.ts`) is the single visibility rule, and
+it is **a SQL fragment applied to every staff-facing query**, never a filter over
+rows already fetched. A System member sees everything; anyone else must match the
+case's queue **and** cover the teacher's region.
+
+Evaluating it in SQL is what deletes the entire apparatus the Apps Script version
+needed: `caseRegionMap_`'s memoisation, whose own comment called it *"not an
+optimisation — it is a correctness requirement for the execution limit"*, existed
+only because there was no join. Filtering after fetching also meant a twenty-row
+limit could not be pushed into the query — every case had to be read in order to
+display twenty.
+
+**Two properties are load-bearing and neither is obvious:**
+
+- **An unknown region hides a case from nobody.** A teacher whose region is
+  recorded nowhere would otherwise file cases no region-scoped staff member can
+  see. In SQL that is an explicit `IS NULL` branch, with a test.
+- **A staff member with no regions covers all of them.** An empty list means every
+  region and never means none, so that adding the column could not narrow
+  anybody's existing access.
+
+The region a case is judged by is resolved live — a staff correction if one
+exists, otherwise the recruitment spreadsheet read **through a join** rather than
+from the copy taken when the teacher signed in. See §5.2.
+
+Contact Support asks the teacher what their case is about, so cases file under
+real categories and queue-scoped staff see real traffic. Urgent Case skips the
+picker and files generic, routing to `All`, which is the correct destination for
+an emergency.
+
+> The seven FAQ-topic mappings the Apps Script version carried in
+> `queueForCategory_` are **deleted as structurally impossible**, not dropped. A
+> case's category is now one of six values because nothing else can create one; in
+> Apps Script a case could be filed under an FAQ topic *label*, and here it cannot.
+
+### 6.3 Bootstrapping — one hand-written row, deliberately
+
+Every staff command requires `System` rank, so **the first System row cannot come
+from inside the bot.** It is a documented `INSERT` run over the server connection
+(`RUNBOOK.md` §2.5), in the same shape as the settings insert that document
+already carries.
+
+There is no bootstrap command and no bootstrap environment variable, because
+every alternative is worse. An environment variable is a permanent back door
+granting System access to whoever can edit a file — and moving permissions out of
+a file anybody could edit is the whole point of §13's permission-boundary row. A
+"first caller becomes System" rule is a race with the public internet. The Apps
+Script answer was a hand edit of a spreadsheet tab; the equivalent here needs
+server access rather than document access, and that is the improvement.
+
+**Consequence:** `/staff_remove` refuses to deactivate the last active System
+member and `/staff_role` refuses to demote them, because the recovery from either
+is another trip to the database. Two named System members is a launch-checklist
+item for the same reason.
+
+### 6.4 Staff lifecycle
+
+Renamed from `/admins`, `/add_admin`, `/set_role`, `/remove_admin`. The word
+"admin" does not appear in the data model any more — the table is `staff`, the
+rank is a staff role, the column is `staff.telegram_id` — and keeping the old
+names would mean the documents and the interface saying different words for one
+concept. The system has never launched and nobody has been trained on the old
+names, so the rename costs nothing now and could not be made cheaply later.
+
+- **`/staff`** — everybody, with rank, queue and regions. Deactivated members are
+  listed separately rather than hidden: `/assign` tells people to check an id
+  here, and an id absent because a row is deactivated looks exactly like one that
+  was mistyped.
+- **`/staff_add <chat id> <rank> <queue> [regions]`** — **adds only.** An existing
+  target is refused and pointed at `/staff_role`. `/add_admin` used to upsert, and
+  its defaulting fourth argument silently stripped the System flag from whatever
+  row it landed on, including the caller's own.
+  - **Rank and queue are required, never defaulted.** The schema defaults both so
+    that adding those columns could not break existing rows; a command inheriting
+    those defaults grants Support over every queue to somebody the caller may have
+    meant to restrict, and nothing in what they typed would show it.
+  - **Regions are validated against regions the system has actually seen**, and
+    written back in the spelling the roster uses. A typo would give a staff member
+    a region no teacher is in — a silently empty queue, which looks like a quiet
+    week. Omitting regions means every region, and the confirmation says so.
+- **`/staff_role <chat id> <rank>`** — changes a rank, and **reactivates** a
+  deactivated member, which is the one obvious way back from `/staff_remove`. It
+  refuses to demote the last active System member (§6.3). The target is notified.
+- **`/staff_remove <chat id>`** — deactivates; **never deletes**, because case
+  notes and audit rows name these people. Refuses self-deactivation. **Reports the
+  open cases the person still owns and leaves them assigned** — deactivated staff
+  are never deleted, so those cases stay in their name and appear in nobody's
+  `/mycases`, and silently unassigning them would destroy the only record of who
+  was working them. The target is notified.
+
+Every one of these writes an audit row in the same transaction as the change
+(§13).
 
 ### 6.5 Command reference
 
-All nineteen commands, their syntax, and what each requires. **Recognition is by
-name, not by sender**: `routeAdminCommand_` matches the command word first and
-then rejects a non-admin with "You are not registered as an admin." Anything not
-in this list (a typo like `/foo`) falls through to ordinary text handling and gets
-the usual topic-picker fallback.
+**Recognition happens inside the message pipeline**, not in a separate command
+handler, so every command inherits the update claim, the chat lock and the
+interaction log. A handler registered outside it would mean a redelivered
+`/close` closes a case twice, and two staff acting at once are not serialised at
+all.
 
-`/help` and `/privacy` are deliberately **not** in this list — both are
-teacher-facing and handled in `Webhook.gs` before the admin dispatcher, so a
-teacher typing them gets an answer rather than an admin rejection. Admins get
-the teacher help plus this command list appended.
+**Two rules govern the dispatcher, and both depart from the Apps Script
+behaviour this section used to describe.**
+
+A command word this build does not have **is not a command**: it falls through to
+ordinary text handling, which is what lets a teacher describing a broken boiler
+start a sentence with a slash.
+
+**A sender with no active staff row is told nothing.** The denial is logged and
+the message *still* falls through. `routeAdminCommand_` answered *"You are not
+registered as an admin"* and consumed the message, which confirmed to any
+stranger that the command exists — precisely what §13's privilege-probing control
+is meant to make expensive — and cost a teacher part-way through describing a case
+everything they had typed. A staff member whose *rank* is too low is a different
+person and is answered plainly, naming the rank required: they already know the
+command exists, and silence would send a Lead's `/maintenance` to the teacher
+topic picker.
+
+`/help` and `/privacy` are teacher-facing and are matched before the staff
+dispatcher, so a teacher typing them gets an answer. Staff get the teacher help
+with their own command list appended, generated from the capability table.
+
+**Seventeen commands.** `BOT-SPEC.md` previously listed nineteen; `/announce` and
+`/export` are deferred (§16), and the rest are the same work under the names in
+§6.4 plus the six added in this stage.
 
 | Command | Syntax | Requires |
 |---|---|---|
-| `/whoami` | `/whoami` | Any active ADMINS row — reports role, fields, and the exact capability list |
-| `/cases` | `/cases` · `/cases all` · `/cases unassigned` · `/cases <status>` | `case.view`; results filtered by queue + region |
-| `/mycases` | `/mycases` | `case.view`; open cases assigned to you |
-| `/urgent` | `/urgent` | `case.view`; results filtered by queue + region |
-| `/case` | `/case <reference>` | Visibility of that case (queue + region) — shows `LAST_ACTOR` |
-| `/reply` | `/reply <reference> <message>` | `case.update` + visibility |
-| `/close` | `/close <reference> [reason]` | `case.update` + visibility |
-| `/reopen` | `/reopen <reference>` | `case.update` + visibility |
-| `/assign` | `/assign <reference> <telegram_id>` | `case.assign` + visibility; assignee must be an active admin who can also see the case |
-| `/note` | `/note <reference> <note>` | `case.update` + visibility |
-| `/search` | `/search <term>` | `case.view`; results filtered by queue + region |
-| `/export` | `/export <reason>` | **`export` capability** (Manager+). Reason ≥10 chars, recorded; other System Admins notified |
-| `/announce` | `/announce <ALL\|region> <message>` → `/announce confirm` \| `cancel` | **`announce` capability** (Manager+). Two-step: draft + preview first, nothing sends without `confirm` |
-| `/generate_urgent_code` | `/generate_urgent_code` | **`urgent.issue` capability** (Agent+) |
-| `/add_admin` | `/add_admin <telegram_id> [tier] [queue] [true\|false] [role] [name]` | **`admin.manage`** (System Admin). New rows only |
-| `/set_role` | `/set_role <telegram_id> <tier> <queue> [role]` | **`admin.manage`**. Also reactivates a deactivated target |
-| `/remove_admin` | `/remove_admin <telegram_id>` | **`admin.manage`**. Deactivates, never deletes |
-| `/admins` | `/admins` | **`admin.manage`** |
-| `/maintenance` | `/maintenance on\|off` | **`maintenance`** (System Admin) |
+| `/whoami` | `/whoami` | Any active staff row — reports rank, queue, regions and the exact capability list |
+| `/cases` | `/cases` · `/cases unassigned` · `/cases <status>` | `case.view` |
+| `/mycases` | `/mycases` | `case.view` — open cases you own |
+| `/urgent` | `/urgent` | `case.view` |
+| `/case` | `/case <reference>` | `case.view` + visibility of that case |
+| `/search` | `/search <text>` | `case.view` — matches reference or the teacher's words, including closed cases |
+| `/reply` | `/reply <ref> <message>` | `case.update` + visibility → **Under review** |
+| `/await` | `/await <ref> <what is needed>` | `case.update` + visibility → **Action required** |
+| `/close` | `/close <ref> <message>` · `/close <ref> unresolved <reason>` | `case.update` + visibility → **Completed** / **Closed** |
+| `/reopen` | `/reopen <ref>` | `case.update` + visibility → **Under review** |
+| `/note` | `/note <ref> <text>` | `case.update` + visibility — internal, no teacher ever sees it |
+| `/mark` | `/mark <ref> Normal\|Urgent\|Critical` | `case.mark` + visibility |
+| `/due` | `/due <ref> <date>` · `/due <ref> clear` | `case.update` + visibility |
+| `/snooze` | `/snooze <ref> <days>` · `/snooze <ref> clear` | `case.update` + visibility |
+| `/assign` | `/assign <ref> <chat id>` | `case.assign` + visibility; the assignee must be active staff who can **also** see the case |
+| `/region` | `/region <chat id> <region>` · `/region <chat id> clear` | `teacher.region`, and coverage of **both** regions in the move |
+| `/regions` | `/regions` | `teacher.region` — teachers who reported a wrong region, in regions you hold |
+| `/revoke` | `/revoke <chat id>` | `teacher.revoke` |
+| `/restore` | `/restore <chat id>` | `teacher.revoke` — the same rank as `/revoke`, deliberately |
+| `/generate_urgent_code` | `/generate_urgent_code` | `urgent.issue` |
+| `/staff` `/staff_add` `/staff_role` `/staff_remove` | §6.4 | `staff.manage` |
+| `/maintenance` | `/maintenance on\|off` · `/maintenance` to ask | `maintenance` |
 
-A System Admin bypasses every capability, queue and region check.
+**The four words staff type, and what each writes.** Eight statuses exist; staff
+type four verbs and the system writes the rest. Which four is in the table above.
+
+> ### `Action required` means **the teacher** must act
+>
+> Not us. It is a **request to the teacher, never a note to ourselves**, and the
+> definition belongs here because the phrase reads both ways to anyone meeting it
+> cold — and the wrong reading routes work to the wrong person. A case sitting in
+> `Action required` is waiting on the *teacher*, so chasing the staff member about
+> it chases somebody who is correctly doing nothing.
+>
+> Whatever follows `/await` is written to the teacher's own case update, so it
+> reaches them rather than sitting in a column only staff read. A case marked
+> "you must act" with the instruction invisible is an instruction nobody follows.
+>
+> **A taxonomy of action types is agreed and not built** — send a document, attend
+> an appointment, confirm an address. Until it exists `/await` carries free text
+> and nothing pretends otherwise. Whoever builds it should find this decision
+> rather than inventing a second one.
+
+**Why `Closed` and `Completed` are different words.** `Completed` is "we fixed
+it"; `Closed` is "we gave up" — a teacher who has left the country, stopped
+replying, or withdrawn the request. The difference is the single most useful thing
+a later reader can know and it disappears if both write the same status. The
+reason for an unresolved close is **required, free text, and goes to a case note
+rather than to the teacher**: it is written for whoever reads the case afterwards,
+and staff being candid is what makes it worth having. The teacher is told their
+case is closed and how to raise it again, which is neither silence nor a blunt
+internal judgement.
+
+The four nobody types: `New` at filing, `Received` when a notification actually
+reaches a staff member, `Escalated` by the urgent-code path, `Duplicate` by the
+24-hour duplicate rule.
 
 **Behaviour worth knowing:**
 
-- **Every authorization denial is logged** as `ADMIN_DENIED` with the command and
-  the caller's system/tier/queue shape — privilege probing leaves a trace (§13).
-- `/cases` with no argument lists **open cases only**. `/cases all` includes
-  closed and completed. `/cases unassigned` is the intake backlog — open cases
-  with no `OWNER`. A status argument may contain spaces (`/cases Under review`)
-  — the remainder is treated as one phrase, not split.
-- `/cases`, `/urgent` and `/search` cap output at **20 rows**; `/cases` says so and
-  points at `/search`.
-- `/urgent` shows escalated cases, plus overdue ones **only if** `OVERDUE_DAYS` is
-  set in SETTINGS. Until then it says so rather than inventing an SLA. The same
-  threshold drives the daily digest (§11).
-- `/assign` validates the assignee: not an active admin, or an admin who cannot
-  see the case, is refused. The assignee is notified in Telegram; a failed
-  notification is reported back to the assigner.
-- `/announce` is two-step: the first call stores a per-admin draft (Script
-  Properties, 1-hour expiry) and shows a preview with the recipient count;
-  only `/announce confirm` delivers. Drafting is itself logged
-  (`ANNOUNCEMENT_DRAFTED`) — an abandoned draft is exactly what an audit trail
-  should show.
-- `/note` appends to `DETAIL` (internal, timestamped, attributed). `/reply` writes
-  `PUBLIC_UPDATE` and messages the teacher. The two never cross.
-- `/export` writes a CSV **excluding `DETAIL`** — a per-case read via `/case` is
-  fine, a bulk file leaving the bot is a larger exposure surface. It requires a
-  recorded reason and notifies the other System Admins (§13).
-- `/reply`, `/close` and `/reopen` detect an `UNRESOLVED:` sentinel chat and report
-  "nothing was sent" rather than claiming a delivery that could not happen.
-- Every mutation reports a lock failure to the admin instead of vanishing
-  silently, and stamps `LAST_ACTOR`.
+- **Every authorization denial is logged** with the caller's shape, so working
+  through the command list from a stranger's account leaves a trace (§13).
+- **A staff command's arguments are never written to the interaction log.** Any
+  message beginning with `/` is logged as its command word and first argument
+  only. `/note VISA-2026-00001 <the internal note>` would otherwise be copied
+  almost verbatim into a table with a different retention story from the one it
+  belongs to. The rule is on the prefix rather than on a list of commands, so a
+  command added later is covered the day it is written.
+- **Every command that changes a case resolves it through the visibility rule
+  first.** The underlying write functions take a bare reference and do not check
+  who is asking, so this is what stops a Support member holding one queue from
+  closing a case in another by typing its reference.
+- `/cases` with no argument lists **open cases only**. `/cases unassigned` is the
+  intake backlog. A status argument may contain spaces (`/cases Under review`) —
+  the remainder is one phrase, not split, which is a filter the Apps Script
+  version made silently unmatchable.
+- Lists cap at **20 rows and always report the total**. Showing twenty and saying
+  nothing further made a backlog of two hundred look exactly like a backlog of
+  twenty, and which of those it is, is the only reason to look at a queue.
+- `/urgent` shows escalated cases and, separately, cases nobody has touched for
+  `OVERDUE_DAYS`. **When that setting is unset it says so** rather than showing an
+  empty list — "nothing is overdue" and "nobody has said what overdue means" are
+  the same empty list and opposite conclusions.
+- `/assign` validates the assignee twice: active staff, **and** able to see the
+  case. The second is the check a foreign key cannot make — a real staff member
+  holding the wrong queue takes the case off the unassigned list and puts it
+  somewhere nobody is looking, which is worse than leaving it unassigned.
+- `/case` shows the teacher's chat id, because that is the argument `/revoke` and
+  `/region` take, and where their region came from, because the fix for a wrong
+  region differs depending on the answer.
+- `/reply` to a teacher who can no longer use the bot **warns the sender and sends
+  it anyway**. Telegram will deliver it; the teacher simply cannot open the bot to
+  read the case or answer. Refusing would leave a staff member believing they had
+  answered somebody.
+- `/note` is an insert and never touches the case row. A note is not progress: if
+  it moved the case's timestamp, a case being discussed internally would look
+  freshly worked to the overdue query, which is exactly the case most worth
+  surfacing.
+- `/mark` is allowed on a finished case, unlike `/due` and `/snooze`. Importance
+  is a judgement somebody makes after reading, and the reader who realises
+  afterwards that a resolved case was an emergency is the person the column exists
+  for — retention reads the marker and never the status.
+- `/due` **refuses a slashed date rather than guessing.** `15/08` and `08/15` are
+  both in ordinary use and mean different days, and a date read the wrong way
+  round is not visibly wrong; it is a promise to a teacher on the wrong day. It
+  lands on the end of the day, in Tashkent.
+- Every case write is a **single statement**. The chat lock is the *sender's*, so
+  two staff acting on one case hold two different locks and any read-modify-write
+  would race.
 
 ### 6.6 Urgent code lifecycle — ✅ rebuilt
 
@@ -491,42 +762,135 @@ something has consumed a code outside the one write path.
 
 ### 7.1 Statuses
 
-| Status | Open? | Meaning |
-|---|---|---|
-| `New` | ✅ | Just created |
-| `Received` | ✅ | Acknowledged |
-| `Under review` | ✅ | Being worked |
-| `Action required` | ✅ | Waiting on the teacher |
-| `Escalated` | ✅ | Urgent |
-| `Completed` | ❌ | Resolved |
-| `Closed` | ❌ | Closed |
-| `Duplicate` | ❌ | Merged elsewhere |
+| Status | Open? | Written by | Meaning |
+|---|---|---|---|
+| `New` | ✅ | the system, at filing | Nobody has it yet |
+| `Received` | ✅ | the system, when notification reaches a staff member | Filed **and** seen — distinguishable from filed and seen by nobody |
+| `Under review` | ✅ | `/reply`, `/reopen` | Somebody has it and is working it |
+| `Action required` | ✅ | `/await` | **The teacher** must do something before it can move — §6.5 |
+| `Escalated` | ✅ | the urgent-code path | An emergency, while it is open |
+| `Completed` | ❌ | `/close <ref> <message>` | Resolved |
+| `Closed` | ❌ | `/close <ref> unresolved <reason>` | Shut without being resolved |
+| `Duplicate` | ❌ | the 24-hour duplicate rule | Merged into an existing case |
 
-Terminal statuses (`Completed`, `Closed`, `Duplicate`) are the only ones eligible
-for archiving.
+**Staff type four words; the system writes the other four.** Eight statuses
+offered to a staff member mid-conversation would be a vocabulary nobody asked
+for; four verbs that each write one status is the same information with nothing
+to learn.
+
+The enum is deliberately not trimmed to four. `Duplicate` is what the duplicate
+window writes, and `Escalated` is how an emergency stays visible while it is open
+— which is a different job from remembering that a *resolved* case was once an
+emergency. That memory is `importance` (§7.1.4), because a status moves and a
+marker does not.
+
+**Terminal statuses (`Completed`, `Closed`, `Duplicate`) stamp the closing date**,
+and that column is what retention measures from (§7.1.3). A case leaving a
+terminal status has it cleared again — a case that has not ended must not carry
+an end date, or reopening one would leave it scheduled for deletion.
 
 ### 7.1.1 New-case notification
 
-Every created case notifies the admins who could actually act on it —
-`notifyAdminsOfNewCase_` filters the ADMINS sheet through `adminCanSeeCase_`
-(active + queue + region), capped at 20 recipients. Urgent cases send 🚨, others
-🆕; the message carries the reference, category, timestamp and ready-to-tap
-`/case` and `/assign` lines, but **never the case DETAIL** — admins read that
-with `/case`, and a teacher's free text is not copied into N Telegram histories.
-Delivery is logged (`ADMINS_NOTIFIED_NEW` / `ADMINS_NOTIFIED_URGENT`, chat_id
-`SYSTEM`) with a delivered/total count; zero authorized recipients is logged as
-an error naming the category. Escalating an existing case via a duplicate urgent
-submission notifies too. Unresolved-submitter document cases notify every
-queue-matching admin — they are the cases only a human who knows they exist can
-triage.
+**Built, and it had never existed.** Until this stage a case was filed and
+*nothing anywhere was told* — not a staff member, not the operations chat, not
+the log.
+
+Every created case now notifies the staff who can actually act on it: active
+rows matching the case's queue and covering the teacher's region, resolved by the
+same rule every case query uses. The message carries the reference, the category,
+the time and ready-to-tap `/case` and `/assign` lines, but **never the case
+detail** — staff read that with `/case`, which leaves a record of who read it, and
+a teacher's free text is not copied into a dozen Telegram histories.
+
+**Recipients are filtered on `case.update`, not on `case.view`.** An observer who
+can read every case is not somebody who should be paged about work they cannot do
+(§6.1).
+
+**Zero authorised recipients raises a critical alert naming the category**, rather
+than writing a line to a log nobody opens, which is what the Apps Script version
+did. A case nobody can see is the exact failure this feature exists to prevent.
+
+A case that actually reaches somebody moves to `Received`, which gives that status
+a writer for the first time and makes "filed but seen by nobody" a queryable
+condition instead of an assumption.
+
+**Escalating an existing case notifies too.** That is the common path rather than
+an edge case: urgent cases have no topic picker, so they file under the same
+general category as every ordinary Contact Support case, and a teacher who opened
+one yesterday will always deduplicate against it.
 
 ### 7.1.2 Overdue push — the daily digest
 
-`runDailyDigest` (time-driven, 07:00) sends each active admin a personal ⏰
-worklist of the open cases *they can see* that have had no update for
-`OVERDUE_DAYS` days, with the unassigned count called out. No `OVERDUE_DAYS`
-row → the digest skips and logs. `OWNER` is load-bearing now: `/assign`
-validates and notifies, `/mycases` and `/cases unassigned` read it.
+**Not built. The queries are.**
+
+Two different ideas of "late" exist, they carry one name each, and merging them
+would make one list that answers neither question:
+
+| | Means | Reads |
+|---|---|---|
+| Stale | Open, and nobody has touched it for `OVERDUE_DAYS` | the case's last-touched time |
+| Past due | Somebody promised a date and missed it | the promised date, and any snooze |
+
+A case can be either, both or neither. `/urgent` asks the first by hand today;
+`/due` and `/snooze` write the second. What is missing is only the schedule, so
+the next stage adds a trigger rather than a trigger and a query.
+
+**Chasing must chase the right person.** A case sitting in `Action required` is
+waiting on the *teacher*, so a digest that nags the staff member about it nags
+somebody who is correctly doing nothing — and a digest people learn to ignore
+costs the cases that genuinely are their fault.
+
+### 7.1.3 Retention — cases are **deleted**, not archived
+
+**Decided 2026-07-29.** The word "archive" appears elsewhere in this document
+describing the Apps Script design, where old rows were moved to extra spreadsheet
+tabs to keep the live sheet small. There are no archive tabs and no archive job.
+Rows are **removed**.
+
+| What | Kept | Setting |
+|---|---|---|
+| A case that is **not resolved** | **Indefinitely** | — |
+| A resolved case, importance `Normal` | **7 days** after it closed | `CASE_RETENTION_DAYS` |
+| A resolved case, importance `Urgent` or `Critical` | **180 days** after it closed | `URGENT_CASE_RETENTION_DAYS` |
+| The interaction log | **3 days** | `MESSAGE_RETENTION_DAYS` |
+| The audit trail | **Never pruned** | — |
+
+**The job reads `importance` and never `status`.** A case marked `Critical` that
+gets resolved becomes `Completed`, and nothing about `Completed` remembers it was
+ever an emergency — a job reading status would delete exactly the cases most worth
+keeping, at the shortest interval, and nobody would notice for six months.
+
+**They are settings, not constants**, so MoPSE can change a period without a
+deployment. **Unset means delete nothing**, in every case: a job that invents a
+retention period deletes real records against a number nobody chose, and there is
+no undo. `RUNBOOK.md` §4.11 is the operator's version, including the rule that
+*lengthening* a period requires teachers to re-accept the privacy notice while
+shortening one does not.
+
+**Nothing is built yet.** The job, the settings and the rewritten notice ship
+together (§5.2).
+
+**Three consequences, stated so they are inherited rather than rediscovered.** A
+week after a case is closed its reference stops resolving, so a teacher
+telephoning about one gets "no such case" and there is nothing to reopen. Notes
+on a case are removed with it. And a three-day interaction log ends the monthly
+content review that ran thirty-day queries over it — deleted from the runbook
+rather than left to return empty results that read like good news.
+
+### 7.1.4 Importance — a permanent marker, separate from status
+
+`Normal` / `Urgent` / `Critical`, set by `/mark`, and the urgent-code path sets
+`Urgent` at creation.
+
+**It cannot be a status, and the reason is retention.** A status moves: an
+escalated case that gets resolved becomes `Completed`, and its history of having
+been an emergency disappears with it. A marker is set once and stays, which is
+what makes "six months for the urgent ones" possible at all.
+
+`Critical` exists alongside `Urgent` because they come from different places.
+Urgent is what a teacher's one-time code buys and is set by the flow; critical is
+a judgement a person makes after reading the case. Collapsing them would mean
+either every code-holder's case is critical or no staff member can mark one.
 
 ### 7.2 Reference generation
 
@@ -622,8 +986,9 @@ the original leak came back.
 | **Photo / file / voice / sticker / location / contact** | Refused with a message naming that specific type, pointing at Submit Documents. The bot never accepts uploads in chat |
 | **Photo or file with a caption** | The caption is treated as the message text and routed normally; the attachment is still refused. Subject to §9.0 — a caption question is only *answered* if the chat is inside a topic |
 | **`/start <payload>`** (deep link) | Treated as `/start`. No payload carries meaning yet |
-| **`/foo`** (unknown command) | Falls through to ordinary text handling, not an admin rejection |
-| **Message from a group** | Ignored. If the update is the bot being *added* to a group, it leaves immediately |
+| **`/foo`** (unknown command) | Falls through to ordinary text handling, not a staff rejection |
+| **Message from a group** | **Ignored, and the bot leaves — except the operations chat, which it stays in and still ignores.** Built in this stage; this row described the control while nothing implemented it. The gate runs before the update is claimed or any lock is taken, because a group's chat id is negative and would fail the digits check on conversation state inside a transaction that rolls back silently |
+| **Being added to a group** | It leaves immediately, saying nothing. Caught on the addition itself rather than on the first message, so it is never sitting in a group it should not be in. Nothing is said because a bot that answers has confirmed it is listening |
 | **Callback older than ~48 h** | Telegram omits `message`; the chat is resolved from `callback_query.from` instead. The spinner is always stopped first |
 
 ### 8.1.2 Display caps
@@ -765,31 +1130,39 @@ matches without paging — those are ranked results, so paging is not meaningful
 
 ---
 
-## 10. Document submission
+## 10. Document submission — **not built, and the direction has reversed**
 
-**The feature hides itself until a real form exists.** `FORM_URLS` ships with
-`PLACEHOLDER_` URLs; `documentSubmissionEnabled_()` (FormRouter.gs) treats a doc
-type as real only once its URL stops being a placeholder. With zero real forms
-the 📤 button and its `/help` line disappear entirely, a stale button from an
-earlier deployment gets a polite "not open yet" reply, and `formUrlForDocType_`
-refuses placeholder URLs outright. Filling in one real `FORM_URLS` entry brings
-the feature back, offering only that doc type — no other change needed.
+**Documents stay in Google Forms. The bot will never accept or store a file.**
 
-1. Teacher taps **Submit Documents** → verification gate → doc-type list
-2. `formUrlForDocType_()` returns the form URL, appending
-   `&entry.<id>=<chatId>` when that doc type has a prefill entry ID
-3. Teacher submits the Google Form
-4. `handleFormSubmit` resolves the doc type from the form ID (stored in Script
-   Properties at trigger-install time) and the chat ID from the response
-5. If the chat ID resolves **and** is verified → case created + confirmation sent
-6. Otherwise → case created under an `UNRESOLVED:<id>` sentinel for manual triage
+That reverses a planned direction and is recorded here because two documents said
+the opposite: an earlier `RUNBOOK.md` called Telegram upload *"the only genuinely
+new feature in the rebuild"*, while this section described the Apps Script Forms
+flow as current. Both are now corrected, in one pass, rather than leaving a third
+version for somebody to find.
 
-**The chat-ID field is a normal, visible, editable form question** — Google Forms
-has no hidden fields. It is therefore treated as a hint, never as identity, and
-is trusted only when it resolves to an already-verified chat.
+**What is planned, when it is built:**
 
-**Seven doc types:** Visa · Contract · Passport · Ticket · Reimbursement ·
-Certificate · Correction.
+1. Form links live in a third spreadsheet tab, synced exactly as the roster and
+   the FAQ are — so a half-ready form is rejected with its row number and cannot
+   reach a teacher, which is the shape the existing sync already has.
+2. A teacher taps **Submit Documents**, passes the sign-in gate, picks a document
+   type and is sent to the form.
+3. Submissions are matched to teachers **by the recruitment email the form
+   collects**, checked against the roster.
+
+**Matching on the roster identifier is stronger than the mechanism it replaces**,
+and this is the substantive change rather than a detail. Google Forms has no
+hidden fields, so the Apps Script version pre-filled the teacher's chat id into a
+**visible, editable** question and could therefore never trust it as identity —
+which is why it needed an `UNRESOLVED:` sentinel for submissions it could not
+place. An email checked against the roster is the same identity check as signing
+in.
+
+> **The sentinel is not coming back, and it cannot be.** The case table requires a
+> real teacher behind every case, so an unidentifiable submitter cannot be stored
+> at all — and under the matching above, nothing will produce one either. Commands
+> written now must not carry a branch for a state that is both forbidden and
+> unreachable.
 
 ---
 
@@ -889,7 +1262,7 @@ busiest — which is when you most want to read them back.
 | Identity | Roster match required before any case action, checked in the program as well as by the foreign key: the key proves a `teachers` row exists, not that its state is `Verified` |
 | Brute force — sign-in | 5 attempts, counted in the conversation state so they expire with it. Deliberately self-healing: no Stage 3 command exists to release a teacher, so a durable counter would strand one |
 | Brute force — urgent codes | 5 wrong codes per chat per rolling hour, counted in `urgent_code_attempts`. Durable against clearing the conversation state, which tapping Main Menu does. Required because making a code genuinely single-use also made guessing free |
-| Group exposure | Non-private chats rejected; the bot actively leaves groups it is added to |
+| Group exposure | Non-private chats rejected; the bot actively leaves groups it is added to. **Built in this stage** — this row described the control for two versions of this document while nothing implemented it, the same class of loss as `update_id` deduplication before it. `OPS_ALERT_CHAT_ID` is exempt from leaving, by chat id, read from one function shared with the ignore path so the two cannot disagree; an unset value exempts nothing |
 | Injection | No `parse_mode` is ever sent, so teacher text cannot break message formatting |
 | Callback forgery | `CAT:`, `PG:` and `QT:` codes resolved through a fixed map, never used as a lookup key on an object; `CASE:` keys likewise; `ANS:` codes resolve to a real active row or a clean "no longer available" reply; unknown and malformed callbacks fall back to the main menu |
 | Secret storage | Environment only, validated at start-up — the web process refuses to run with a placeholder support contact rather than serving teachers a number nobody answers. No secrets in source; `.env` is `chmod 600` and gitignored |
@@ -897,10 +1270,14 @@ busiest — which is when you most want to read them back.
 | Transport | TLS terminated by Caddy with an automatically renewed certificate; port 80 carries only the ACME challenge and the redirect |
 | Data minimisation | Identifiers stored once; failed attempts logged redacted |
 | Internal data | `DETAIL` never surfaced to teachers; `getCasesForChatId` strips it structurally; excluded from `/export` and from new-case notifications |
-| Privilege probing | **Every** authorization denial — queue, region, capability, or system — logs `ADMIN_DENIED` with the command and the caller's permission shape |
-| Impersonation visibility | A second chat verifying an already-held identifier alerts System Admins and the prior holder (`IDENTITY_DUPLICATE_BINDING`) — detected, not blocked |
+| Privilege probing | **Every** authorization denial — queue, region, capability, or rank — is logged with the command and the caller's permission shape. A sender with no staff row is told **nothing at all** and the message falls through, so the deny path is not an oracle for which commands exist |
+| Privileged actions | Staff lifecycle changes, maintenance changes, teacher revocation and restoration, case assignment and urgent-code issuance each write an audit row **in the same transaction as the action**. That write propagates its errors on purpose: a grant that cannot be recorded does not happen. The audit trail is never pruned. **There is deliberately no command to read it** — it is read by somebody with database access during an investigation, and a command would need its own permission model to avoid becoming the thing it audits |
+| Audit honesty | A command that changed nothing writes nothing. `/restore` on a teacher who was never revoked, `/maintenance on` when it is already on, and `/revoke` on somebody already revoked all say so and leave no row — an audit trail with entries for events that did not happen is worse than a short one |
+| Staff free text | Any message beginning with `/` is logged as its command word and first argument only, so internal case notes and replies are not copied into the interaction log (§5.2) |
+| Impersonation visibility | A second chat verifying an already-held identifier alerts the operations chat, every System member and the prior holder — detected, not blocked |
+| Self-service privilege escalation | None. A revoked teacher cannot sign in again to undo it (§5.1); the first System member is a hand-written database row (§6.3); and no command grants a rank above the caller's own reach, because managing staff at all requires the highest rank |
 | Permission-boundary bypass | The `staff` table is the access boundary, and it is inside the database rather than in a shared spreadsheet — so granting yourself staff access now requires server access, not edit access to a document. The spreadsheet is read-only to the bot and holds only the roster and the answer bank; nothing about permissions is reachable from it |
-| Bulk exfiltration | `/export` requires a recorded reason (≥10 chars) and notifies the other System Admins; mass sends require an explicit `/announce confirm` after a preview |
+| Bulk exfiltration | Deferred with the commands themselves (§16). When they arrive, `export` and `announce` are already permissions rather than a new model |
 
 **Not protected against:** staff with database access seeing everything (by
 design — they are staff); Telegram itself; identity impersonation via a known
@@ -908,19 +1285,20 @@ roster email (made visible by the duplicate-binding alert, prevented only by
 per-person one-time codes — an open product decision that gets cheaper to change
 now than at any later point).
 
-**Two things the rebuild made worse, both open:**
+**One thing the rebuild made worse, and it is still open:**
 
-- **Erasure is blocked by the database.** `cases.teacher_chat_id` is
-  `ON DELETE RESTRICT`, which is what guarantees no case can exist without a real
-  teacher behind it. It also means a teacher who has ever opened a case cannot be
-  deleted — and the privacy notice promises removal on request. That promise now
-  needs a deliberate anonymisation route; it is not merely unbuilt, it is
-  refused by a constraint we added on purpose.
 - **Data is collected before the notice is shown.** FAQ browsing is open to
-  anyone and every inbound message writes a `messages` row. Apps Script had the
-  identical flaw. The difference is that `privacy_notice_accepted_at` now makes
-  it *auditable*: messages whose chat has a null acceptance are a directly
-  queryable list.
+  anyone and every inbound message writes a log row. Apps Script had the identical
+  flaw. The difference is that the recorded acceptance now makes it *auditable*:
+  messages whose chat has never accepted the notice are a directly queryable list.
+
+> **The erasure item that used to sit here was based on a misreading of our own
+> schema, and is removed.** It said the case foreign key blocks deleting a case.
+> It does not: the constraint refuses the deletion of a **teacher** who still has
+> cases, and deleting the case itself was never obstructed — notes attached to it
+> go with it. Retention therefore deletes cases outright (§7.1.3). Anonymisation
+> is what a teacher's *own* removal request needs, which is a smaller and
+> different job, and it ships with the retention work.
 
 ---
 
@@ -959,28 +1337,56 @@ rather than vanishing into the `doPost` catch.
 
 ## 16. Deferred / not built
 
-- **Multilingual content.** `LANGUAGE` columns exist; only `EN` is populated.
-- **Drive file retention.** The bot never touches Drive; submitted files live in
-  each Form's own folder. Purging is deferred until real forms exist.
-- **Asynchronous `/announce`.** The send loop (behind `/announce confirm`) is
-  still synchronous inside the webhook; safe because of `update_id` dedup, but
-  the request may time out on very large audiences. Queue it if the roster
-  passes ~500 (UPGRADE-PLAN Task 6.3).
+**Next stage, and each already has its permission or its query in place, so the
+stage adds the missing half rather than a new model:**
+
+- **`/announce`** — messaging teachers in bulk. The `announce` capability exists
+  with no command behind it (§6.1), and the tables that make a paced send
+  resumable rather than restartable already exist. Deferred because it and
+  `/export` are the same feature wearing two hats — bulk egress with a
+  confirmation step, a paced fan-out and a report back to the sender — and
+  building half of that machinery in a command file is how it ends up in the
+  wrong place.
+- **`/export`** — exporting case records. Same reason, plus one of its own: it
+  needs the bot to be able to send a **file**, and today it can send only text.
+- **The daily overdue digest, and chasing a missed promised date** (§7.1.2). Both
+  queries are written and tested; the schedule is what is missing.
+- **The retention job**, its three settings and the rewritten privacy notice
+  (§5.2, §7.1.3) — one release, or the notice is false in one direction or the
+  other. **Asking every teacher to accept the notice again ships with it.**
+- **Anonymising a teacher who asks to be removed**, which is a different and
+  smaller job from retention (§13).
+
+**Later:**
+
+- **Document submission** through Google Forms, matched on the recruitment email
+  (§10). The bot will never accept a file.
+- **A taxonomy of action types**, so a case can say *what kind* of thing the
+  teacher must do. Until then `/await` carries free text (§6.5).
+- **Multilingual content.** Language columns exist; only English is populated.
 - **Global free-text FAQ search.** Matching is scoped to one topic by design
   (§9.0); the topic picker softens the dead end without changing the trade.
   Cross-topic search would need a false-positive policy that has not been agreed.
-- **Locking on admin-role writes and urgent-code consumption** (§12). Bounded and
-  low-frequency; listed so it is a decision rather than an omission.
-- **System Admin revocation by command.** Sheet edit only (and now alerted).
 - **Per-person one-time verification codes.** Email identifiers stay guessable
-  by colleagues; duplicate bindings are detected (§5) but not prevented.
-- **Dedicated queues for the seven newer FAQ topics.** Deliberately mapped onto
-  the four existing queues instead (`queueForCategory_`) — resolved, not pending.
+  by colleagues; duplicate bindings are detected (§5) but not prevented. **This
+  decision gets more expensive at launch**, not more wrong.
 
-*(Built since v1.1 of this document and no longer deferred: topic-aware case
-creation with queue+region scoping, new-case notification, the overdue digest,
-admin lifecycle commands, the ordered-role capability table, two-step
-`/announce`, `/export` justification, FAQ miss logging and answer feedback.)*
+**Deliberately never:**
+
+- **A command to read the audit trail** (§13). It is read during an investigation
+  by somebody with database access, and a command would need its own permission
+  model to avoid becoming the thing it audits.
+- **A command to list issued urgent codes.** One would turn every staff account
+  into a way of reading all of them. A lost code is reissued; the first expires.
+- **Dedicated queues for the seven newer FAQ topics.** Not deferred — impossible.
+  A case's category is one of six values because nothing else can produce one.
+
+*(Built since the last version of this document and no longer deferred: the whole
+staff command set, the ordered-rank capability table, staff lifecycle commands,
+new-case notification, case notes, importance, promised dates and snoozes, region
+correction and the teacher's region prompt, teacher revocation and restoration,
+`/maintenance`, urgent-code issuance, the group gate, and alarms fanning out to
+System staff.)*
 
 ### Superseded documents
 
