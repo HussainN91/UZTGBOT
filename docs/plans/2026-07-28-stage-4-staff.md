@@ -12,11 +12,11 @@
 
 ---
 
-## ▶ Where this stands — 29 July 2026, end of session
+## ▶ Where this stands — 29 July 2026, second session
 
-**Layers 1 and 2 are complete, committed and green. Layer 3 has not been started.**
+**Layers 1 and 2 are complete. Layer 3 has begun: tasks 31 and 32 are done.**
 
-`495 tests across 35 files, none skipped. Typecheck and build clean.` Every number in this section was verified by a full run against a live database, not inferred.
+`540 tests across 37 files, none skipped. Typecheck and build clean.` Every number in this section was verified by a full run against a live database, not inferred.
 
 | Task | What | State |
 |---|---|---|
@@ -33,9 +33,17 @@
 | 30 | Teacher revocation, both halves | ✅ `repository.ts` + the gate in `router.ts` |
 | 40 | The `/` prefix log rule | ✅ done early, `src/log/interactions.ts` |
 | R10 | `OutgoingMessage.purpose` | ✅ **pulled forward from Task 39** — see R10 |
-| **31–39, 41, 45, 46** | **Layer 3, 4, 5** | ⬜ **not started** |
+| 31 | Dispatcher, deny path, `/whoami` | ✅ `src/telegram/commands/{index,context,staff}.ts` |
+| 32 | New-case notification | ✅ `src/cases/notify.ts`, wired into both filing paths |
+| **33–39, 41, 45, 46** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
 
-**Three of the four audit faults are closed:** revocation now revokes, a corrected region reaches the visibility rule, and the staff table has a reader and a writer. **The fourth is Task 32** — a teacher files a case and nothing anywhere is told. That is the first substantial thing left.
+**All four audit faults are now closed.** Revocation revokes, a corrected region reaches the visibility rule, the staff table has a reader and a writer, and — as of Task 32 — a case that is filed reaches the people who can work it. `Received` has a writer for the first time, and a case nobody can act on raises a critical alert instead of sitting unseen.
+
+**Next is Task 33**, case reading: `/cases` `/mycases` `/urgent` `/case` `/search`. Every query it needs already exists in `src/cases/queries.ts`; the commands are thin over it, and the dispatcher gives them their scope.
+
+**All three remaining questions were answered on 29 July** and are recorded as **D26** (`Action required` means the teacher must act, and `Closed` gets a writer), **D27** (`/restore`, added to Task 36) and **D28** (retention: unresolved cases kept indefinitely, resolved ones 7 days, urgent and critical 6 months, the interaction log 3 days). No question in this plan is open.
+
+**Nothing is open.** Both follow-ups were answered the same day: `/close <ref> unresolved <reason>` exists, with the reason as required free text written to a case note (D26); and the three retention periods are **settings**, which makes rendering the privacy notice from those settings mandatory rather than optional (D28).
 
 **Read `docs/plans/2026-07-29-stage-4-handoff.md` before starting.** It records what is built, what is deliberately different from this plan, and the three open questions.
 
@@ -274,17 +282,96 @@ The second is cheaper: one migration instead of two.
 | What staff call it | Status written | Who writes it | When |
 |---|---|---|---|
 | not yet opened | `New` | `createCase` | Automatically, at filing. Nobody types it |
-| under review | `Under review` | `/reply`, `/reopen` | A staff member has the case and is working it |
-| approved or processing | `Action required` | `/await <ref> <message>` | Replied, and the case is accepted and in progress |
+| working on it | `Under review` | `/reply`, `/reopen` | A staff member has the case and is working it |
+| **waiting on the teacher** | `Action required` | `/await <ref> <what is needed>` | The teacher must do something before the case can move |
 | done | `Completed` | `/close` | The teacher's problem is resolved |
 
-The four nobody types: `Received` is written by Task 32 when a new-case notification actually reaches at least one staff member — which gives it a real writer for the first time and makes "filed but seen by nobody" distinguishable from "filed and picked up" without asking anyone to maintain it. `Escalated` is set by the urgent-code path and already is. `Duplicate` is set by the duplicate rule. `Closed` is left for Stage 5's retention pass, so "resolved" and "shut without resolution" do not collapse into one word.
+The four nobody types: `Received` is written by Task 32 when a new-case notification actually reaches at least one staff member — which gives it a real writer for the first time and makes "filed but seen by nobody" distinguishable from "filed and picked up" without asking anyone to maintain it. `Escalated` is set by the urgent-code path and already is. `Duplicate` is set by the duplicate rule. `Closed` is the case shut without being resolved — see D26 for who writes it, because that changed.
 
-**The judgement call, stated because it is the weak joint.** *Approved or processing* has no exact home among the eight — `Received` is too early, `Escalated` is wrong, and `Action required` reads as "somebody must act" without saying who. It is mapped to `Action required` and **the runbook defines it as "accepted and being worked"**. If MoPSE reads that phrase as *the teacher* must act, this is the one row of the table to change, and it is cheap: the status value does not move, only which command writes it.
+**The judgement call was put to the head of project and answered on 29 July — see D26.** `Action required` means **the teacher must act**. The row above is already corrected; the paragraph that used to say "accepted and being worked" is gone rather than struck through, because a decision recorded twice in two wordings is how this document would start disagreeing with itself.
 
 **Why not trim the enum to four.** Two things would be lost that cost nothing to keep, and both are load-bearing later: `Duplicate` is what the 24-hour duplicate window writes, and `Escalated` is how an emergency is visible while it is open. D22 already establishes that a *status* cannot carry the memory of an emergency once it resolves — that is what `importance` is for — but while a case is open, `Escalated` is what puts it in `/urgent`.
 
 **Why not show all eight.** Eight words written for a proposal document, offered to a staff member mid-conversation, is a vocabulary nobody asked for. Four verbs that each write one status is the same information with nothing to learn.
+
+---
+
+*D26–D28 were answered by the head of project on 29 July, closing the last three open questions in the stage. Nothing above them is superseded except the one row of D25 already corrected.*
+
+### D26 — `Action required` means the teacher must act, and `Closed` gains the writer that frees up
+
+**Settled 29 July.** D25 left one row open and named the cost of getting it wrong. The answer is the second reading: **`Action required` means the teacher has to do something.** `/await <ref> <what is needed>` writes it, and the text the staff member types is written to `public_update` — which is the only case text a teacher ever sees, so "what is needed" actually reaches them rather than sitting in a column staff read.
+
+**A taxonomy of action types is coming and is not built here.** The head of project has said the case should eventually show *what kind* of action is wanted — send a document, attend an appointment, confirm an address. Until that exists, `/await` carries free text and nothing pretends otherwise. Task 41 must record this in the runbook so that whoever adds the taxonomy finds the decision rather than inventing a second one, and so the phrase is defined for staff on day one: **"Action required" is a request to the teacher, never a note to ourselves.**
+
+**What this frees, and it is the part that would have been missed.** D25 parked `Closed` with Stage 5's retention pass, on the reasoning that retention would shut cases nobody resolved. D28 removes that job — an unresolved case is now kept indefinitely — so `Closed` would have been left with no writer at all, which is the eleven-row backward audit at the top of this plan happening again inside the same stage.
+
+✅ **Approved 29 July.** `Closed` becomes a staff verb: the case is shut and was not resolved. It is the honest answer for a teacher who has left the country, stopped replying, or withdrawn the request, and it must not collapse into `Completed` — the difference between "we fixed it" and "we gave up" is the single most useful thing a later reader can know. Task 34 gives it the form `/close <ref> unresolved <reason>`, alongside the ordinary `/close <ref> <message>` that writes `Completed`.
+
+**The reason is free text and is required.** The head of project asked specifically that a person be able to write why in their own words, so there is no list of reasons to choose from — the situations that end a case unresolved are exactly the ones a fixed list would fail to cover.
+
+**Where that text goes is the one judgement in this, and it goes to a note rather than to the teacher.** `/close <ref> <message>` writes `public_update`, because it is a reply. The unresolved reason is not a reply: it is written for whoever reads the case afterwards, and staff being candid — *"unreachable since March, three attempts"* — is what makes it worth having. Sending that to the teacher would either leak a blunt internal judgement or teach staff to write nothing useful. So `/close … unresolved` writes the reason to `case_notes` via `addNote` (D8) and sends the teacher a plain notice that their case has been closed and how to raise it again. **Cost: nothing** — both write paths already exist and are already tested.
+
+**The ripple into chasing, which belongs to Stage 5 and is stated here so it is inherited rather than rediscovered:** a case sitting in `Action required` is waiting on the *teacher*. Chasing must chase the teacher, not the staff member who is correctly doing nothing. A digest that nags staff about cases they are not permitted to move is a digest they will learn to ignore, which costs the cases that genuinely are their fault.
+
+### D27 — A revoked teacher can be restored, by the rank that revoked them
+
+**Settled 29 July.** The plan never specified a counterpart to `/revoke`, so revoking the wrong person meant a database session over the SSH tunnel. Revoking the wrong teacher is an ordinary mistake; reaching for the database is not an ordinary recovery.
+
+**Decision:** `/restore <chat_id>` at `teacher.revoke` — the same capability as `/revoke`, deliberately. Whoever can make the mistake can undo it without escalating to somebody more senior, and a recovery that needs a second person is a recovery that waits until Monday.
+
+It sets `verification_state = 'Verified'`, clears `revoked_at` and `revoked_by`, and writes a `TEACHER_RESTORED` audit row naming who did it (D18). It does **not** touch `identifier`, `region_override` or the privacy-acceptance columns: restoring somebody is undoing one act, not re-running their sign-in.
+
+**Why it cannot simply be "sign in again", which is the obvious cheap answer and is wrong.** `bindTeacher` clears `revoked_at`, so a revoked teacher who signed in again would silently undo their own revocation — which is exactly why `requireSignIn` was changed to refuse them rather than prompt (departure 6 in the handoff). That refusal is load-bearing and must stay; `/restore` is the door it leaves shut being opened by somebody with the authority to open it.
+
+**The failure this must not have, and it is not obvious.** There are two ways a teacher loses access and only one of them is `Revoked`. A teacher whose *roster row* was deactivated or removed is still `Verified` and still fails `teacherHasAccess`, because the gate re-checks the roster live (D17). `/restore` cannot help them — the fix is recruitment's spreadsheet — and a command that reports success while the teacher stays locked out is worse than no command. It must therefore check the roster and say which of the two situations it found, in those words.
+
+### D28 — Retention: resolved cases go in a week, the interaction log in three days, urgent cases in six months
+
+**Settled 29 July**, the last of the four original questions, and the one every earlier document has been waiting on.
+
+| What | Kept | Reads |
+|---|---|---|
+| A case that is **not resolved** | **Indefinitely** | `status` — nothing terminal |
+| A resolved case, `importance = Normal` | **7 days** after `closed_at` | `closed_at`, `importance` |
+| A resolved case, `importance = Urgent` or `Critical` | **180 days** after `closed_at` | `closed_at`, `importance` |
+| `messages` — the interaction log | **3 days** | `at` |
+| `audit_log` | **Never pruned** | — |
+
+"Resolved" means any status that stamps `closed_at`, which is already `Completed`, `Closed` and `Duplicate` (`TERMINAL_STATUSES` in `service.ts`). That column already has a writer, so the job reads a real field rather than inferring an end date from a status history nobody keeps.
+
+**Why `importance` and never `status`.** This is D22 and R13 arriving at their consumer. A case marked `Critical` that gets resolved becomes `Completed`, and nothing about `Completed` remembers it was ever an emergency — a job reading status would delete exactly the cases most worth keeping, at the shortest interval, and nobody would notice for six months.
+
+**Cases are deleted, not anonymised, and that is a change of direction worth stating.** The forward table below says removal means anonymise, because `cases.teacher_chat_id` is a non-null foreign key. That constraint is about deleting a **teacher**, not a case: `ON DELETE restrict` refuses to remove a teacher who still has cases, and `case_notes` cascades from the case. Deleting the case row is unobstructed, and it is what "deleted in a week" means. The consequence is real and is accepted: a week after a case is closed its reference stops resolving, so a teacher telephoning about `VISA-2026-00123` gets "no such case" and `/reopen` has nothing to reopen.
+
+✅ **Settled 29 July: the three periods are settings, not constants.** MoPSE adjusts them itself, without a deployment. `RETENTION_DAYS` is replaced by three keys, because one number cannot carry three different promises:
+
+| Key | Default | Governs |
+|---|---|---|
+| `CASE_RETENTION_DAYS` | 7 | A resolved case, `importance = Normal` |
+| `URGENT_CASE_RETENTION_DAYS` | 180 | A resolved case, `importance = Urgent` or `Critical` |
+| `MESSAGE_RETENTION_DAYS` | 3 | Rows in `messages` |
+
+**Unset means delete nothing.** Exactly the rule `staleCases` already follows for `OVERDUE_DAYS`, and for a stronger version of the same reason: a job that invents a retention period deletes real records against a number nobody chose, and there is no undo. The runbook seeds all three at launch, in the same shape as the settings inserts it already carries (§2.4).
+
+**The one thing this choice makes mandatory, and it is what turns it from a risk into a clean design.** The privacy notice must **render the current values** rather than have numbers typed into its text. A settings row and a hard-coded sentence can disagree; a sentence generated from the row cannot. `privacyNotice()` therefore becomes a function of the three settings, and the notice always states what the system will actually do — which is the property the constants option was reaching for, obtained a different way.
+
+**Consequence for re-consent, so Stage 5 inherits a rule rather than an argument (R17).** Changing a period changes what teachers were told, so:
+
+- **Lengthening** one — keeping data longer than promised — is a material change. It bumps `PRIVACY_NOTICE_VERSION` and asks teachers to read the notice again.
+- **Shortening** one is not. Deleting sooner than promised breaks no commitment made to anybody, and forcing 1,800 people through a re-consent to be told their data goes sooner is a cost with no beneficiary.
+
+Every change to any of the three writes a `recordAudit` row (D18). It is a change to a published commitment, and "who shortened this to one day, and when" is an audit question.
+
+**Not built in Stage 4.** No key is added and `RETENTION_DAYS` is not renamed here: three settings with no reader is the eleven-row backward audit at the top of this plan happening again. Stage 5 adds the keys, the job and the notice together.
+
+**The promise that has already been made, and it is the expensive part.** `src/config/privacy.ts` says, to every teacher who has signed in: *"Until the Ministry sets a retention period. When one is set, this notice will be updated and you will be asked to read it again."* Setting a period therefore requires new wording, a bumped `PRIVACY_NOTICE_VERSION`, and **asking every teacher to read it again** — a teacher-facing re-consent flow for 1,800 people that nothing in any plan currently builds. It ships in Stage 5, in the same release as the job, because a notice promising deletion before the job exists is false in the other direction.
+
+**Three days is three days, for every row.** No exemptions, no per-action carve-outs. A retention rule with a list of things it does not apply to is a rule nobody can state in one sentence, and the privacy notice has to state it in one sentence.
+
+**What that costs, stated plainly because it is a real loss and not a theoretical one.** `RUNBOOK.md` §4.7 is a **monthly** content review that runs two **30-day** queries over `messages`. At three days both return nothing, and an empty result from a review reads exactly like a system with no problems. The review is dead as written — see R18. Task 41 removes it from the runbook rather than leaving instructions that quietly stop working, and the recovery, **if the head of project wants one**, is a nightly roll-up into counts before the delete: a Stage 5 task, not a longer period. Nobody should discover this by running the query in November and finding nothing.
+
+`BOT-SPEC.md` §7.1.3's word for this is "archive". It is now a delete, and Task 41 corrects the vocabulary in every document that says otherwise.
 
 ---
 
@@ -319,7 +406,7 @@ Every row here is something a previous stage created and nothing has ever used. 
 |---|---|---|
 | Stage 5 | `announcements`, `announcement_recipients` | Leave untouched. Carry `announce`/`export` in the capability table so Stage 5 adds commands only (D7, D19) |
 | Stage 5 | The daily overdue digest | Read `OVERDUE_DAYS` for `/urgent`; do not push anything on a schedule. The digest is the same query with a different trigger, so `staleCases()` is written here as a reusable query |
-| Stage 5 | Retention clean-up | Do not consume `RETENTION_DAYS`. Three things must be in that job's scope and none of them are obvious: `case_notes` (D8) holds staff writing about teachers; `isRetained(importance)` (D22) is what makes "six months for urgent and critical" possible, and a job reading `status` instead would delete exactly those; and removal means **anonymise, not delete** — `cases.teacher_chat_id` refuses the delete, which is `CONCERNS` A11 |
+| Stage 5 | Retention clean-up — **now specified, see D28** | Do not consume the periods here; nothing in Stage 4 deletes anything. Five things must be in that job's scope and none are obvious: `case_notes` (D8) cascades from the case and holds staff writing about teachers; `isRetained(importance)` (D22) is what makes "six months for urgent and critical" possible, and a job reading `status` instead would delete exactly those; `closed_at` is what the job reads, not a status history; the **privacy notice, its version bump and a re-consent flow for 1,800 teachers ship in the same release** (R17), because the notice already promises it; and `RUNBOOK.md` §4.7's monthly content review does not survive a 3-day log (R18) |
 | Stage 5 | Chasing open cases | `due_at` and `snoozed_until` are written here (D23) and `casesPastDue()` exists and is tested. Stage 5 adds a schedule, not a field |
 | Stage 6 | `DOC:` callback prefix, `CASE_CATEGORY.SUBMIT_DOCS` | The queue map must be **total** over `CaseCategory` today, so a document case files to a real queue the moment Stage 6 emits one |
 | Stage 6 | Document cases with an unresolvable submitter | Do **not** reintroduce the `UNRESOLVED:` sentinel. `cases.teacher_chat_id` is a non-null FK with a digits check; Apps Script's sentinel cannot be stored and `hasNotifiableChatId_` (`AdminCommands.gs:652`) has no equivalent here. Under D24 nothing will produce one either — submissions are matched on the roster identifier — so commands written in this stage must not carry a branch for a state that is both forbidden and unreachable |
@@ -479,6 +566,30 @@ New case → recipients computed → an observer holds `case.view` and matches t
 `due_at` and `snoozed_until` are added here (D23) and the chasing that reads them is Stage 5 → for one stage they are columns with a writer and no reader → which is a milder version of the eleven-row backward audit at the top of this plan.
 **Terminates at:** `/case` displaying both, and `casesPastDue()` existing and being tested in Task 44. The data is visible to a human and queryable from the first day, so Stage 5 adds a schedule rather than a schedule plus a field plus the hope that staff have been filling it in.
 **Left as a known cost:** until Stage 5, a promised date that passes is visible only to somebody who looks. That is the same position `OVERDUE_DAYS` has been in since Stage 2 and is honest about what this stage does not do.
+
+*R16–R18 trace D26, D27 and D28.*
+
+### R16 — Restoring somebody the roster no longer lists
+
+`/restore` sets `Verified` and clears `revoked_at` → the teacher's roster row was *also* deactivated, or was never the reason → `teacherHasAccess` re-checks the roster live (D17) and still refuses them → the staff member is told "restored", the teacher tries again and is still locked out, and the two of them conclude the bot is broken.
+**Terminates at:** `/restore` reading the roster before it reports anything, and naming which of the two situations it found — "restored, and they can use the bot again" versus "restored, but their roster row is inactive; recruitment has to put it back". Same shape as R3's rule for `/assign`: the recoverable outcome is being told what to fix, and the unrecoverable one is believing it worked.
+**Second order:** a teacher who was never revoked at all. `/restore` on a `Verified` teacher must say so and change nothing, rather than writing a `TEACHER_RESTORED` audit row for an event that did not happen — an audit trail with invented entries is worse than a short one.
+
+### R17 — Setting a retention period triggers a promise already made to 1,800 people
+
+D28 fixes the periods → `src/config/privacy.ts` currently tells every teacher the period is unset and that *"when one is set, this notice will be updated and you will be asked to read it again"* → publishing the periods without the re-consent breaks a commitment made in the one document teachers were required to read before signing in.
+**Terminates at:** Stage 5 shipping four things in one release — the new wording, a bumped `PRIVACY_NOTICE_VERSION`, a re-consent flow, and the job itself. Any three without the fourth is a false statement in one direction or the other.
+**Sharper now that the periods are settings (D28).** The notice must be *generated from* the three settings rather than have numbers written into its text, or this ripple fires again every time somebody edits one — and next time silently, because nobody will be watching for it. Generated, the notice cannot disagree with the system; typed, it disagrees the moment a period changes and nothing anywhere notices.
+**Not fixed by:** updating the notice in Stage 4. The notice would then promise deletion that nothing performs, which is the same class of fault as `RUNBOOK.md` §4.3 promising that a roster edit revokes a teacher — a document describing behaviour the code does not have, which is what this rebuild exists to stop.
+**Consequence for this stage:** `src/config/privacy.test.ts` asserts the notice names no period (`does not promise a retention period, because none has been decided`). That test is **correct today and must not be changed here.** It inverts in Stage 5, in the same commit as the wording.
+
+### R18 — Three days deletes the evidence the monthly review runs on
+
+`messages` is pruned at 3 days → `RUNBOOK.md` §4.7 runs two 30-day queries over it → both return nothing → an empty result from a review looks exactly like a system with no problems, which is the failure mode this project keeps finding.
+**Terminates at:** Task 41 deleting §4.7 from the runbook. An instruction that has silently stopped working is worse than no instruction, and this one would fail in the direction of false reassurance.
+**Collides with the backward audit:** the `ANSWER_HELPFUL` / `ANSWER_UNHELPFUL` rows are the one entry marked "not connected — read by a human running SQL", and that was accepted precisely because a person reading them monthly *is* the endpoint. Three days removes that endpoint, so those rows go back to having no consumer at all. `ANSWER_HELPFUL` was added in Stage 3 specifically so the answer bank could learn what was working; it now has three days to be read in.
+**The cost, named so nobody reports it as a bug later.** Two questions become unanswerable beyond three days: *what are teachers asking that the answer bank cannot cover*, and *which confident answers are teachers rejecting*. The second is described in the runbook as "the strongest signal available".
+**The recovery, and it is the head of project's to ask for.** A nightly roll-up into counts, run *before* the delete, keeps both signals without keeping anybody's words — the row becomes "`VISA-001` was rejected 14 times in October" and no teacher text survives past three days. That is a Stage 5 task and it is **not** a longer retention period. It is written down here so it is a choice rather than something rediscovered when the answer bank stops improving.
 
 ---
 
@@ -1360,11 +1471,11 @@ it('caps recipients at twenty', async () => { /* R9 */ });
 
 ### Task 34: Case mutation — `/reply` `/await` `/close` `/reopen` `/note`
 
-The four status-writing verbs of D25. `/reply` moves an open case to `Under review`; `/await` replies *and* moves it to `Action required`; `/close` writes `Completed`; `/reopen` returns it to `Under review`. `/note` writes no status at all — it is internal, and a note is not progress.
+The status-writing verbs of D25, **as corrected by D26**. `/reply` moves an open case to `Under review`; `/await` writes `Action required`, which now means **the teacher must do something**; `/close` writes `Completed`, and `/close <ref> unresolved <reason>` writes `Closed`; `/reopen` returns a case to `Under review`. `/note` writes no status at all — it is internal, and a note is not progress.
 
 **Files:** Modify `src/telegram/commands/cases.ts`
 
-- [ ] **Step 1: The tests that encode the two rules**
+- [ ] **Step 1: The tests that encode the rules**
 
 ```ts
 it('commits the case update before messaging the teacher', async () => {
@@ -1381,6 +1492,48 @@ it('tells the sender when the teacher cannot receive it', async () => {
 it('never writes a note where the teacher can read it', async () => {
   const visible = await getCasesForChatId(db, CHAT);
   expect(JSON.stringify(visible)).not.toContain(NOTE_TEXT);
+});
+
+it('puts what the teacher must do where the teacher can read it', async () => {
+  // D26. `Action required` means they have to act, so the request has to reach
+  // them — public_update is the only case text a teacher ever sees, and an
+  // instruction sitting in a staff-only column is an instruction nobody follows.
+  await run('/await VISA-2026-00001 send us a scan of your passport page');
+  const visible = await getCasesForChatId(db, CHAT);
+  expect(JSON.stringify(visible)).toContain('passport page');
+});
+
+it('refuses /await with nothing to ask for', async () => {
+  // A case moved to "waiting on the teacher" without saying what is wanted
+  // strands them: they can see they must act and not what the act is.
+});
+
+it('distinguishes a case that was resolved from one that was given up on', async () => {
+  // D26. `Closed` has a writer now, and the difference between "we fixed it"
+  // and "we gave up" is the most useful thing a later reader can know. Both
+  // stamp closed_at, which is what D28's retention job reads.
+  await run('/close VISA-2026-00001 your visa was issued on Tuesday');
+  expect(await statusOf('VISA-2026-00001')).toBe('Completed');
+  await run('/close VISA-2026-00002 unresolved teacher has left the country');
+  expect(await statusOf('VISA-2026-00002')).toBe('Closed');
+});
+
+it('keeps the unresolved reason internal, and still tells the teacher', async () => {
+  // D26. The reason is written for whoever reads the case afterwards, and
+  // staff being candid is what makes it worth having. The teacher is told
+  // their case is closed — silence would be worse — but not told this.
+  const outcome = await run('/close VISA-2026-00002 unresolved unreachable since March, three attempts');
+
+  expect(await notesOn('VISA-2026-00002')).toContain('three attempts');
+  const visible = await getCasesForChatId(db, CHAT);
+  expect(JSON.stringify(visible)).not.toContain('three attempts');
+  expect(outcome.messages.some((m) => m.chatId === CHAT)).toBe(true);
+});
+
+it('refuses to close a case unresolved without saying why', async () => {
+  // The reason is the whole point of the form. `Closed` with no explanation is
+  // `Completed` with a different word, and a case shut for no recorded reason
+  // is one nobody can answer for.
 });
 
 it('sets closed_at when a case is closed, and clears nothing when it is reopened', async () => { /* … */ });
@@ -1484,9 +1637,9 @@ it('never interrupts a teacher part-way through a case', async () => { /* … */
 
 ---
 
-### Task 36: Staff management — `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke`
+### Task 36: Staff management — `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke` `/restore`
 
-Implements D14, D18 and the second half of D17.
+Implements D14, D18, the second half of D17, and **D27**.
 
 **Files:** Modify `src/telegram/commands/staff.ts`
 
@@ -1514,7 +1667,62 @@ it('notifies the person whose access changed', async () => { /* … */ });
 
 - [ ] **Step 2: Implement.** `/staff_add` adds only — an existing target is refused and pointed at `/staff_role`. Role and queue are required arguments, not defaulted.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: `/revoke <chat_id>` and `/restore <chat_id>`**, both at `teacher.revoke` — D17's command half and D27. `restoreTeacher` joins `revokeTeacher` in `src/teachers/repository.ts`; the commands are thin over both.
+
+  The same rank on purpose. Whoever can make the mistake can undo it without escalating, because a recovery that needs a second person is a recovery that waits until Monday.
+
+```ts
+it('gives a wrongly revoked teacher their access back', async () => {
+  // D27. Before this the only route was a database session over the SSH
+  // tunnel, for what is an ordinary mistake.
+  await run(`/revoke ${TEACHER}`);
+  expect(await canUseBot(TEACHER)).toBe(false);
+  await run(`/restore ${TEACHER}`);
+  expect(await canUseBot(TEACHER)).toBe(true);
+});
+
+it('does not let a restore be faked by signing in again', async () => {
+  // The reason /restore has to exist at all. `bindTeacher` clears revoked_at,
+  // so prompting a revoked teacher to sign in would let them undo their own
+  // revocation — which is why requireSignIn refuses them instead. That refusal
+  // is load-bearing and this test is what keeps it.
+  await run(`/revoke ${TEACHER}`);
+  await teacherTypes('/start');
+  await teacherTypes(IDENTIFIER);
+  expect(await canUseBot(TEACHER)).toBe(false);
+});
+
+it('says so, and changes nothing, when the teacher was never revoked', async () => {
+  // R16, second order. An audit trail with entries for events that did not
+  // happen is worse than a short one.
+  const outcome = await run(`/restore ${TEACHER}`);
+  expect(outcome).toMatch(/not revoked/i);
+  expect(await auditRowsFor(TEACHER)).toHaveLength(0);
+});
+
+it('warns when the roster is the reason they are locked out, not the revocation', async () => {
+  // R16, and the failure this command must not have. A teacher whose roster
+  // row was deactivated is still `Verified` and still fails teacherHasAccess,
+  // because the gate re-checks the roster live (D17). /restore cannot help
+  // them — recruitment has to put the row back — and reporting success while
+  // they stay locked out is worse than having no command.
+  await deactivateRosterRow(IDENTIFIER);
+  await run(`/revoke ${TEACHER}`);
+  const outcome = await run(`/restore ${TEACHER}`);
+  expect(outcome).toMatch(/roster/i);
+  expect(await canUseBot(TEACHER)).toBe(false);
+});
+
+it('reports the teacher’s open cases both ways', async () => {
+  // R5. Revoking somebody with open cases strands a staff member replying to
+  // a teacher who cannot read it; restoring them is the moment those cases
+  // become answerable again, and the person doing it should know.
+});
+```
+
+  `/restore` writes `verification_state = 'Verified'`, clears `revoked_at` and `revoked_by`, and records `TEACHER_RESTORED` (D18). It touches **nothing else** — not `identifier`, not `region_override`, not the privacy-acceptance columns. Restoring somebody undoes one act; it does not re-run their sign-in.
+
+- [ ] **Step 4: Commit**
 
 ---
 
@@ -1629,7 +1837,10 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
 
 - [ ] **Step 1: `BOT-SPEC.md`**
   - §6.1 — the capability table, re-expressed against the five ranks `Observer/Support/Lead/Program/System`, recording that the rank once called `Regional` is now `Lead` precisely because it was never the region axis, and that a MoPSE "regional admin" is usually `Support` with a region set (D7). The teacher-facing job title "Regional admin" stays as it is, and §6.1 should say so, or the next reader will "correct" it
-  - §6.4, §6.5 — command names (D14), and the command list: nineteen becomes eighteen, minus two deferred (D19), plus `/mark` `/due` `/snooze` `/region` `/regions` (D20, D22, D23)
+  - §6.4, §6.5 — command names (D14), and the command list: nineteen becomes eighteen, minus two deferred (D19), plus `/mark` `/due` `/snooze` `/region` `/regions` (D20, D22, D23) and `/restore` (D27)
+  - **§6.5 — define `Action required` as "the teacher must do something" (D26)**, in those words, next to the command that writes it. This is the row D25 flagged as the weak joint; it has been answered and the document is where the answer has to live, because the phrase is ambiguous to anyone reading it cold and the wrong reading routes work to the wrong person
+  - **§7.1.3 — "archive" becomes "delete" (D28).** The word appears throughout and is now wrong: resolved ordinary cases are removed after seven days, urgent and critical after six months, the interaction log after three days, and an unresolved case is never removed at all. Name the three periods rather than referring to a settings key
+  - **§4.2, §12 — the retention paragraph.** It currently rests on `RETENTION_DAYS` being unset. Every sentence that says "until a period is decided" is now false
   - **§10 — rewrite.** It describes the Apps Script Forms flow as current, including the pre-filled chat id. D24 keeps Forms and changes how a submission is identified; the `FORMS` tab and roster-email matching replace `FORM_URLS` and the prefill entirely
   - **§1 — the non-goal about uploads is now correct rather than aspirational**, and should say so; `RUNBOOK.md` Part 6 says the opposite and is the one that changes
   - §6.2 — queue and region as one SQL predicate; the seven FAQ-topic mappings deleted as structurally impossible (Task 24)
@@ -1640,15 +1851,19 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
 
 - [ ] **Step 2: `RUNBOOK.md`**
   - §1.2 — the launch gate moves: the staff half exists
-  - §2.4 — `/maintenance` replaces the SQL
+  - §2.4 — `/maintenance` replaces the SQL, and the launch settings insert gains the three retention keys seeded at 7, 180 and 3 (D28). Unseeded, the job deletes nothing — which is the safe direction, and is also why it will look like it is not working
   - **new §2.5** — bootstrapping the first System member (D13)
-  - §4.3 — **rewrite.** It currently describes revocation that does not happen
+  - §4.3 — **rewrite.** It currently describes revocation that does not happen. Add `/restore` and, in the same paragraph, **the one thing it cannot fix**: a teacher locked out because their *roster row* went is not revoked and `/restore` will not help them — recruitment has to put the row back (D27, R16). Two causes with one symptom is how an operator wastes an afternoon
   - §4.4 — `/generate_urgent_code` replaces the hand-written `INSERT`
   - §4.5 — `/maintenance on`
+  - **new §4.6a — what the four case words mean**, written for staff rather than for engineers, with `Action required` defined as **a request to the teacher, never a note to ourselves** (D26). Record that a taxonomy of action types is coming and that until it does, `/await` carries free text — so whoever builds it finds the decision instead of inventing a second one
+  - **§4.7 — delete it.** The monthly content review runs two 30-day queries over a table that now keeps three days (R18). Leaving it would have somebody run it in November, get an empty result, and read that as "no problems". If the signal is wanted back, it comes from a nightly roll-up, and that is a Stage 5 item — not a longer period
+  - **new §4.11 — changing a retention period.** The three keys, what each governs, and the two rules that go with them (D28): unset deletes nothing, and *lengthening* a period requires the privacy notice to be re-accepted while shortening one does not. Written for whoever will actually type it, with the warning that these are not ordinary settings — they govern deletion, there is no undo, and the notice teachers read is generated from them
   - **new §4.10 — changing a teacher's region**, and the fact that correcting the spreadsheet now reaches teachers who already signed in, which it never did (R12)
   - Part 3 — smoke-test steps below
   - **Part 6 — correct the document entry.** It calls Telegram upload "the only genuinely new feature in the rebuild"; under D24 there is no upload. What arrives is a `FORMS` tab and submissions matched by recruitment email
-  - **Part 1 §1.3 — two of the five decisions can be marked settled**: removal means anonymisation (D24 of the design session), and urgent and critical cases are kept six months. The rest of the retention question stays open
+  - **Part 1 §1.3 — every open decision can now be marked settled.** All four original questions are answered: the observer rank, the `Regional`→`Lead` rename, the case-status vocabulary (D25, D26) and retention (D28). Nothing in that list stays open
+  - **The retention entry states the four rules and their consequence.** An unresolved case is kept for ever; a resolved one goes after seven days, or six months if it was marked urgent or critical; the interaction log goes after three days. Say plainly what the first consequence is, because an operator will meet it in week two: **a week after a case is closed, its reference stops resolving.** A teacher telephoning about `VISA-2026-00123` gets "no such case", and there is nothing for `/reopen` to reopen
   - **A note for whoever owns the spreadsheet:** the bot reads two tabs. If the original document is reused, the other six are inert and should be deleted — especially `ADMINS`, which used to grant administrator rights and now does nothing at all. A tab that looks like it works and does not is worse than no tab
 
 - [ ] **Step 3: `CONCERNS-AND-IT-ACTIONS.md`**
@@ -1656,8 +1871,8 @@ Not optional, and larger than Stage 3's equivalent because this stage corrects t
   - A4 — two System members, now with the commands to manage them
   - A7 — close the "left for you" half; the ops chat is still required (D12)
   - B3 — unchanged, re-pointed at Stage 5
-  - **A11 — close it.** Removal means anonymisation: replace the identifying columns, keep the case. The database's refusal to delete a teacher who has opened a case stops being a contradiction with the privacy notice and becomes the mechanism that satisfies it
-  - **A10 — narrow it.** Urgent and critical cases are kept six months. The period for ordinary cases and for the message log is still unset, and the item stays red until both are
+  - **A11 — close it, and correct what it says.** The constraint it worries about is `ON DELETE restrict` on `cases.teacher_chat_id`, which refuses the deletion of a **teacher** who has cases. It never blocked deleting a case, and `case_notes` cascades from one. D28 deletes cases; anonymisation is what a teacher's *own* removal request needs, and that is the distinction A11 currently blurs
+  - **A10 — close it.** All four periods are decided (D28). Record the two consequences rather than only the numbers: the monthly content review does not survive three days (R18), and publishing the periods requires re-consent from every teacher who accepted the current notice (R17)
   - **new B11 — regions were never correctable.** Recruitment's spreadsheet edits reached nobody who had already signed in, and no command existed. Recorded as closed by Task 43, because the lesson is the one B4 already teaches: a column with a writer and no reader looks exactly like a working feature
 
 - [ ] **Step 4: Commit**
