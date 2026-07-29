@@ -12,7 +12,7 @@
  * inside `withChatLock`, which is already a transaction — one lock, taken in one
  * place, at the top of the update handler.
  */
-import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { type SQL, and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import {
   CASE_DEDUP_WINDOW_HOURS,
   CHECK_MY_CASE_CAP,
@@ -240,6 +240,12 @@ export interface CaseFields {
  *
  * Returns false when no such case exists, rather than throwing — a stale
  * reference from a button or a typed command is ordinary input.
+ *
+ * **This function does not check who is asking.** It takes a bare reference and
+ * writes. Visibility is the caller's job, and in layer 3 that means resolving
+ * the reference through `findCase` — which applies the scope — before calling
+ * this. A command that skips that step lets a staff member close a case in a
+ * queue they do not hold, and nothing here would notice.
  */
 export async function updateCase(
   db: Database,
@@ -247,8 +253,23 @@ export async function updateCase(
   fields: CaseFields,
   actor: string,
 ): Promise<boolean> {
-  const closedAt =
-    fields.status !== undefined && isClosedStatus(fields.status) ? sql`now()` : undefined;
+  /**
+   * `closed_at` follows the status in both directions, and the second one is the
+   * one that was missing.
+   *
+   * It marks when a case *ended*, so a case that has not ended must not carry
+   * one. Before this it was set on the way into a terminal status and left alone
+   * on the way out, so a case that was closed and then reopened stayed open with
+   * a `closed_at` from its previous life.
+   *
+   * That was harmless until D28 and is not harmless now: stage 5's retention
+   * measures the seven days from this column. A reopened case with a stale
+   * `closed_at` is one somebody is actively working that the clean-up would
+   * delete a week later. `undefined` still means "the status is not changing,
+   * leave this alone" — only an actual move rewrites it.
+   */
+  const closedAt: SQL | null | undefined =
+    fields.status === undefined ? undefined : isClosedStatus(fields.status) ? sql`now()` : null;
 
   const result = await db
     .update(cases)

@@ -247,6 +247,48 @@ describe.skipIf(!TEST_DATABASE_URL)('cases', () => {
       expect(rows.rows[0]?.closed_at).not.toBeNull();
     });
 
+    it('clears closed_at when a case is reopened', async () => {
+      /**
+       * The column means "when this case ended", so a case that has not ended
+       * must not carry one. It used to: `closed_at` was set on the way into a
+       * terminal status and left alone on the way out, so a reopened case stayed
+       * open holding a timestamp from its previous life.
+       *
+       * Harmless until D28, and not harmless now — stage 5's retention measures
+       * seven days from this column, so a reopened case somebody is actively
+       * working would have been deleted a week later.
+       */
+      const { reference } = await createCase(db, {
+        chatId: CHAT,
+        category: CASE_CATEGORY.VISA,
+        detail: DETAIL,
+      });
+      await updateCase(db, reference, { status: 'Completed' }, '960001');
+      await updateCase(db, reference, { status: 'Under review' }, '960001');
+
+      const rows = await db.execute<{ closed_at: Date | null }>(
+        sql`SELECT closed_at FROM cases WHERE reference = ${reference}`,
+      );
+      expect(rows.rows[0]?.closed_at).toBeNull();
+    });
+
+    it('leaves closed_at alone when the status is not the thing changing', async () => {
+      // `undefined` still means "not moving the status, do not touch this".
+      // Writing a public update on a closed case must not resurrect its end date.
+      const { reference } = await createCase(db, {
+        chatId: CHAT,
+        category: CASE_CATEGORY.VISA,
+        detail: DETAIL,
+      });
+      await updateCase(db, reference, { status: 'Completed' }, '960001');
+      await updateCase(db, reference, { publicUpdate: 'one last thing' }, '960001');
+
+      const rows = await db.execute<{ closed_at: Date | null }>(
+        sql`SELECT closed_at FROM cases WHERE reference = ${reference}`,
+      );
+      expect(rows.rows[0]?.closed_at).not.toBeNull();
+    });
+
     it('reports a reference that does not exist rather than throwing', async () => {
       await expect(updateCase(db, 'VISA-2026-99999', { status: 'Closed' }, 'x')).resolves.toBe(
         false,
