@@ -21,6 +21,7 @@ import { withChatLock } from '../conversation/lock.js';
 import { log } from '../log.js';
 import type { Alerter } from '../sync/alerts.js';
 import { telegramAlerter } from './alerter.js';
+import { verdictForChat } from './chat-gate.js';
 import { claimUpdate } from './dedup.js';
 import type { InboundUpdate, RouterOutcome } from './router.js';
 import { route } from './router.js';
@@ -157,7 +158,50 @@ export function createBot(): Bot {
     );
   });
 
+  /**
+   * The group gate — D15, before anything else happens.
+   *
+   * **Before `processUpdate`, deliberately.** A non-private update must not
+   * consume an update claim or take a chat lock: `claimUpdate` writes a row, and
+   * `withChatLock` hashes a chat id that is negative and would then fail the
+   * digits check on `conversation_states` — inside a transaction that rolls back
+   * silently. Refusing here costs one comparison and reaches neither.
+   *
+   * Nothing is said to the group. A bot that answers "I only work in private
+   * chats" is a bot that answers, which in a group of forty teachers is both
+   * noise and a confirmation that it is listening. `Webhook.gs:57-69` was silent
+   * too.
+   */
+  const gate = (ctx: Context): boolean => {
+    const chat = ctx.chat;
+    if (chat === undefined) return false;
+
+    const verdict = verdictForChat(chat.type, String(chat.id), env().OPS_ALERT_CHAT_ID);
+    if (verdict === 'handle') return true;
+
+    log.debug({ chatId: chat.id, type: chat.type, verdict }, 'update from a non-private chat');
+    if (verdict === 'leave') void leaveQuietly(ctx);
+    return false;
+  };
+
+  /**
+   * Leave, and never let leaving break the process.
+   *
+   * `bot.catch` would swallow a throw here anyway; failing loudly gains nothing
+   * and a bot that cannot leave a group is a nuisance rather than an incident —
+   * the gate above has already made sure it will not *act* there.
+   */
+  const leaveQuietly = async (ctx: Context): Promise<void> => {
+    try {
+      await ctx.leaveChat();
+    } catch (err) {
+      log.error({ err, chatId: ctx.chat?.id }, 'could not leave a group');
+    }
+  };
+
   const run = async (ctx: Context, update: InboundUpdate): Promise<void> => {
+    if (!gate(ctx)) return;
+
     const outcome = await processUpdate(
       getDb(),
       ctx.update.update_id,
@@ -166,6 +210,26 @@ export function createBot(): Bot {
     );
     if (outcome !== null) await deliver(ctx.api, alerter, outcome);
   };
+
+  /**
+   * Being added to a group, which is the moment worth catching.
+   *
+   * Waiting for somebody to type gives the bot a stretch of time sitting in a
+   * group it should not be in, and `my_chat_member` fires on the addition
+   * itself. The exemption is read from the same function, so the chat every
+   * alarm in this system depends on — including the alarm that would report
+   * this going wrong — is never the one it walks out of (R8).
+   */
+  bot.on('my_chat_member', async (ctx) => {
+    const chat = ctx.chat;
+    if (verdictForChat(chat.type, String(chat.id), env().OPS_ALERT_CHAT_ID) !== 'leave') return;
+
+    const status = ctx.myChatMember.new_chat_member.status;
+    if (status === 'left' || status === 'kicked') return;
+
+    log.warn({ chatId: chat.id, type: chat.type }, 'added to a group; leaving');
+    await leaveQuietly(ctx);
+  });
 
   /**
    * Acknowledge the button first, always.

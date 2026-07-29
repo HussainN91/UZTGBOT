@@ -26,16 +26,21 @@
  * read-then-write and runs inside `withChatLock`, which is already a
  * transaction — one lock, taken in one place.
  */
+import { randomInt } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import {
   URGENT_CASE_CATEGORY,
+  URGENT_CODE_ALPHABET,
   URGENT_CODE_ATTEMPT_WINDOW_MINUTES,
+  URGENT_CODE_LENGTH,
   URGENT_CODE_MAX_ATTEMPTS,
   URGENT_CODE_STRANDED_AFTER_MINUTES,
+  URGENT_CODE_TTL_HOURS,
   TIMEZONE,
 } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import { log } from '../log.js';
+import { recordAudit } from '../log/audit.js';
 import type { Alerter } from '../sync/alerts.js';
 import { appendUrgentFollowUp, createCase } from './service.js';
 
@@ -48,6 +53,90 @@ import { appendUrgentFollowUp, createCase } from './service.js';
  */
 export function normaliseUrgentCode(raw: string): string {
   return raw.trim().toUpperCase();
+}
+
+/**
+ * A fresh code, from a cryptographic source.
+ *
+ * `randomInt` rather than `Math.random`, and rather than a slice of a UUID.
+ * `Math.random` is not seeded for unpredictability and its output is recoverable
+ * from a handful of samples — and every code this issues is one somebody could
+ * otherwise guess their way to an escalated case with. A UUID slice would be
+ * hexadecimal, which is sixteen characters rather than thirty-two and throws
+ * away half the code space for no benefit.
+ *
+ * `randomInt(max)` is rejection-sampled by Node, so each character is uniform.
+ * Taking `% alphabet.length` of a random byte would not be: 256 does not divide
+ * by 32 evenly for most alphabets, and the bias always favours the same early
+ * characters — invisible in any test, and exactly the sort of thing that makes a
+ * six-character space smaller than it looks.
+ */
+export function generateUrgentCode(): string {
+  let code = '';
+  for (let i = 0; i < URGENT_CODE_LENGTH; i += 1) {
+    code += URGENT_CODE_ALPHABET[randomInt(URGENT_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+export interface IssuedUrgentCode {
+  readonly code: string;
+  /**
+   * Read back from the database rather than computed here.
+   *
+   * The expiry is written by PostgreSQL's clock, which is the authority on every
+   * timestamp in this system that decides something — and this one decides
+   * whether a teacher's emergency is escalated. A staff member reading a
+   * different time from the one stored, because the Node clock had drifted, is
+   * a staff member who tells a teacher the wrong deadline.
+   */
+  readonly expiresAt: Date;
+}
+
+/**
+ * Issue a one-time urgent code, naming who issued it.
+ *
+ * The two halves of this feature have never met. Codes have only ever been
+ * inserted by hand through `RUNBOOK.md` §4.4, which is why `issued_by` has held
+ * the string `'0'` for every code that has ever existed — and `'0'` names
+ * nobody, so the stranded-code alarm, which exists to say whose teacher is
+ * sitting with no case, has never been able to say whose.
+ *
+ * **The collision retry is not defensive tidiness.** `code` is the primary key,
+ * so a duplicate raises `23505`, which would reach `bot.catch` — and `bot.catch`
+ * acknowledges the update and says nothing at all, so the staff member would see
+ * silence and tell the teacher a code was coming. A collision is vanishingly
+ * unlikely at 32^6; being unlikely is not the same as being handled.
+ */
+export async function issueUrgentCode(db: Database, actor: string): Promise<IssuedUrgentCode> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = generateUrgentCode();
+
+    try {
+      const inserted = await db.execute<{ expires_at: Date }>(sql`
+        INSERT INTO urgent_codes (code, issued_by, expires_at)
+        VALUES (${code}, ${actor}, now() + make_interval(hours => ${URGENT_CODE_TTL_HOURS}))
+        RETURNING expires_at
+      `);
+
+      /**
+       * ⚠️ `db.execute` hands back what PostgreSQL sent, and drizzle installs its
+       * own type parsers — a `timestamptz` read this way is a string, not the
+       * `Date` the row type claims. Constructed explicitly rather than trusted,
+       * because `formatTashkent` would otherwise be handed a string and throw
+       * inside a command, which `bot.catch` turns into silence.
+       */
+      const raw = inserted.rows[0]?.expires_at;
+      await recordAudit(db, { actor, action: 'URGENT_CODE_ISSUED', subject: code });
+
+      return { code, expiresAt: new Date(raw as unknown as string) };
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === '23505') continue;
+      throw err;
+    }
+  }
+
+  throw new Error('could not generate an unused urgent code in five attempts');
 }
 
 export type UrgentCodeCheck =

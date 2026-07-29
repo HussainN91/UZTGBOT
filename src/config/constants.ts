@@ -258,6 +258,36 @@ export const URGENT_CODE_ATTEMPT_WINDOW_MINUTES = 60;
  */
 export const URGENT_CODE_STRANDED_AFTER_MINUTES = 60;
 
+/**
+ * How long an issued code stays usable (`AdminCommands.gs:77`).
+ *
+ * Carried over unchanged, and it is a real trade rather than an arbitrary
+ * number: a code is read aloud over the telephone to a teacher who may be in
+ * transit, in another time zone, or asleep, so anything much shorter turns an
+ * emergency route into a second telephone call. Two days also bounds the window
+ * in which a leaked code is worth anything.
+ *
+ * A program constant rather than a setting. Shortening it silently strands codes
+ * already issued and read out to teachers, and lengthening it changes what a
+ * one-time emergency credential is worth — neither is a thing to flip in seconds
+ * during an incident, which is the test `settings.ts` states for its own home.
+ */
+export const URGENT_CODE_TTL_HOURS = 48;
+
+/**
+ * Characters a code is drawn from, and how many.
+ *
+ * Upper case throughout, because `normaliseUrgentCode` upper-cases what the
+ * teacher types and a lower-case code would simply never match. `0`, `O`, `1`
+ * and `I` are left out on purpose: this string's whole job is to survive being
+ * read aloud down a bad telephone line and typed by somebody under stress, and
+ * those four are the pairs people mishear and mistype. Dropping them costs about
+ * a fifth of the code space and buys back every one of those failures, which
+ * would otherwise present as a rejected code with no explanation.
+ */
+export const URGENT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export const URGENT_CODE_LENGTH = 6;
+
 /** Questions listed per page when browsing one topic (`QAEngine.gs:376`). */
 export const FAQ_PAGE_SIZE = 8;
 
