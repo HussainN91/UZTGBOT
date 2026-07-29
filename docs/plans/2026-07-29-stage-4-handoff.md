@@ -217,7 +217,23 @@ does nothing" failure this rebuild exists to remove, so it was uninstalled rathe
 place. Do not reach for it again until it supports TypeScript 7, and **do not downgrade TypeScript
 to suit a linting tool.**
 
-**The alternative, if the head of project wants it.** The layers map cleanly onto directories —
+**The graph itself now exists, built rather than installed** (`340966f`):
+
+```
+npm run deps          → writes docs/dependency-tree.md
+npm run deps:check    → silent, exits non-zero on a cycle, an unresolvable
+                        import, or a file nothing uses
+```
+
+`scripts/dependency-tree.mjs` — plain Node, no dependencies, no build step, and
+nothing a compiler upgrade can break. It already knows the three things the
+off-the-shelf tool had to be taught: entry points and test files are imported by
+nothing and that is correct; a `.js` on a relative import means a `.ts` file; and
+a type-only import may point upward and is not a cycle. **Current state: 62 source
+files, 40 test files, no cycles, no unresolved imports, nothing unused.** Run
+`npm run deps` after adding files and commit the regenerated document.
+
+**What is still missing is the rule, not the graph.** The layers map cleanly onto directories —
 `src/staff/roles.ts` and `src/cases/status.ts` are pure leaves, `src/cases/queries.ts` and the
 repositories are stores, `src/telegram/commands/` is layer 3. A script of roughly thirty lines can
 read the import lines of every file and fail on one that points upward. No dependency, no coupling
