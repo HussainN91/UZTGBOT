@@ -550,6 +550,190 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
     });
   });
 
+  /**
+   * Task 45 — the three judgements staff record about a case.
+   *
+   * `/mark` is the one that outlives the case: status moves and a resolved
+   * emergency becomes `Completed`, so the marker is the only thing that will
+   * still know it was one when stage 5's retention reads it (D22, R13).
+   */
+  describe('marks and dates', () => {
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    /** A date far enough ahead that it cannot go stale while this suite exists. */
+    const isoInDays = (days: number): string =>
+      new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+    const spelt = (iso: string): string => {
+      const [year, month, day] = iso.split('-');
+      return `${day!} ${MONTHS[Number(month) - 1]!} ${year!}`;
+    };
+
+    const judgement = async (
+      reference: string,
+    ): Promise<{ importance: string; due_at: string | null; snoozed_until: string | null }> => {
+      const rows = await db.execute<{ importance: string; due_at: string | null; snoozed_until: string | null }>(
+        sql`SELECT importance, due_at, snoozed_until FROM cases WHERE reference = ${reference}`,
+      );
+      return rows.rows[0]!;
+    };
+
+    describe('/mark', () => {
+      it('records a level, and says which one it replaced', async () => {
+        const body = await run(`/mark ${VISA_REF} Critical`);
+
+        expect((await judgement(VISA_REF)).importance).toBe('Critical');
+        expect(body).toContain('Critical');
+        expect(body).toContain('Normal');
+      });
+
+      it('refuses a word it does not know instead of quietly marking nothing', async () => {
+        const body = await run(`/mark ${VISA_REF} hihg`);
+
+        expect(body).toMatch(/do not know a level/i);
+        expect(body).toContain('Critical');
+        expect((await judgement(VISA_REF)).importance).toBe('Normal');
+      });
+
+      it('reads a level however it is capitalised', async () => {
+        await run(`/mark ${VISA_REF} urgent`);
+        expect((await judgement(VISA_REF)).importance).toBe('Urgent');
+      });
+
+      it('keeps the marker through close and reopen — R13', async () => {
+        // Nothing about `Completed` remembers that a case was an emergency. A
+        // retention job reading status would delete exactly the cases the rule
+        // exists to keep, at the shortest interval, and nobody would find out.
+        await run(`/mark ${VISA_REF} Critical`);
+        await run(`/close ${VISA_REF} the visa was issued`);
+        expect((await judgement(VISA_REF)).importance).toBe('Critical');
+
+        await run(`/reopen ${VISA_REF}`);
+        expect((await judgement(VISA_REF)).importance).toBe('Critical');
+      });
+
+      it('may be used on a finished case, unlike /due and /snooze', async () => {
+        // D22: critical is a judgement somebody makes after reading the case,
+        // and the reader who realises afterwards is the person it exists for.
+        await run(`/close ${VISA_REF} the visa was issued`);
+        await run(`/mark ${VISA_REF} Critical`);
+
+        expect((await judgement(VISA_REF)).importance).toBe('Critical');
+      });
+
+      it('is refused outside the caller’s queue, like every other write', async () => {
+        await run(`/mark ${ACCOM_REF} Critical`);
+        expect((await judgement(ACCOM_REF)).importance).toBe('Normal');
+      });
+
+      it('is not available to an Observer', async () => {
+        expect(await run(`/mark ${VISA_REF} Critical`, OBSERVER)).toMatch(/rank/i);
+        expect((await judgement(VISA_REF)).importance).toBe('Normal');
+      });
+    });
+
+    describe('/due', () => {
+      it('accepts a date a person would actually type, in either form', async () => {
+        const iso = isoInDays(30);
+
+        await run(`/due ${VISA_REF} ${iso}`);
+        const first = (await judgement(VISA_REF)).due_at;
+        expect(first).not.toBeNull();
+
+        await run(`/due ${VISA_REF} ${spelt(iso)}`);
+        expect((await judgement(VISA_REF)).due_at).toBe(first);
+      });
+
+      it('refuses one in the past, and says to check the year', async () => {
+        const body = await run(`/due ${VISA_REF} 2020-01-01`);
+
+        expect(body).toMatch(/already passed/i);
+        expect(body).toMatch(/year/i);
+        expect((await judgement(VISA_REF)).due_at).toBeNull();
+      });
+
+      it('refuses a slashed date rather than guessing which half is the month', async () => {
+        const body = await run(`/due ${VISA_REF} 15/08/2026`);
+
+        expect(body).toMatch(/will not guess/i);
+        expect((await judgement(VISA_REF)).due_at).toBeNull();
+      });
+
+      it('refuses a day that does not exist', async () => {
+        await run(`/due ${VISA_REF} 2027-02-31`);
+        expect((await judgement(VISA_REF)).due_at).toBeNull();
+      });
+
+      it('takes the date off again', async () => {
+        await run(`/due ${VISA_REF} ${isoInDays(30)}`);
+        await run(`/due ${VISA_REF} clear`);
+
+        expect((await judgement(VISA_REF)).due_at).toBeNull();
+      });
+
+      it('refuses a finished case — a promise about work that is over', async () => {
+        await run(`/close ${VISA_REF} the visa was issued`);
+        const body = await run(`/due ${VISA_REF} ${isoInDays(30)}`);
+
+        expect(body).toMatch(/finished/i);
+        expect((await judgement(VISA_REF)).due_at).toBeNull();
+      });
+
+      it('tells nobody but the person who typed it', async () => {
+        // A date staff agree among themselves is not a promise made to anybody
+        // until somebody makes it with /reply.
+        const outcome = await command(`/due ${VISA_REF} ${isoInDays(30)}`);
+
+        expect(outcome.messages).toHaveLength(1);
+        expect(outcome.messages[0]?.chatId).toBe(VISA_STAFF);
+      });
+    });
+
+    describe('/snooze', () => {
+      it('snoozes for a number of days and says until when', async () => {
+        const body = await run(`/snooze ${VISA_REF} 14`);
+
+        expect((await judgement(VISA_REF)).snoozed_until).not.toBeNull();
+        expect(body).toMatch(/still open/i);
+      });
+
+      it('refuses longer than the cap, rather than throwing into silence', async () => {
+        // An exception reaches bot.catch, which acknowledges the update and says
+        // nothing — so the staff member would see silence and assume it worked.
+        const body = await run(`/snooze ${VISA_REF} 400`);
+
+        expect(body).toMatch(/limit is/i);
+        expect((await judgement(VISA_REF)).snoozed_until).toBeNull();
+      });
+
+      it('refuses something that is not a number of days', async () => {
+        await run(`/snooze ${VISA_REF} a fortnight`);
+        expect((await judgement(VISA_REF)).snoozed_until).toBeNull();
+      });
+
+      it('can be lifted again, which is the recovery from a mistyped one', async () => {
+        await run(`/snooze ${VISA_REF} 90`);
+        await run(`/snooze ${VISA_REF} clear`);
+
+        expect((await judgement(VISA_REF)).snoozed_until).toBeNull();
+      });
+
+      it('refuses a finished case', async () => {
+        await run(`/close ${VISA_REF} the visa was issued`);
+        await run(`/snooze ${VISA_REF} 14`);
+
+        expect((await judgement(VISA_REF)).snoozed_until).toBeNull();
+      });
+
+      it('changes neither the status nor the owner', async () => {
+        await run(`/reply ${VISA_REF} we are on it`);
+        await run(`/snooze ${VISA_REF} 14`);
+
+        expect((await caseRow(VISA_REF)).status).toBe('Under review');
+      });
+    });
+  });
+
   describe('length', () => {
     it('keeps both messages inside what Telegram will deliver', async () => {
       // A reply carries staff free text of unbounded length, and a reply that

@@ -27,6 +27,16 @@ export interface StaffCaseRow {
   readonly teacherChatId: string;
   readonly teacherName: string | null;
   readonly region: string | null;
+  /**
+   * Set when a person decided the region, null when it came from the roster.
+   *
+   * `regionSetBy` alone cannot answer that: `clearRegionOverride` stamps it too,
+   * and a teacher whose override was cleared has a named setter and a region
+   * that came from the spreadsheet after all.
+   */
+  readonly regionOverride: string | null;
+  readonly regionSetBy: string | null;
+  readonly regionSetAt: Date | null;
   readonly owner: string | null;
   readonly detail: string;
   readonly publicUpdate: string;
@@ -69,6 +79,10 @@ const COLUMNS = {
   teacherName: teachers.name,
   /** Resolved the same way `regionFor` resolves it, never from the sign-in copy. */
   region: sql<string | null>`coalesce(${teachers.regionOverride}, ${rosterEntries.region})`,
+  /** Where that region came from, so `/case` can say who decided it (Task 45). */
+  regionOverride: teachers.regionOverride,
+  regionSetBy: teachers.regionSetBy,
+  regionSetAt: teachers.regionSetAt,
   owner: cases.owner,
   detail: cases.detail,
   publicUpdate: cases.publicUpdate,

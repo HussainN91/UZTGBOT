@@ -12,7 +12,7 @@
  * possible moment. So a correction lives here, and `schema.ts`'s ownership rule
  * holds: the sheet owns what the bot reads, the database owns what it writes.
  */
-import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { rosterEntries, teachers } from '../db/schema.js';
 import { recordAudit } from '../log/audit.js';
@@ -138,6 +138,46 @@ export async function flagRegionMismatch(db: Database, chatId: string): Promise<
   return (result.rowCount ?? 0) > 0;
 }
 
+/**
+ * Every region this system has ever heard of, spelt as its source spells it.
+ *
+ * `/region` matches what a staff member types against this list and writes back
+ * the spelling it finds, which does two things. A typo — `Bukhrara` — is refused
+ * with the real names rather than written, and a region nobody covers is a
+ * teacher whose cases only all-region staff can see: routed nowhere, visibly
+ * wrong to nobody. And `tashkent` becomes `Tashkent`, so `/case` and `/regions`
+ * do not grow a second spelling of one province. (Visibility itself already
+ * compares case-insensitively, so this is legibility rather than correctness —
+ * but two spellings on screen is how a person concludes there are two places.)
+ *
+ * The roster is the source; overrides are included because a region set by a
+ * manager before recruitment caught up is still a real region. Read fresh each
+ * time: this runs on a command a person types, not in a loop.
+ */
+export async function knownRegions(db: Database): Promise<string[]> {
+  const [fromRoster, fromOverrides] = await Promise.all([
+    db
+      .selectDistinct({ region: rosterEntries.region })
+      .from(rosterEntries)
+      .where(and(isNotNull(rosterEntries.region), ne(rosterEntries.region, ''))),
+    db
+      .selectDistinct({ region: teachers.regionOverride })
+      .from(teachers)
+      .where(and(isNotNull(teachers.regionOverride), ne(teachers.regionOverride, ''))),
+  ]);
+
+  // The roster is listed first so that when the two disagree only in case, the
+  // spelling recruitment uses is the one that survives.
+  const seen = new Map<string, string>();
+  for (const { region } of [...fromRoster, ...fromOverrides]) {
+    if (region === null) continue;
+    const key = region.toLowerCase();
+    if (!seen.has(key)) seen.set(key, region);
+  }
+
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
 export interface RegionFlag {
   readonly chatId: string;
   readonly name: string | null;
@@ -151,18 +191,49 @@ export interface RegionFlag {
  *
  * Ordered oldest first: a report that has been waiting longest is the one most
  * likely to be routing somebody's emergency to the wrong province.
+ *
+ * **Scoped by the region we currently hold, which is the only one we know.** A
+ * report says "the region on my record is wrong" — so the person who should see
+ * it is whoever holds the teacher today, because it is their queue the teacher is
+ * wrongly sitting in. It cannot be scoped by where the teacher actually is: that
+ * is the very thing nobody has been told yet.
+ *
+ * `regions` empty means every region, exactly as `staff.regions` means it
+ * everywhere else, and a teacher with no region recorded appears for everybody —
+ * the same `IS NULL` rule the visibility predicate depends on, for the same
+ * reason. Without it, the teachers whose region is least known would be the ones
+ * nobody could be shown.
  */
-export async function listRegionFlags(db: Database): Promise<RegionFlag[]> {
+export async function listRegionFlags(
+  db: Database,
+  regions: readonly string[] = [],
+): Promise<RegionFlag[]> {
+  const held = sql<string | null>`coalesce(${teachers.regionOverride}, ${rosterEntries.region})`;
+
+  // ⚠️ A JS array cannot be interpolated into a `sql` template — drizzle expands
+  // it into a parameter list, so `= ANY(${arr})` becomes `= ANY(($1, $2))` and
+  // PostgreSQL rejects it. `inArray`, as in `visibility.ts`, for the same reason.
+  const regionClause =
+    regions.length === 0
+      ? sql`true`
+      : sql`(${held} IS NULL OR ${inArray(sql`lower(${held})`, regions.map((r) => r.toLowerCase()))})`;
+
   const rows = await db
     .select({
       chatId: teachers.chatId,
       name: teachers.name,
-      region: sql<string | null>`coalesce(${teachers.regionOverride}, ${rosterEntries.region})`,
+      region: held,
       flaggedAt: teachers.regionFlaggedAt,
     })
     .from(teachers)
     .leftJoin(rosterEntries, eq(teachers.identifier, rosterEntries.identifier))
-    .where(and(isNotNull(teachers.regionFlaggedAt), eq(teachers.verificationState, 'Verified')))
+    .where(
+      and(
+        isNotNull(teachers.regionFlaggedAt),
+        eq(teachers.verificationState, 'Verified'),
+        regionClause,
+      ),
+    )
     .orderBy(teachers.regionFlaggedAt);
 
   return rows.map((r) => ({ ...r, flaggedAt: r.flaggedAt as Date }));

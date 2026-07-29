@@ -381,6 +381,30 @@ export async function setSnooze(
 }
 
 /**
+ * Lift a snooze.
+ *
+ * Its own verb because `setSnooze` takes a number of days and there is no number
+ * that means "never mind". Somebody who types `/snooze REF 90` meaning 9 has
+ * otherwise put a case beyond chasing for three months with no way back short of
+ * a database session — which is the argument D27 made for `/restore` and D20
+ * made for clearing a region override. A mistake made by a command should be
+ * undoable by a command.
+ */
+export async function clearSnooze(
+  db: Database,
+  reference: string,
+  actor: string,
+): Promise<boolean> {
+  const result = await db
+    .update(cases)
+    .set({ snoozedUntil: null, updatedAt: sql`now()`, lastActor: actor })
+    .where(eq(cases.reference, reference.trim().toUpperCase()))
+    .returning({ reference: cases.reference });
+
+  return result.length > 0;
+}
+
+/**
  * What a teacher is allowed to see about their own cases.
  *
  * `detail` is absent from this type, not merely unselected. Check My Case

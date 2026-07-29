@@ -38,7 +38,7 @@ import {
 } from './context.js';
 import { CASE_COMMANDS } from './cases.js';
 import { parseCommand } from './parse.js';
-import { whoami } from './staff.js';
+import { PEOPLE_COMMANDS } from './staff.js';
 
 export type { StaffCommand, StaffContext };
 
@@ -59,7 +59,7 @@ export const STAFF_DENIED = 'STAFF_DENIED';
  * unbuilt command that answered "not implemented" would tell a stranger the
  * command list, and would consume a teacher's message to say it.
  */
-export const STAFF_COMMANDS: readonly StaffCommand[] = [whoami, ...CASE_COMMANDS];
+export const STAFF_COMMANDS: readonly StaffCommand[] = [...PEOPLE_COMMANDS, ...CASE_COMMANDS];
 
 /**
  * Match, authorise, and run one staff command.

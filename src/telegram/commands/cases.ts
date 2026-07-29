@@ -23,7 +23,9 @@ import {
   CASE_DETAIL_SHOWN_CHARS,
   CASE_NOTES_SHOWN,
   CASE_NOTE_SHOWN_CHARS,
+  MAX_SNOOZE_DAYS,
 } from '../../config/constants.js';
+import { importanceList, parseImportance } from '../../cases/importance.js';
 import { addNote, countNotes, recentNotes, type CaseNote } from '../../cases/notes.js';
 import {
   casesOwnedBy,
@@ -35,7 +37,7 @@ import {
   type StaffCaseList,
   type StaffCaseRow,
 } from '../../cases/queries.js';
-import { updateCase } from '../../cases/service.js';
+import { clearSnooze, markImportance, setDue, setSnooze, updateCase } from '../../cases/service.js';
 import { caseStatusList, isOpenStatus, parseCaseStatus } from '../../cases/status.js';
 import { recordAudit } from '../../log/audit.js';
 import { CAPABILITY } from '../../staff/roles.js';
@@ -51,7 +53,7 @@ import {
   replyAndTell,
   scopeOf,
 } from './context.js';
-import { splitReference } from './parse.js';
+import { parseDueDate, splitReference } from './parse.js';
 
 /**
  * What `/cases` was asked for.
@@ -116,6 +118,32 @@ function budget(text: string, limit: number): string {
   return `${trimmed.slice(0, limit)}… (${trimmed.length - limit} more characters — this is the whole of it in the database)`;
 }
 
+/**
+ * The region, and where it came from.
+ *
+ * Provenance rather than decoration. There are two sources — recruitment's
+ * spreadsheet and a staff correction — and which one is in force decides what to
+ * do about a region that looks wrong: ask recruitment to fix the sheet, or ask
+ * whoever set the override why. Without this the answer to "why is this teacher
+ * in Samarkand" is a database session.
+ *
+ * "Not recorded" says what that *means* rather than leaving a blank. It is not a
+ * missing field, it is the state in which every staff member can see the case
+ * (D10), and that is the opposite of what an empty region looks like.
+ */
+function renderRegion(row: StaffCaseRow): string {
+  if (row.region === null) {
+    return 'Region: not recorded — which means every staff member can see this case';
+  }
+
+  if (row.regionOverride === null) {
+    return `Region: ${row.region} (from the recruitment spreadsheet)`;
+  }
+
+  const when = row.regionSetAt === null ? '' : ` on ${formatTashkent(row.regionSetAt)}`;
+  return `Region: ${row.region} (set by ${row.regionSetBy ?? 'a staff member'}${when})`;
+}
+
 function renderNote(note: CaseNote): string {
   return `${formatTashkent(note.createdAt)} · ${note.authorChatId}\n  ${budget(note.body, CASE_NOTE_SHOWN_CHARS)}`;
 }
@@ -138,7 +166,7 @@ function renderCase(row: StaffCaseRow, notes: CaseNote[], noteTotal: number): st
     `${row.status} · ${row.category} · importance ${row.importance}`,
     '',
     `Teacher: ${row.teacherName ?? 'name not recorded'} (chat ${row.teacherChatId})`,
-    `Region: ${row.region ?? 'not recorded'}`,
+    renderRegion(row),
     `Owner: ${row.owner ?? 'nobody — /assign to take it'}`,
     `Opened: ${formatTashkent(row.createdAt)} (${ageInDays(row.createdAt)} ago)`,
     `Last touched: ${formatTashkent(row.updatedAt)}`,
@@ -830,6 +858,262 @@ export const assignCase: StaffCommand = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Judgements about a case — Task 45, over D22 and D23
+// ---------------------------------------------------------------------------
+
+/**
+ * `/mark <ref> Normal|Urgent|Critical` — how serious this is, as a person judged it.
+ *
+ * Deliberately allowed on a case that is already finished, unlike `/due` and
+ * `/snooze` below. Importance is not a piece of work in progress: D22 calls it a
+ * judgement somebody makes after reading the case, and the reader who realises
+ * afterwards that a resolved case was an emergency is exactly the person this
+ * column exists for. Stage 5's retention reads the marker and never the status,
+ * so marking a closed case is the one thing that keeps it (R13).
+ *
+ * It writes no audit row. D18 lists the privileged actions that do — staff
+ * lifecycle, maintenance, revocation, assignment, urgent codes — and a judgement
+ * about severity is not one of them. `last_actor` records who touched it.
+ */
+export const markCase: StaffCommand = {
+  name: '/mark',
+  capability: CAPABILITY.CASE_MARK,
+  handle: async (ctx) => {
+    const usage = `/mark VISA-2026-00001 Critical   — the levels are ${importanceList()}`;
+
+    const resolved = await resolveCase(ctx, usage);
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row, rest } = resolved;
+    const wanted = rest.trim();
+    if (wanted === '') return reply(ctx.member.telegramId, `How serious is it?\n\n${usage}`);
+
+    /**
+     * An unknown word is refused rather than treated as `Normal`. A command that
+     * appeared to work and marked nothing is the failure this column exists to
+     * prevent, and nobody would have a reason to look again.
+     */
+    const level = parseImportance(wanted);
+    if (level === null) {
+      return reply(
+        ctx.member.telegramId,
+        [`I do not know a level called “${wanted}”.`, '', `The levels are: ${importanceList()}.`].join('\n'),
+      );
+    }
+
+    if (level === row.importance) {
+      return reply(ctx.member.telegramId, `${row.reference} is already ${level}. Nothing changed.`);
+    }
+
+    const written = await markImportance(ctx.db, row.reference, level, ctx.member.telegramId);
+    if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        `${row.reference} is marked ${level}, was ${row.importance}.`,
+        '',
+        'The mark stays on the case after it is closed, which a status does not —',
+        'that is the whole reason it is a separate thing. The teacher is not told;',
+        'this is our judgement, not theirs. /reply is what tells them something.',
+      ].join('\n'),
+    );
+  },
+};
+
+/**
+ * Both of the dates staff put on a case, and both refuse a finished one.
+ *
+ * A promise on a completed case is a promise about work that is over, and a
+ * snooze suppresses chasing that has nothing left to chase. Neither is harmful
+ * on its own — but a `due_at` in the future on a `Completed` case is precisely
+ * the sort of row that makes stage 5's chasing job look broken to whoever writes
+ * it. `/mark` is deliberately not in here; see above.
+ */
+async function resolveOpenCase(ctx: StaffContext, usage: string): Promise<Resolved> {
+  const resolved = await resolveCase(ctx, usage);
+  if (!resolved.ok) return resolved;
+
+  if (!isOpenStatus(resolved.row.status)) {
+    return {
+      ok: false,
+      text: `${resolved.row.reference} is ${resolved.row.status}, so it is finished. /reopen ${resolved.row.reference} first if there is more to do.`,
+    };
+  }
+
+  return resolved;
+}
+
+/**
+ * `/due <ref> <date>` — when whoever holds this case said it would be done.
+ *
+ * Nothing chases it yet. D23 writes it here anyway, so that stage 5 adds a
+ * schedule to a column already holding real data rather than a schedule, a
+ * column, and the hope that staff have been filling it in. Until then it is
+ * visible on `/case` and to nobody else, and that is stated in the confirmation
+ * rather than left for somebody to discover.
+ *
+ * The teacher is not told. A date staff agree among themselves is not a promise
+ * made to anybody until somebody makes it with `/reply`, and a bot announcing a
+ * date nobody chose to send is how a missed internal estimate becomes a broken
+ * promise to a teacher.
+ */
+export const dueCase: StaffCommand = {
+  name: '/due',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: async (ctx) => {
+    const usage = [
+      '/due VISA-2026-00001 2026-08-15',
+      '/due VISA-2026-00001 15 Aug 2026',
+      '/due VISA-2026-00001 clear   — take the date off again',
+    ].join('\n');
+
+    const resolved = await resolveOpenCase(ctx, usage);
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row, rest } = resolved;
+    const wanted = rest.trim();
+    if (wanted === '') return reply(ctx.member.telegramId, `By when?\n\n${usage}`);
+
+    if (/^(clear|none)$/i.test(wanted)) {
+      const cleared = await setDue(ctx.db, row.reference, null, ctx.member.telegramId);
+      if (!cleared) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+      return reply(
+        ctx.member.telegramId,
+        `${row.reference} has no promised date now. Nobody is expecting it by any particular day.`,
+      );
+    }
+
+    const parsed = parseDueDate(wanted);
+    if (!parsed.ok) {
+      const explanation = {
+        ambiguous:
+          `I will not guess at “${wanted}”. 15/08 and 08/15 are both in ordinary use and they ` +
+          'mean different days, and a date read the wrong way round is not visibly wrong — it is ' +
+          'just a promise to a teacher on the wrong day.',
+        unreadable: `I cannot read “${wanted}” as a date.`,
+        'no-such-day': `There is no such day as “${wanted}”.`,
+      }[parsed.why];
+
+      return reply(ctx.member.telegramId, [explanation, '', 'Type it one of these ways:', usage].join('\n'));
+    }
+
+    /**
+     * A date already gone is refused. It is almost always last year's typed by
+     * habit in January, and the alternative is a case that is overdue the moment
+     * it is promised — which stage 5 would then chase somebody about for ever.
+     * The end of today still counts as future, so "by close of play" works.
+     */
+    if (parsed.at.getTime() <= Date.now()) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${formatTashkent(parsed.at)} has already passed, so nothing was written.`,
+          '',
+          'A date in the past would make the case overdue from the moment it was promised.',
+          'Check the year — this is usually last year typed out of habit.',
+        ].join('\n'),
+      );
+    }
+
+    const written = await setDue(ctx.db, row.reference, parsed.at, ctx.member.telegramId);
+    if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        `${row.reference} is promised by ${formatTashkent(parsed.at)}.`,
+        '',
+        'The teacher has not been told — /reply is what tells them anything.',
+        'Nothing chases this date yet either; it is on /case for whoever looks.',
+      ].join('\n'),
+    );
+  },
+};
+
+/**
+ * `/snooze <ref> <days>` — stop chasing this one for a while.
+ *
+ * A snooze suppresses the chasing, never the work. The case stays open, stays in
+ * `/cases`, stays with its owner and keeps its status. That is worth saying in
+ * the confirmation, because the word invites the opposite reading and a staff
+ * member who thinks a snooze hides a case will use it to hide one.
+ *
+ * `MAX_SNOOZE_DAYS` is enforced in `setSnooze` as well as here, and the cap is
+ * what stops a snooze becoming a way to make an inconvenient case go away. The
+ * check is repeated in the command so that going over it is answered rather than
+ * thrown — an exception reaches `bot.catch`, which acknowledges the update and
+ * says nothing, so the staff member would see silence and assume it worked.
+ */
+export const snoozeCase: StaffCommand = {
+  name: '/snooze',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: async (ctx) => {
+    const usage = [
+      '/snooze VISA-2026-00001 14   — days, up to ' + String(MAX_SNOOZE_DAYS),
+      '/snooze VISA-2026-00001 clear   — start chasing it again',
+    ].join('\n');
+
+    const resolved = await resolveOpenCase(ctx, usage);
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row, rest } = resolved;
+    const wanted = rest.trim();
+    if (wanted === '') return reply(ctx.member.telegramId, `For how long?\n\n${usage}`);
+
+    if (/^(clear|none)$/i.test(wanted)) {
+      const cleared = await clearSnooze(ctx.db, row.reference, ctx.member.telegramId);
+      if (!cleared) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+      return reply(ctx.member.telegramId, `${row.reference} is not snoozed any more.`);
+    }
+
+    const days = Number(wanted.replace(/\s*days?$/i, '').trim());
+    if (!Number.isInteger(days) || days <= 0) {
+      return reply(
+        ctx.member.telegramId,
+        [`“${wanted}” is not a number of days.`, '', usage].join('\n'),
+      );
+    }
+
+    if (days > MAX_SNOOZE_DAYS) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${String(days)} days is longer than a case may be snoozed. The limit is ${String(MAX_SNOOZE_DAYS)}.`,
+          '',
+          'The limit is what stops a snooze becoming a way of making an awkward case',
+          'disappear. If it genuinely needs longer than that, it needs a note saying why.',
+        ].join('\n'),
+      );
+    }
+
+    const written = await setSnooze(ctx.db, row.reference, days, ctx.member.telegramId);
+    if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+    /**
+     * Read back rather than computed here. `setSnooze` writes `now()` inside
+     * PostgreSQL, and every timestamp that decides something in this system is
+     * the database's rather than this process's — so the date shown is the date
+     * stored, not a second opinion about it that could differ by a clock skew.
+     */
+    const after = await findCase(ctx.db, ctx.scope, row.reference);
+    const until = after?.snoozedUntil ?? null;
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        until === null
+          ? `${row.reference} is snoozed for ${String(days)} days.`
+          : `${row.reference} is snoozed until ${formatTashkent(until)}.`,
+        '',
+        'It is still open, still yours, still in /cases and still at the same status.',
+        'A snooze stops the chasing, not the work.',
+      ].join('\n'),
+    );
+  },
+};
+
 /** A staff member as another staff member should see them named. */
 const describeStaff = (member: { telegramId: string; name: string | null }): string =>
   member.name === null ? member.telegramId : `${member.name} (${member.telegramId})`;
@@ -846,4 +1130,7 @@ export const CASE_COMMANDS: readonly StaffCommand[] = [
   reopenCase,
   noteOnCase,
   assignCase,
+  markCase,
+  dueCase,
+  snoozeCase,
 ];
