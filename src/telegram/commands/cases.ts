@@ -24,7 +24,7 @@ import {
   CASE_NOTES_SHOWN,
   CASE_NOTE_SHOWN_CHARS,
 } from '../../config/constants.js';
-import { countNotes, recentNotes, type CaseNote } from '../../cases/notes.js';
+import { addNote, countNotes, recentNotes, type CaseNote } from '../../cases/notes.js';
 import {
   casesOwnedBy,
   findCase,
@@ -35,14 +35,20 @@ import {
   type StaffCaseList,
   type StaffCaseRow,
 } from '../../cases/queries.js';
-import { caseStatusList, parseCaseStatus } from '../../cases/status.js';
+import { updateCase } from '../../cases/service.js';
+import { caseStatusList, isOpenStatus, parseCaseStatus } from '../../cases/status.js';
 import { CAPABILITY } from '../../staff/roles.js';
+import { findTeacher, teacherHasAccess } from '../../teachers/repository.js';
+import type { OutgoingMessage, RouterOutcome } from '../router.js';
 import {
   type StaffCommand,
+  type StaffContext,
   ageInDays,
   formatTashkent,
   reply,
+  replyAndTell,
 } from './context.js';
+import { splitReference } from './parse.js';
 
 /**
  * What `/cases` was asked for.
@@ -342,4 +348,364 @@ export const search: StaffCommand = {
   },
 };
 
-export const CASE_COMMANDS: readonly StaffCommand[] = [cases, myCases, urgent, oneCase, search];
+// ---------------------------------------------------------------------------
+// Changing a case — Task 34, D25 as corrected by D26
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn what somebody typed into a case they are allowed to change.
+ *
+ * **This is the authorization step for every mutation below, and it is the one
+ * thing in this file that must never be skipped.** `updateCase` and `addNote`
+ * take a bare reference and write — neither knows who is asking. Resolving
+ * through `findCase` is what applies the scope, so a Support member holding the
+ * Visa queue in Tashkent cannot close an Accommodation case in Samarkand by
+ * typing its reference. Doing it in one helper rather than at five call sites is
+ * the whole lesson of `adminCanSeeCase_`, which was correct and was applied by
+ * hand until one place forgot.
+ *
+ * It answers "no such case" and "not yours" identically, for the same reason
+ * `findCase` returns null for both: confirming that a reference exists tells the
+ * asker a teacher filed something, which is what the visibility rule protects.
+ */
+type Resolved =
+  | { readonly ok: true; readonly row: StaffCaseRow; readonly rest: string }
+  | { readonly ok: false; readonly text: string };
+
+async function resolveCase(ctx: StaffContext, usage: string): Promise<Resolved> {
+  const split = splitReference(ctx.rest);
+  if (split === null) {
+    return { ok: false, text: `I need a case reference first.\n\n${usage}` };
+  }
+
+  const row = await findCase(ctx.db, ctx.scope, split.reference);
+  if (row === null) {
+    return {
+      ok: false,
+      text: `No case ${split.reference} that you can see. Check the reference, or /cases for what is open.`,
+    };
+  }
+
+  return { ok: true, row, rest: split.rest };
+}
+
+/**
+ * A message to the teacher, and whether the sender needs warning about it.
+ *
+ * R5, and it is wider than R5 described. A teacher loses the use of the bot in
+ * two ways — `/revoke`, and their roster row being deactivated or removed — and
+ * only the first is a `Revoked` state. `teacherHasAccess` is the single answer
+ * to both, which is why the check is that function and not a comparison against
+ * `verificationState`.
+ *
+ * The message is still **sent**. Telegram will deliver it: the teacher simply
+ * cannot use the bot to reply or to look the case up again. Refusing to send
+ * would leave a staff member believing they had answered somebody. So this is a
+ * warning to the sender, never a refusal.
+ */
+async function noticeForTeacher(
+  ctx: StaffContext,
+  row: StaffCaseRow,
+  text: string,
+  purpose: string,
+): Promise<{ readonly message: OutgoingMessage; readonly warning: string | null }> {
+  const teacher = await findTeacher(ctx.db, row.teacherChatId);
+  const reachable = teacherHasAccess(teacher);
+
+  return {
+    message: { chatId: row.teacherChatId, text, purpose },
+    warning: reachable
+      ? null
+      : 'Note: this teacher can no longer use the bot, so they cannot open it to ' +
+        'read the case or reply. The message has still been sent to their chat.',
+  };
+}
+
+/** The staff confirmation, with the R5 warning appended when there is one. */
+const confirm = (lines: readonly string[], warning: string | null): string =>
+  warning === null ? lines.join('\n') : [...lines, '', warning].join('\n');
+
+/**
+ * Both halves of answering a teacher: `/reply` and `/await`.
+ *
+ * They differ in one thing — the status they write, and therefore what the
+ * teacher is being told to do. `/reply` says "we are working on it";
+ * `/await` says "we need something from you" (D26). Everything else is
+ * identical, so they are one function rather than two that drift.
+ *
+ * Both write `public_update`, which is the only case text a teacher ever sees.
+ * `/await` in particular is useless without it: a case marked "you must act"
+ * with the instruction sitting in a staff-only column is an instruction nobody
+ * follows.
+ */
+async function answerTeacher(
+  ctx: StaffContext,
+  kind: 'reply' | 'await',
+): Promise<RouterOutcome> {
+  const usage =
+    kind === 'reply'
+      ? '/reply VISA-2026-00001 your visa is with the embassy and should be ready on Friday'
+      : '/await VISA-2026-00001 please send us a photograph of your passport page';
+
+  const resolved = await resolveCase(ctx, usage);
+  if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+  const { row, rest } = resolved;
+  const body = rest.trim();
+
+  if (body === '') {
+    return reply(
+      ctx.member.telegramId,
+      kind === 'reply'
+        ? `What should I tell them?\n\n${usage}`
+        : `What do you need from them? A case marked “Action required” with nothing asked for leaves the teacher stuck.\n\n${usage}`,
+    );
+  }
+
+  if (!isOpenStatus(row.status)) {
+    return reply(
+      ctx.member.telegramId,
+      `${row.reference} is ${row.status}, so it is finished. /reopen ${row.reference} first if there is more to do.`,
+    );
+  }
+
+  const status = kind === 'reply' ? 'Under review' : 'Action required';
+  const written = await updateCase(ctx.db, row.reference, { status, publicUpdate: body }, ctx.member.telegramId);
+  if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+  const teacherText =
+    kind === 'reply'
+      ? [`Update on your case ${row.reference}`, '', body].join('\n')
+      : [
+          `Your case ${row.reference} — we need something from you`,
+          '',
+          body,
+          '',
+          'The case cannot move forward until this is done.',
+        ].join('\n');
+
+  const { message, warning } = await noticeForTeacher(
+    ctx,
+    row,
+    teacherText,
+    kind === 'reply' ? 'a reply to a teacher about their case' : 'a request to a teacher for something we need',
+  );
+
+  return replyAndTell(
+    ctx.member.telegramId,
+    confirm(
+      [
+        `${row.reference} is now ${status}.`,
+        kind === 'reply'
+          ? 'The teacher has been sent your message and can also see it in Check My Case.'
+          : 'The teacher has been told what you need, and can see it in Check My Case.',
+      ],
+      warning,
+    ),
+    [message],
+  );
+}
+
+export const replyToTeacher: StaffCommand = {
+  name: '/reply',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: (ctx) => answerTeacher(ctx, 'reply'),
+};
+
+export const awaitTeacher: StaffCommand = {
+  name: '/await',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: (ctx) => answerTeacher(ctx, 'await'),
+};
+
+/**
+ * `/close <ref> <message>` resolved it. `/close <ref> unresolved <reason>` did not.
+ *
+ * D26 gives `Closed` a writer, and the difference between "we fixed it" and "we
+ * gave up" is the single most useful thing a later reader can know. Both stamp
+ * `closed_at` and both start stage 5's retention clock; only what a later reader
+ * learns differs.
+ *
+ * **The unresolved reason goes to a note, not to the teacher.** It is written
+ * for whoever reads the case afterwards, and staff being candid — "unreachable
+ * since March, three attempts" — is what makes it worth having. The teacher is
+ * still told their case is closed, because silence against a case they raised is
+ * worse than a plain notice, and `public_update` gets a neutral sentence so
+ * Check My Case does not go on saying "we are working on it" against a closed
+ * case.
+ *
+ * The word is matched exactly, and the confirmation says plainly which of the
+ * two happened — `/close REF unresolved issues remain` is a real thing somebody
+ * could type meaning the other one, and the way to catch it is to say what was
+ * done rather than to guess.
+ */
+export const closeCase: StaffCommand = {
+  name: '/close',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: async (ctx) => {
+    const usage = [
+      '/close VISA-2026-00001 your visa was issued on Tuesday',
+      '/close VISA-2026-00001 unresolved unreachable since March, three attempts',
+    ].join('\n');
+
+    const resolved = await resolveCase(ctx, usage);
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row, rest } = resolved;
+
+    if (!isOpenStatus(row.status)) {
+      return reply(ctx.member.telegramId, `${row.reference} is already ${row.status}.`);
+    }
+
+    const unresolved = /^unresolved(\s|$)/i.test(rest.trim());
+    const body = unresolved ? rest.trim().replace(/^unresolved\s*/i, '').trim() : rest.trim();
+
+    if (body === '') {
+      return reply(
+        ctx.member.telegramId,
+        unresolved
+          ? `Why is it being closed unresolved? A case shut for no recorded reason is one nobody can answer for.\n\n${usage}`
+          : `What should I tell the teacher?\n\n${usage}`,
+      );
+    }
+
+    const publicText = unresolved
+      ? `This case has been closed without being resolved. If you still need help, contact ${ctx.deps.supportContact}.`
+      : body;
+
+    const written = await updateCase(
+      ctx.db,
+      row.reference,
+      { status: unresolved ? 'Closed' : 'Completed', publicUpdate: publicText },
+      ctx.member.telegramId,
+    );
+    if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+    // The reason is a note, and only on the unresolved path. On the ordinary
+    // path the teacher's message is already the record, in public_update.
+    if (unresolved) {
+      await addNote(ctx.db, row.reference, `Closed unresolved: ${body}`, ctx.member.telegramId);
+    }
+
+    const { message, warning } = await noticeForTeacher(
+      ctx,
+      row,
+      [`Your case ${row.reference} has been closed.`, '', publicText].join('\n'),
+      'a notice to a teacher that their case is closed',
+    );
+
+    return replyAndTell(
+      ctx.member.telegramId,
+      confirm(
+        unresolved
+          ? [
+              `${row.reference} is Closed — shut without being resolved.`,
+              'Your reason is on the case as a note. The teacher was told the case is closed, not why.',
+            ]
+          : [
+              `${row.reference} is Completed.`,
+              'The teacher has been sent your message and can see it in Check My Case.',
+            ],
+        warning,
+      ),
+      [message],
+    );
+  },
+};
+
+/**
+ * `/reopen <ref>` — back to `Under review`.
+ *
+ * Refuses a case that is already open rather than quietly rewriting its status,
+ * which would move `updated_at` and make a case somebody else is working look
+ * freshly touched to `staleCases`.
+ *
+ * The teacher is not messaged. Nothing has been said to them by a person, and
+ * Check My Case shows the status, so a notice here would be the bot inventing
+ * words nobody wrote. What `updateCase` does do is clear `closed_at` — a case
+ * that has not ended must not carry an end date, and stage 5's retention
+ * measures from that column.
+ */
+export const reopenCase: StaffCommand = {
+  name: '/reopen',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: async (ctx) => {
+    const resolved = await resolveCase(ctx, '/reopen VISA-2026-00001');
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row } = resolved;
+    if (isOpenStatus(row.status)) {
+      return reply(ctx.member.telegramId, `${row.reference} is already open — it is ${row.status}.`);
+    }
+
+    const written = await updateCase(
+      ctx.db,
+      row.reference,
+      { status: 'Under review' },
+      ctx.member.telegramId,
+    );
+    if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        `${row.reference} is open again, at Under review.`,
+        'The teacher has not been messaged. /reply tells them something.',
+      ].join('\n'),
+    );
+  },
+};
+
+/**
+ * `/note <ref> <text>` — internal, and no teacher ever sees it.
+ *
+ * Writes no status, and `addNote` deliberately does not touch the case row at
+ * all. A note is not progress: if it moved `updated_at`, a case being discussed
+ * internally would look freshly worked to `staleCases`, which is exactly the
+ * case most worth surfacing.
+ *
+ * Allowed on a closed case. Something worth recording often turns up after the
+ * fact, and a note is a record rather than an action.
+ *
+ * The body is checked here rather than left to `addNote`'s throw: an exception
+ * from a command reaches `bot.catch`, which acknowledges the update and says
+ * nothing — so the staff member would see silence and assume it worked.
+ */
+export const noteOnCase: StaffCommand = {
+  name: '/note',
+  capability: CAPABILITY.CASE_UPDATE,
+  handle: async (ctx) => {
+    const usage = '/note VISA-2026-00001 she is still waiting on the embassy';
+
+    const resolved = await resolveCase(ctx, usage);
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row, rest } = resolved;
+    const body = rest.trim();
+    if (body === '') return reply(ctx.member.telegramId, `What is the note?\n\n${usage}`);
+
+    await addNote(ctx.db, row.reference, body, ctx.member.telegramId);
+    const total = await countNotes(ctx.db, row.reference);
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        `Noted on ${row.reference}. ${total} note${total === 1 ? '' : 's'} on this case.`,
+        'No teacher ever sees these, and the case has not been touched — /reply is what tells them something.',
+      ].join('\n'),
+    );
+  },
+};
+
+export const CASE_COMMANDS: readonly StaffCommand[] = [
+  cases,
+  myCases,
+  urgent,
+  oneCase,
+  search,
+  replyToTeacher,
+  awaitTeacher,
+  closeCase,
+  reopenCase,
+  noteOnCase,
+];

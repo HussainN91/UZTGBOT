@@ -14,7 +14,7 @@ import type { Database } from '../../db/index.js';
 import type { Capability } from '../../staff/roles.js';
 import type { StaffRecord } from '../../staff/repository.js';
 import type { StaffScope } from '../../staff/visibility.js';
-import type { RouterDeps, RouterOutcome } from '../router.js';
+import type { OutgoingMessage, RouterDeps, RouterOutcome } from '../router.js';
 import type { InlineKeyboard } from '../keyboards.js';
 
 /** Everything a command handler is given. It never re-reads any of it. */
@@ -64,6 +64,32 @@ export interface StaffCommand {
 export function reply(chatId: string, text: string, keyboard?: InlineKeyboard): RouterOutcome {
   return {
     messages: [{ chatId, text: clampToTelegram(text), ...(keyboard !== undefined ? { keyboard } : {}) }],
+    alerts: [],
+  };
+}
+
+/**
+ * The staff member's confirmation, followed by anyone else who must be told.
+ *
+ * `messages[0]` stays the answer to whoever typed the command — `deliver` words
+ * its failure alarm from that position, and everything after it is expected to
+ * carry a `purpose` naming what it was (R10).
+ *
+ * Every message is clamped, not just the first. A message to a teacher carries
+ * `public_update`, which is staff free text of unbounded length, so it can reach
+ * Telegram's limit exactly as `/case` can — and a reply that fails to send is a
+ * teacher who is never told the answer to their problem.
+ */
+export function replyAndTell(
+  chatId: string,
+  text: string,
+  others: readonly OutgoingMessage[],
+): RouterOutcome {
+  return {
+    messages: [
+      { chatId, text: clampToTelegram(text) },
+      ...others.map((m) => ({ ...m, text: clampToTelegram(m.text) })),
+    ],
     alerts: [],
   };
 }
