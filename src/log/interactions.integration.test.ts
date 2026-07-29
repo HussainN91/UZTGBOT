@@ -112,7 +112,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the audit log', () => {
       actor: '930001',
       action: 'STAFF_ADDED',
       subject: '930002',
-      detail: { role: 'Regional', region: 'Tashkent' },
+      detail: { role: 'Lead', region: 'Tashkent' },
     });
 
     const rows = await db.execute<{ actor: string; action: string; subject: string; detail: unknown }>(
@@ -123,7 +123,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the audit log', () => {
       action: 'STAFF_ADDED',
       subject: '930002',
     });
-    expect(rows.rows[0]?.detail).toEqual({ role: 'Regional', region: 'Tashkent' });
+    expect(rows.rows[0]?.detail).toEqual({ role: 'Lead', region: 'Tashkent' });
   });
 
   it('records an entry that has no subject', async () => {
