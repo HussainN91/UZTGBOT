@@ -23,7 +23,14 @@ shipped as `d743d72`; Stage 4 ends at `807284c`.
 Verify it yourself before trusting it — see §7. Do not take the numbers above on trust; this
 document has been wrong before and the only reason it is not wrong now is that somebody ran things.
 
-**Next is Stage 5, and it has no plan yet.** §8 says what it inherits.
+**Next is Stage 5, and it has no plan yet. Write the plan before writing any code** — in a new
+document, `docs/plans/2026-07-30-stage-5-scheduled-work.md`. §8 says what it inherits and what the
+plan has to answer.
+
+> **The filename of this document still says stage 4.** That is historical and it is deliberate that
+> it was not renamed: there is one handoff, it is this file, and it is rewritten in place whatever
+> stage is current. Rename it if you like, but do it as its own change and update the reference in
+> `docs/plans/2026-07-28-stage-4-staff.md`.
 
 ## 2. Commits, oldest first
 
@@ -337,6 +344,26 @@ Stage 4 built everything it set out to build. **Stage 5 needs a plan written bef
 started**, in the shape the Stage 3 and Stage 4 plans use: decisions recorded with their reasoning,
 a ripple analysis, and a dependency tree that is checked rather than asserted.
 
+### Where the plan goes, and what not to touch while writing it
+
+**A new document: `docs/plans/2026-07-30-stage-5-scheduled-work.md`.** Plans are never written into
+this file and never into the stage-4 plan. Both of those are records of work that is finished, and
+editing them to hold the next stage's intentions is how a document stops being able to say what
+happened.
+
+**Do not edit `BOT-SPEC.md`, `RUNBOOK.md` or `CONCERNS-AND-IT-ACTIONS.md` while building Stage 5.**
+They were brought current through Stage 4 by task 41 (`807284c`) and they are *correct today*.
+Correcting them again is Stage 5's own final task, done in one pass at the end — exactly as task 41
+was — because a document edited a little at a time as code lands is a document that describes a
+system half-way between two states. **If Stage 5 makes one of them wrong, write that down in the
+Stage 5 plan as a documentation item; do not fix it in passing.**
+
+The one exception, and it is why the ordering matters: **the privacy notice is code**
+(`src/config/privacy.ts`), and it ships with the retention job rather than with the documentation
+pass. See below.
+
+### The four things Stage 5 inherits, and what the plan must answer for each
+
 **What Stage 4 deliberately left for it, each with its permission or its query already in place, so
 Stage 5 adds the missing half rather than a new model:**
 
@@ -359,6 +386,23 @@ Stage 5 adds the missing half rather than a new model:**
 
 **Nothing in Stage 4 is half-built.** If something looks unfinished, check the plan's table before
 assuming.
+
+### Two things the Stage 5 plan must put to the head of project, and one rule about doing so
+
+Neither is a question a developer may answer, and both were deliberately left to this stage:
+
+- **The content-review roll-up.** Three days of interaction log killed `RUNBOOK.md` §4.7, and the
+  recovery — a nightly count taken *before* the delete, keeping no teacher's words — is **their
+  choice to ask for, not a thing to build because it seems sensible.** Offer it; record the answer.
+  It is explicitly **not** an argument for a longer retention period.
+- **Whether the bot tells a teacher who their regional manager is.** Asked during Stage 4 and never
+  answered. Nothing in Stage 4 depended on it, so it was withdrawn rather than left blocking. It
+  publishes staff names, and possibly telephone numbers, to 1,800 people, so it wants a real
+  decision rather than a passing one.
+
+**The rule, which has held for four stages: ask, do not assume, and do not decide it yourself.** A
+question answered by a developer becomes an accident nobody recorded. Put it in the plan as an open
+question with the cost of each answer stated, and build the rest around it.
 
 ### A loose end that is not a task: the layer rule has no mechanical enforcement
 
@@ -457,6 +501,13 @@ and each time the next session started from something that was quietly wrong.
 **1. This document, rewritten in place.** Not patched — rewritten. It has been amended five times in
 a single session before, and the result contradicted itself in three places. There is one of it and
 it is the first thing the next session reads.
+
+> **This is the only document rewritten in place, and that is the whole point of it.** Everything
+> else is either a record of finished work — the stage plans — or a description of the running
+> system — `BOT-SPEC.md`, `RUNBOOK.md`, `CONCERNS-AND-IT-ACTIONS.md`. A stage's plan goes in **a new
+> document**; the three specification documents are corrected **once, at the end of a stage, in one
+> pass**, as task 41 did. Nothing else is edited mid-stage, and nothing else needs reading at length
+> to get started: this file plus the current stage's plan is the whole briefing.
 
 **2. The plan's "Where this stands" table**, at the top of `docs/plans/2026-07-28-stage-4-staff.md`,
 plus the checkboxes on any task that was finished, with its commit hash.
