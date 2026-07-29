@@ -12,6 +12,35 @@
 
 ---
 
+## ▶ Where this stands — 29 July 2026, end of session
+
+**Layers 1 and 2 are complete, committed and green. Layer 3 has not been started.**
+
+`495 tests across 35 files, none skipped. Typecheck and build clean.` Every number in this section was verified by a full run against a live database, not inferred.
+
+| Task | What | State |
+|---|---|---|
+| 23 | Role ladder + capability table | ✅ `src/staff/roles.ts` |
+| 24 | Queue map, total over every category | ✅ `src/staff/queues.ts` |
+| 25 | Command parser | ✅ `src/telegram/commands/parse.ts` |
+| 42 | The migration | ✅ `drizzle/0006_notes_regions_importance.sql`, applied and verified |
+| 26 | Staff repository | ✅ `src/staff/repository.ts` |
+| 43 | Region resolution | ✅ `src/teachers/region.ts` |
+| 27 | Visibility predicate | ✅ `src/staff/visibility.ts` |
+| 28 | Staff case queries | ✅ `src/cases/queries.ts` |
+| 29 | Case notes | ✅ `src/cases/notes.ts` |
+| 44 | Importance, due dates, snoozes | ✅ `src/cases/importance.ts` + `service.ts` |
+| 30 | Teacher revocation, both halves | ✅ `repository.ts` + the gate in `router.ts` |
+| 40 | The `/` prefix log rule | ✅ done early, `src/log/interactions.ts` |
+| R10 | `OutgoingMessage.purpose` | ✅ **pulled forward from Task 39** — see R10 |
+| **31–39, 41, 45, 46** | **Layer 3, 4, 5** | ⬜ **not started** |
+
+**Three of the four audit faults are closed:** revocation now revokes, a corrected region reaches the visibility rule, and the staff table has a reader and a writer. **The fourth is Task 32** — a teacher files a case and nothing anywhere is told. That is the first substantial thing left.
+
+**Read `docs/plans/2026-07-29-stage-4-handoff.md` before starting.** It records what is built, what is deliberately different from this plan, and the three open questions.
+
+---
+
 ## What this stage is not
 
 `/announce` and `/export` are **Stage 5**, with the announcement tables that already exist for them. Both are bulk egress, both need a fan-out-and-report mechanism this stage does not build, and `/export` additionally needs a document-sending path that `src/telegram/send.ts` does not have. `BOT-SPEC.md` §6.5 lists them among the nineteen commands; they are deferred here deliberately, not overlooked. See D19.
