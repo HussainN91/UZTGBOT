@@ -10,18 +10,19 @@ which opens with a "Where this stands" table naming every task and its state.
 
 ## 1. State, in one paragraph
 
-Stage 3 (teachers) shipped as `d743d72`. Stage 4's layers 1 and 2 are complete. **Layer 3 is six
-tasks of nine done: 31, 32, 33, 34 and 35 are built, committed and green.** All four of the audit
-faults this stage set out to close are closed, and **every question that was open is answered** —
-there is nothing waiting on the head of project. The working tree is clean at `260f7c1`.
+Stage 3 (teachers) shipped as `d743d72`. Stage 4's layers 1 and 2 are complete. **Layer 3 is eight
+tasks of nine done: 31, 32, 33, 34, 35, 45 and 46.** All four of the audit faults this stage set out
+to close are closed, and **every question that was open is answered** — there is nothing waiting on
+the head of project. Tasks 45 and 46 are built and green but **not yet committed**: the last commit
+is `7514e56` and the working tree carries both.
 
 ```
-630 tests, 40 files, none skipped · typecheck clean · build clean
+694 tests, 42 files, none skipped · typecheck clean · build clean · deps:check clean
 ```
 
 Verify it yourself before trusting it — see §7.
 
-## 2. Commits this session
+## 2. Commits, most recent last
 
 | Commit | What |
 |---|---|
@@ -31,6 +32,10 @@ Verify it yourself before trusting it — see §7.
 | `8f2b84c` | **A fix, not a feature.** A reopened case kept its `closed_at`, and retention would have deleted it |
 | `d0f08ba` | Task 34: `/reply` `/await` `/close` `/reopen` `/note` |
 | `260f7c1` | Task 35: `/assign` |
+| `340966f` | The dependency graph, built rather than installed — see §8 |
+| `7514e56` | Docs: why `dependency-cruiser` is waiting on TypeScript, not behind |
+| *uncommitted* | **Task 45**: `/region` `/regions` `/mark` `/due` `/snooze` |
+| *uncommitted* | **Task 46**: asking the teacher about their region, and **migration `0007`** |
 
 ## 3. The three answers given this session, because they change what gets built
 
@@ -67,6 +72,9 @@ improve their answers.**
 | 33 | `/cases` `/mycases` `/urgent` `/case` `/search` | `src/telegram/commands/cases.ts` |
 | 34 | `/reply` `/await` `/close` `/reopen` `/note` | same file |
 | 35 | `/assign` | same file |
+| 45 | `/mark` `/due` `/snooze` | same file |
+| 45 | `/region` `/regions` | `src/telegram/commands/staff.ts` |
+| 46 | the teacher's region prompt | `router.ts`, `keyboards.ts`, `handlers/menu.ts` |
 
 **`updateCase` and `addNote` do not check who is asking.** They take a bare reference and write.
 Every mutation command resolves through `findCase` first — which applies the scope — in the shared
@@ -82,11 +90,13 @@ unbounded length. A new command that builds its own `RouterOutcome` loses the gu
 **A new command must be registered in `STAFF_COMMANDS`** (`commands/index.ts`) or it is not
 recognised at all — and, by D9, an unrecognised word falls through to ordinary teacher handling
 rather than erroring. That is deliberate, and it means a forgotten registration fails *silently*.
+`STAFF_COMMANDS` is now `[...PEOPLE_COMMANDS, ...CASE_COMMANDS]`, so a command is registered in the
+file it lives in and `index.ts` does not have to be edited twice.
 
-**`/whoami` and `/help` already advertise commands that do not exist yet** — `/region`, `/regions`,
-`/mark`, `/due`, `/snooze`, `/staff*`, `/revoke`, `/maintenance`. They render from
-`CAPABILITY_INTERFACE` in `context.ts`, which is D7's table and is total over `Capability` on
-purpose. Tasks 45, 36 and 37 close the gap. **Do not "fix" this by trimming the table.**
+**`/whoami` and `/help` still advertise commands that do not exist yet** — `/staff*`, `/revoke`,
+`/restore`, `/maintenance`, `/generate_urgent_code`. They render from `CAPABILITY_INTERFACE` in
+`context.ts`, which is D7's table and is total over `Capability` on purpose. Tasks 36 and 37 close
+what is left. **Do not "fix" this by trimming the table.**
 
 **`teacherHasAccess` answers two questions, not one.** It is the sign-in gate *and* the "can this
 teacher still receive what we send" check that `/reply` warns on. A teacher loses the bot two ways —
@@ -97,10 +107,10 @@ state. Never compare against `verificationState` directly.
 read-modify-write on a case races. Every write in layer 3 is a single statement. `resolveCase`'s
 read is for permission, not for a value being modified, which is why it is safe.
 
-## 5. Deliberate departures from the plan — fifteen
+## 5. Deliberate departures from the plan — twenty-four
 
 Each is explained in a comment at the site. **Do not revert them.** 1–6 are from the first session,
-7–12 from tasks 31–32, 13–15 from tasks 33–34.
+7–12 from tasks 31–32, 13–15 from tasks 33–34, 16–20 from task 45, 21–24 from task 46.
 
 1. `OutgoingMessage.purpose` built early, not at Task 39. Every non-first message must set it.
 2. All five case queries return `{ cases, total }`.
@@ -126,6 +136,38 @@ Each is explained in a comment at the site. **Do not revert them.** 1–6 are fr
     `CASE_STATUS_ORDER` in the schema is now the source.
 14. `/case` budgets its own output because `send.ts` does not split messages.
 15. `updateCase` now **clears** `closed_at` when a case leaves a terminal status. See §6.
+16. `/region` refuses **both ends** of a move, not only the destination. Refusing only the
+    destination still lets a Samarkand lead pull a teacher *out* of Bukhara, which is the same act
+    from the other side. A `null` region is covered by everybody, because D10 already says an
+    unknown region hides a case from nobody. Consequence, stated in the refusal text: a
+    cross-region move needs somebody covering both.
+17. `knownRegions` in `teachers/region.ts` — `/region` refuses a region the system has never seen
+    and canonicalises the spelling. A typo would otherwise put a teacher in a province nobody
+    covers, routed nowhere, wrong in a way nothing reports.
+18. `listRegionFlags` takes a region scope. It is scoped by the region **we currently hold**,
+    because where the teacher actually is, is the thing nobody has been told yet.
+19. `clearSnooze` in `service.ts`, so `/snooze <ref> clear` exists. `setSnooze` takes a number of
+    days and no number means "never mind"; somebody who types `90` meaning `9` otherwise has no
+    recovery short of a database session. Same argument D27 made for `/restore`.
+20. `parseDueDate` lives in `commands/parse.ts` and imports `TIMEZONE`. `/due` refuses a slashed
+    date rather than guessing, and lands on the **end** of the day in Tashkent. `/mark` is at
+    `case.mark`, not `case.update` as the plan text said — D7's table is the source.
+21. **A second migration in the stage** — `drizzle/0007_region_asked_at.sql`. Task 42 said one
+    migration for the whole stage and it could not hold: nothing in the schema could answer "when
+    did we last ask", and without that the plan's own test (*does not ask again the next day*) is
+    unimplementable. `regionFlaggedAt` does not serve — it means "reported wrong, not yet dealt
+    with" and staff clear it. One `ADD COLUMN`, generated by `drizzle-kit`, verified against an
+    empty database as well as the incremental path, renamed to match the file convention.
+22. **`region_asked_at` is stamped when the question is SHOWN, not answered.** Stamped on answer, a
+    teacher who ignores it is asked again on every visit to the menu, which is the nagging D21
+    rules out. Both answers therefore need no write of their own for the cadence to work.
+23. **The prompt is on `/start` and `MENU:MAIN` only, not on `mainMenuReply()`.** That function is
+    reached from a dozen recovery branches and is documented as the one thing that cannot itself
+    fail; it is unchanged. `startReply` now returns `{ signedIn, reply }` so the teacher lookup
+    happens once and somebody being asked to sign in is not asked anything else on top.
+24. **"Still right" clears an outstanding mismatch flag** (`confirmRegion`). A teacher who reported
+    a move nobody acted on, and now says the record is correct, has withdrawn the report; leaving
+    it raised keeps it on `/regions` as work its author no longer wants done.
 
 ## 6. Two faults found by building, both in already-committed code
 
@@ -180,25 +222,24 @@ something the CLI does.
 
 ## 8. What to do next
 
-**Task 45 — `/region` `/regions` `/mark` `/due` `/snooze`.** The commands over Tasks 43 and 44, and
-the build order puts it here, after 35. It is where `importance`, `due_at` and `snoozed_until`
-finally get writers; `/case` already displays all three, so R15 closes properly rather than being a
-display of empty fields.
+**Task 36 — staff management: `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke`
+`/restore`.** The last task in layer 3.
 
 Build order from here, unchanged from the plan:
 
 ```
-45 · 46 · 36 · 37 · 38 · 39(partly done) · 41
+36 · 37 · 38 · 39(partly done) · 41
 ```
 
 Things already argued, so do not re-derive them:
 
-- **Task 45** — `/region` must refuse a region the manager does not cover: region decides who sees a
-  case, so a command that edits it can move work away from the person holding it. `/regions` is the
-  flag list, and without it a teacher's report has a writer and no reader.
 - **Task 36** — `/restore` is D27, and its trap is R16: a teacher locked out because their *roster
   row* went is not `Revoked`, so `/restore` cannot help them and must say which of the two it found.
-  `/staff_remove` must refuse to deactivate the last active System member (D13).
+  `/restore` on a teacher who was never revoked must say so and write **no** audit row — an audit
+  trail with invented entries is worse than a short one. `/staff_remove` must refuse to deactivate
+  the last active System member (D13), and must report rather than silently unassign when the
+  person owns open cases (R3 second order). `/staff_add` needs region names — `knownRegions` in
+  `teachers/region.ts` already produces them, and `/region` shows the shape of the refusal.
 - **Task 38** — the group gate. Its trap is R8: a naive "leave every group" makes the bot leave
   `OPS_ALERT_CHAT_ID` and kills every alarm in the system.
 - **Task 41** — larger than it looks. §4.7 of the runbook is deleted, "archive" becomes "delete",
@@ -241,8 +282,18 @@ nothing a compiler upgrade can break. It already knows the three things the
 off-the-shelf tool had to be taught: entry points and test files are imported by
 nothing and that is correct; a `.js` on a relative import means a `.ts` file; and
 a type-only import may point upward and is not a cycle. **Current state: 62 source
-files, 40 test files, no cycles, no unresolved imports, nothing unused.** Run
+files, 42 test files, no cycles, no unresolved imports, nothing unused.** Run
 `npm run deps` after adding files and commit the regenerated document.
+
+**`repowise` was tried on 29 July, reported honestly, and rejected by the head of
+project — "ignore repowise forever".** It is uninstalled and the `.repowise/`,
+`.mcp.json` and `.vscode/` it wrote were removed from the repo the same evening.
+**This is a closed decision. Do not propose it, and do not re-test it.** It is
+recorded only so that nobody spends the effort again: it indexed fine and free,
+but its search returned its own generated pages rather than source, and its MCP
+tools needed a restart to appear — so it was unavailable during the very task it
+was installed for. `Grep` answered everything it answered, in one call, with the
+code attached.
 
 **What is still missing is the rule, not the graph.** The layers map cleanly onto directories —
 `src/staff/roles.ts` and `src/cases/status.ts` are pure leaves, `src/cases/queries.ts` and the
@@ -277,4 +328,6 @@ arises, ask; do not assume.
   asked and record the cost. See §3.
 - **The artifact** at `https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53` is
   their document, in plain English. Update it **in place** by passing that URL as `url`. Never mint
-  a new one. **It has not been updated since layer 2 and is now several tasks behind.**
+  a new one. **Brought current on 29 July as v7** — through task 45, all six answers, all four audit
+  faults closed. The way to update it is `WebFetch` on that URL (which saves the full HTML), strip
+  the `<!doctype>`/`<head>` wrapper, edit, and republish with `url`.

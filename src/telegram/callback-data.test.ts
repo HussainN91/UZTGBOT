@@ -37,6 +37,14 @@ describe('callback data stays inside Telegram’s 64-byte limit', () => {
     emitted.push(encodeCallback(CALLBACK.ANSWER_UNHELPFUL, 'PLACEMENT-999'));
     emitted.push(encodeCallback(CALLBACK.ANSWER_HELPFUL, 'PLACEMENT-999'));
     emitted.push(encodeCallback(CALLBACK.DOC_TYPE, 'REIMBURSEMENT'));
+    /**
+     * The region check carries no parts at all — deliberately, because a payload
+     * naming a region would make it a picker, and a menu of regions is a menu of
+     * whose problem an emergency becomes. Asserted here so that anybody who later
+     * adds a part is measured rather than trusted.
+     */
+    emitted.push(encodeCallback(CALLBACK.REGION_CONFIRMED));
+    emitted.push(encodeCallback(CALLBACK.REGION_MOVED));
 
     const worst = emitted.reduce((a, b) => (byteLength(a) >= byteLength(b) ? a : b));
     expect(byteLength(worst)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);

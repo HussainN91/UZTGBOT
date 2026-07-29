@@ -148,6 +148,27 @@ export function backToMenuKeyboard(): InlineKeyboard {
 }
 
 /**
+ * Two answers to "is the region we hold for you still right?" — D21.
+ *
+ * There is deliberately no third button and no list of regions. Region decides
+ * which staff receive a teacher's emergency, so a picker is a menu of whose
+ * problem this becomes, and a wrong tap sends an urgent case to the wrong
+ * province. The teacher is the best source of the signal and the worst source of
+ * the record: they report, and a manager makes the change with `/region`.
+ *
+ * No Main Menu button either, and that is not an oversight. This keyboard hangs
+ * under a second message that arrives *beside* the menu, never instead of it —
+ * the menu is already on screen with its own Home button, and repeating it would
+ * suggest the question has to be dealt with before anything else can happen.
+ */
+export function regionCheckKeyboard(): InlineKeyboard {
+  return [
+    [{ text: '✅ Yes, still right', callback_data: encodeCallback(CALLBACK.REGION_CONFIRMED) }],
+    [{ text: '📍 No, I have moved', callback_data: encodeCallback(CALLBACK.REGION_MOVED) }],
+  ];
+}
+
+/**
  * Shown under an approved answer.
  *
  * Both halves of the feedback pair, then Back *and* Home. Only Home existed

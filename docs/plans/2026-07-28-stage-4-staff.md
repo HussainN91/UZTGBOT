@@ -12,11 +12,11 @@
 
 ---
 
-## ▶ Where this stands — 29 July 2026, second session
+## ▶ Where this stands — 29 July 2026, third session
 
-**Layers 1 and 2 are complete. Layer 3 has begun: tasks 31 and 32 are done.**
+**Layers 1 and 2 are complete. Layer 3 is eight tasks of nine done: 31, 32, 33, 34, 35, 45 and 46.**
 
-`540 tests across 37 files, none skipped. Typecheck and build clean.` Every number in this section was verified by a full run against a live database, not inferred.
+`694 tests across 42 files, none skipped. Typecheck, build and deps:check clean.` Every number in this section was verified by a full run against a live database, not inferred.
 
 | Task | What | State |
 |---|---|---|
@@ -38,13 +38,15 @@
 | 33 | Case reading — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ `src/telegram/commands/cases.ts`, plus the status vocabulary in `src/cases/status.ts` |
 | 34 | Case mutation — `/reply` `/await` `/close` `/reopen` `/note` | ✅ same file; fixed `updateCase` leaving a stale `closed_at` on reopen |
 | 35 | `/assign` | ✅ same file; both R3 checks before the write, plus a `CASE_ASSIGNED` audit row |
-| **36–39, 41, 45, 46** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
+| 45 | `/region` `/regions` `/mark` `/due` `/snooze` | ✅ `cases.ts` + `staff.ts`; `/region` checks **both ends** of the move, and refuses a region the system has never heard of |
+| 46 | Asking the teacher about their region | ✅ `router.ts` + `keyboards.ts` + `handlers/menu.ts`; needed **a second migration**, `0007_region_asked_at.sql` |
+| **36–39, 41** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
 
 **All four audit faults are now closed.** Revocation revokes, a corrected region reaches the visibility rule, the staff table has a reader and a writer, and — as of Task 32 — a case that is filed reaches the people who can work it. `Received` has a writer for the first time, and a case nobody can act on raises a critical alert instead of sitting unseen.
 
-**Next is Task 45**, `/region` `/regions` `/mark` `/due` `/snooze` — the commands over Tasks 43 and 44, built after Task 35 as the build order says. It is where `importance`, `due_at` and `snoozed_until` finally get writers, and where R15 stops being a live concern rather than a displayed one.
+**Next is Task 36**, staff management — `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke` `/restore`. It is the last of layer 3, and it is where D13's "refuse to deactivate the last active System member" and D27's `/restore` land.
 
-**What the last two tasks changed outside their own files** — departures 13 to 15, and none of them optional to know: the case-status vocabulary was collapsed into one list; `/case` bounds its own output because `send.ts` does not split messages; and `updateCase` now clears `closed_at` when a case leaves a terminal status, which was a live fault against D28's retention.
+**What the last two tasks changed outside their own files** — departures 13 to 20, and none of them optional to know: the case-status vocabulary was collapsed into one list; `/case` bounds its own output because `send.ts` does not split messages; `updateCase` now clears `closed_at` when a case leaves a terminal status, which was a live fault against D28's retention; `StaffCaseRow` carries where a region came from; `listRegionFlags` takes a region scope; and `knownRegions` and `clearSnooze` are new.
 
 **All three remaining questions were answered on 29 July** and are recorded as **D26** (`Action required` means the teacher must act, and `Closed` gets a writer), **D27** (`/restore`, added to Task 36) and **D28** (retention: unresolved cases kept indefinitely, resolved ones 7 days, urgent and critical 6 months, the interaction log 3 days). No question in this plan is open.
 
@@ -1599,27 +1601,25 @@ The commands over Tasks 43 and 44. **Built after Task 35.**
 
 **Files:** Modify `src/telegram/commands/cases.ts`, `src/telegram/commands/staff.ts`
 
-- [ ] **Step 1: `/region <chat_id> <region|clear>`** at `teacher.region` — `Lead` and above. Clears `region_flagged_at` when it acts, so the flag means "reported and not yet dealt with" rather than "reported once, ever".
+- [x] **Step 1: `/region <chat_id> <region|clear>`** at `teacher.region` — `Lead` and above. Clears `region_flagged_at` when it acts, so the flag means "reported and not yet dealt with" rather than "reported once, ever".
 
-- [ ] **Step 2: `/regions`** — the flag list. Without it, a teacher's report has a writer and no reader, which is the pattern the backward audit of this plan exists to stop.
+- [x] **Step 2: `/regions`** — the flag list. Without it, a teacher's report has a writer and no reader, which is the pattern the backward audit of this plan exists to stop.
 
-- [ ] **Step 3: `/mark <ref> Normal|Urgent|Critical`**, `/due <ref> <date>`, `/snooze <ref> <days>` at `case.update`.
+- [x] **Step 3: `/mark <ref> Normal|Urgent|Critical`**, `/due <ref> <date>`, `/snooze <ref> <days>`. `/mark` is at `case.mark` rather than `case.update`, following D7's table — the plan text said `case.update` and the capability table is the source.
 
-- [ ] **Step 4: `/case` shows all four fields** — importance, promised date, snooze, and who set the region — or R15 stands and the columns are invisible until Stage 5.
+- [x] **Step 4: `/case` shows all four fields** — importance, promised date, snooze, and who set the region — or R15 stands and the columns are invisible until Stage 5.
 
-- [ ] **Step 5: Tests**
-
-```ts
-it('refuses a region a manager does not cover', async () => {
-  // A Lead scoped to Samarkand must not be able to move a teacher into
-  // Bukhara. Region is the axis that decides who sees a case, so a command that
-  // edits it is a command that can move work away from the person holding it.
-});
-
-it('accepts a date a person would actually type, and refuses one in the past', async () => { /* … */ });
-```
+- [x] **Step 5: Tests.** 19 in `region.integration.test.ts`, 20 added to `mutate.integration.test.ts`, 12 added to `parse.test.ts`.
 
 - [ ] **Step 6: Commit**
+
+**Three things the sketch did not say, each of which is a hole the sketch's own reasoning opens.**
+
+**`/region` checks both ends of the move, not only the destination.** The named test asks that a Samarkand lead be unable to push a teacher into Bukhara. Refusing only the destination still lets them *pull* a teacher out of Bukhara into Samarkand, which is the same act of taking work from the person holding it seen from the other side. Both are refused. A teacher with **no** region recorded is covered by everybody, because D10 already says an unknown region hides a case from nobody — without that carve-out the teachers whose region is least certain become the ones nobody may correct. The consequence is deliberate and is stated in the refusal: **a cross-region move needs somebody who covers both regions**, which in practice is a `Lead` with no region set, or `Program`/`System`.
+
+**A region the system has never heard of is refused, listing the ones it knows** (`knownRegions`). A typo written happily puts a teacher in a province no staff member covers: their cases visible only to all-region staff, routed nowhere, and wrong in a way nothing reports. The typed region is also canonicalised to the roster's spelling, so `tashkent` is stored as `Tashkent` — visibility already compares case-insensitively, so that is legibility rather than correctness, but two spellings on screen is how a person concludes there are two places.
+
+**`/due` refuses `15/08/2026` rather than guessing.** Day-first and month-first are both in ordinary use and disagree for the first twelve days of every month, and a date read the wrong way round is not visibly wrong — it is a promise to a teacher on the wrong day. Two forms are accepted, `2026-08-15` and `15 Aug 2026`, and the refusal names the ambiguity rather than saying "invalid". The parsed instant is the **end** of that day in Tashkent: parsed as midnight, every promise would land five hours into the previous day for everyone who reads it, and a case promised for today would look broken the moment it was promised.
 
 ---
 
@@ -1629,11 +1629,19 @@ Implements D21's teacher-facing half — the only teacher-visible change in this
 
 **Files:** Modify `src/telegram/router.ts`, `src/telegram/keyboards.ts`, `src/telegram/handlers/menu.ts`
 
-- [ ] **Step 1: Ask rarely, and only where it is relevant**
+- [x] **Step 1: Ask rarely, and only where it is relevant**
 
 Shown when the chat is verified, `REGION_CONFIRM_AFTER_DAYS` have passed since the last confirmation, and the teacher is at the main menu — never in the middle of describing a case, and never as a blocker. Two buttons: *Yes, still right* / *No, I have moved*.
 
-- [ ] **Step 2: "No" writes nothing but a flag**
+**This needed a column and therefore a second migration in the stage** — `drizzle/0007_region_asked_at.sql`, one `ADD COLUMN`, generated and verified against an empty database as well as an incremental one. Task 42's "one migration for the whole stage" could not hold: nothing in the schema could answer "when did we last ask", and without it Step 2's *does not ask again the next day* cannot be implemented at all. `regionFlaggedAt` does not serve — it means "reported wrong, not yet dealt with", and it is cleared when staff act.
+
+**The stamp is written when the question is SHOWN, not when it is answered**, and that is the whole design of the cadence. Stamped on answer, a teacher who ignores the question is asked again on every visit to the menu — the nagging D21 rules out. Stamped on show, everyone is asked at most once per interval whether they answer or not, and an ignored question returns later rather than never. `REGION_CONFIRM_AFTER_DAYS` is **180**.
+
+**Asked on `/start` and the Main Menu button only, not on the fallback paths.** `mainMenuReply()` is reached from a dozen recovery branches — a withdrawn answer, an unknown topic, an expired state — and it is documented as the one thing that cannot itself fail. It is unchanged. Interrupting a recovery with an unrelated question is the blocking behaviour D21 rules out.
+
+**A teacher with no region recorded is not asked.** There is nothing to confirm, D21's question is "is *this* still right", and their cases are already visible to every staff member (D10) — over-routed rather than misrouted, which is the less urgent of the two failures and not one this question can fix.
+
+- [x] **Step 2: "No" writes nothing but a flag**
 
 ```ts
 it('does not change the region when a teacher says it is wrong', async () => {
@@ -1650,9 +1658,13 @@ it('does not ask again the next day', async () => { /* … */ });
 it('never interrupts a teacher part-way through a case', async () => { /* … */ });
 ```
 
-- [ ] **Step 3: Two new callback prefixes** through `encodeCallback`, and the byte-ceiling assertion extended to cover them — one place measures callback data and the suite asserts the worst realistic payload with real values.
+**Also asserted, and the second one is the reason the first is safe:** the question arrives *beside* the menu and never instead of it, so a teacher who ignores it has lost nothing; and **a tap from a chat with no teacher row is answered exactly as a teacher's tap is**, because the button survives in scrollback for ever, arrives from the network, and saying "no such teacher" would tell a stranger whether we hold a record. Neither answer can move a case, so neither needs a guard against a replayed tap.
 
-- [ ] **Step 4: Run the full router suite.** This adds a branch to the teacher path, which is finished and working; the 35 router tests are what will catch a mistake.
+**One behaviour not in the sketch:** "still right" clears an outstanding mismatch flag. A teacher who reported a move that nobody acted on, and who now says the record is correct, has withdrawn the report — leaving it raised keeps it on `/regions` as work a manager was asked to do by somebody who no longer wants it done.
+
+- [x] **Step 3: Two new callback prefixes** through `encodeCallback`, and the byte-ceiling assertion extended to cover them — one place measures callback data and the suite asserts the worst realistic payload with real values. `REGION_CONFIRMED` (`ROK`) and `REGION_MOVED` (`RMV`), both carrying **no parts at all**: a payload naming a region would make this a picker, which is the one thing D21 forbids.
+
+- [x] **Step 4: Run the full router suite.** This adds a branch to the teacher path, which is finished and working; the router tests are what will catch a mistake. **694 tests across 42 files, none skipped.** The migration was additionally applied to an empty database to prove the deploy path, not only the incremental one.
 
 - [ ] **Step 5: Commit**
 

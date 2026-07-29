@@ -1,0 +1,1 @@
+ALTER TABLE "teachers" ADD COLUMN "region_asked_at" timestamp with time zone;

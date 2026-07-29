@@ -370,3 +370,19 @@ export const CASE_NOTE_SHOWN_CHARS = 280;
  * resurfaces inside one recruitment cycle.
  */
 export const MAX_SNOOZE_DAYS = 90;
+
+/**
+ * How long between asking one teacher whether the region we hold is still right.
+ *
+ * Deliberately rare, and D21 gives the reason: there is no session to attach the
+ * question to — only messages and a thirty-minute conversation state — so
+ * "every new session" becomes "most times they come back", which for 1,800
+ * people is a question tapped through unread. A field that decides who receives
+ * somebody's emergency is the last one that should be filled by reflex.
+ *
+ * Half a year is roughly one recruitment cycle: long enough that nobody is being
+ * nagged, short enough that a teacher who moved in March is asked before the
+ * year is out. It is measured from when the question was last *shown*, so a
+ * teacher who ignores it is asked again rather than never again.
+ */
+export const REGION_CONFIRM_AFTER_DAYS = 180;

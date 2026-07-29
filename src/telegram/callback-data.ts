@@ -50,6 +50,22 @@ export const CALLBACK = {
    * and previously had nowhere to go.
    */
   QUERY_TOPIC: 'QT',
+  /**
+   * "The region you hold for me is still right", e.g. ROK.
+   *
+   * No parts: the only thing it says is yes, and who said it is the chat the tap
+   * arrived from. D21 &mdash; the teacher confirms, and only staff change.
+   */
+  REGION_CONFIRMED: 'ROK',
+  /**
+   * "I have moved", e.g. RMV.
+   *
+   * Also carries nothing, and that is the decision rather than an omission. A
+   * payload naming the new region would make this a picker, and a menu of
+   * regions is a menu of whose problem this becomes — one wrong tap routes an
+   * emergency to the wrong province. It raises a flag; a manager decides.
+   */
+  REGION_MOVED: 'RMV',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];

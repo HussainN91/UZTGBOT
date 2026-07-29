@@ -306,6 +306,22 @@ export const teachers = pgTable(
      * emergency. A menu of regions is a menu of whose problem this becomes.
      */
     regionFlaggedAt: tsz('region_flagged_at'),
+    /**
+     * When the teacher was last *asked* whether the region we hold is right.
+     *
+     * Stamped when the question is shown, not when it is answered, and that is
+     * the whole design. Stamped on answer, a teacher who ignores the question is
+     * asked again every time they open the menu — which for 1,800 people is a
+     * question tapped through unread, filling the field that routes emergencies
+     * with noise. Stamped on show, everybody is asked at most once every
+     * `REGION_CONFIRM_AFTER_DAYS`, whether they answer or not, and an ignored
+     * question comes back later rather than never.
+     *
+     * Distinct from `regionFlaggedAt`, which means "reported wrong and not yet
+     * dealt with". This one means "we have put the question to them recently",
+     * and both answers set it because both mean we should stop asking for now.
+     */
+    regionAskedAt: tsz('region_asked_at'),
     language: text('language').notNull().default('EN'),
     firstSeen: tsz('first_seen').notNull().defaultNow(),
     lastSeen: tsz('last_seen').notNull().defaultNow(),

@@ -32,6 +32,7 @@
 import {
   CASE_TOPIC_CHOICES,
   MAX_CASE_DETAIL_ATTEMPTS,
+  REGION_CONFIRM_AFTER_DAYS,
   URGENT_CASE_CATEGORY,
   caseTopicByKey,
 } from '../config/constants.js';
@@ -62,7 +63,19 @@ import {
   caseCategoryLabel,
   checkMyCaseReply,
 } from './handlers/cases.js';
-import { helpReply, mainMenuReply, privacyReply, signInPromptReply } from './handlers/menu.js';
+import {
+  helpReply,
+  mainMenuReply,
+  privacyReply,
+  regionCheckReply,
+  signInPromptReply,
+} from './handlers/menu.js';
+import {
+  confirmRegion,
+  flagRegionMismatch,
+  markRegionAsked,
+  regionCheckDue,
+} from '../teachers/region.js';
 import {
   urgentCaseEscalatedReply,
   urgentCaseFiledReply,
@@ -231,7 +244,13 @@ async function routeText(
    */
   if (text === '/start') {
     await clearState(db, update.chatId);
-    return only(update.chatId, await startReply(db, update.chatId, deps));
+    const start = await startReply(db, update.chatId, deps);
+    // A verified teacher gets the menu, and the region question with it when one
+    // is due. Anybody else is being asked to sign in, and must not be asked
+    // anything else on top of that.
+    return start.signedIn
+      ? menuWithRegionCheck(db, update.chatId)
+      : only(update.chatId, start.reply);
   }
   if (text === '/privacy') return only(update.chatId, privacyReply(deps.supportContact));
   if (text === '/help') {
@@ -308,12 +327,64 @@ async function routeText(
   return only(update.chatId, questionWithoutTopicReply());
 }
 
-/** `/start`: the menu for a teacher we know, the notice and prompt for one we do not. */
-async function startReply(db: Database, chatId: string, deps: RouterDeps): Promise<Reply> {
+/**
+ * The main menu, with the region question beside it when one is due — D21, task 46.
+ *
+ * **Beside it, never instead of it, and never in place of anything else.** The
+ * menu stays `messages[0]`, so a teacher who ignores the question has lost
+ * nothing and the bot behaves exactly as it did before. The question is a second
+ * message they may leave sitting there; it comes back in
+ * `REGION_CONFIRM_AFTER_DAYS`.
+ *
+ * Used on the two paths a teacher arrives at the menu *deliberately* — `/start`
+ * and the Main Menu button — and on none of the fallbacks. Landing on the menu
+ * because an answer was withdrawn, a topic vanished or a conversation state
+ * expired is a recovery, and a recovery interrupted by an unrelated question is
+ * the blocking behaviour D21 rules out. `mainMenuReply()` is still the thing that
+ * cannot itself fail, and it is unchanged.
+ *
+ * The stamp is written when the question is shown. See `teachers.region_asked_at`.
+ */
+async function menuWithRegionCheck(db: Database, chatId: string): Promise<RouterOutcome> {
+  const menu = only(chatId, mainMenuReply());
+
+  const region = await regionCheckDue(db, chatId, REGION_CONFIRM_AFTER_DAYS);
+  if (region === null) return menu;
+
+  await markRegionAsked(db, chatId);
+  const ask = regionCheckReply(region);
+
+  return {
+    messages: [
+      ...menu.messages,
+      {
+        chatId,
+        text: ask.text,
+        keyboard: ask.keyboard,
+        purpose: 'a question to a teacher about which region we hold for them',
+      },
+    ],
+    alerts: [...menu.alerts, ...skippedAlert(ask)],
+  };
+}
+
+/**
+ * `/start`: the menu for a teacher we know, the notice and prompt for one we do not.
+ *
+ * `signedIn` is reported rather than re-derived by the caller, so that the
+ * teacher lookup happens once. It is what decides whether the region question may
+ * be asked alongside the menu: somebody being asked to sign in must not be asked
+ * anything else on top of it.
+ */
+async function startReply(
+  db: Database,
+  chatId: string,
+  deps: RouterDeps,
+): Promise<{ readonly signedIn: boolean; readonly reply: Reply }> {
   const teacher = await findTeacher(db, chatId);
-  if (teacher?.verificationState === 'Verified') return mainMenuReply();
+  if (teacher?.verificationState === 'Verified') return { signedIn: true, reply: mainMenuReply() };
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0 });
-  return signInPromptReply(deps.supportContact);
+  return { signedIn: false, reply: signInPromptReply(deps.supportContact) };
 }
 
 async function handleIdentifier(
@@ -709,6 +780,41 @@ async function routeCallback(
     case CALLBACK.CASE_TOPIC:
       return chooseCaseTopic(db, update.chatId, first, deps);
 
+    /**
+     * D21's two answers. Neither writes a region, and that is the decision.
+     *
+     * Both are safe to receive from a chat that was never asked, or asked a year
+     * ago and has the button still in its scrollback: "still right" writes
+     * nothing but the withdrawal of a stale flag, and "I have moved" raises a
+     * flag a manager reads before acting. Neither can move a case, so neither
+     * needs a guard against a replayed tap.
+     */
+    case CALLBACK.REGION_CONFIRMED:
+      await confirmRegion(db, update.chatId);
+      return only(update.chatId, {
+        text:
+          'Thank you — nothing has changed, and we will not ask again for a while.\n\n' +
+          'If you do move, tap Contact Support and tell us.',
+        keyboard: backToMenuKeyboard(),
+      });
+
+    case CALLBACK.REGION_MOVED: {
+      /**
+       * The flag is raised against the teacher, not against a region they typed.
+       * `flagRegionMismatch` reports whether there was a teacher to flag at all;
+       * a tap from a chat with no teacher row is answered the same way, because
+       * the alternative tells a stranger whether we hold a record for them.
+       */
+      await flagRegionMismatch(db, update.chatId);
+      return only(update.chatId, {
+        text:
+          'Thank you for telling us. One of our staff will check it and update your record.\n\n' +
+          'Nothing you need to do — and if you have an urgent problem in the meantime, ' +
+          'use Contact Support as usual.',
+        keyboard: backToMenuKeyboard(),
+      });
+    }
+
     default:
       return only(update.chatId, mainMenuReply());
   }
@@ -723,7 +829,7 @@ async function routeMenu(
   switch (action) {
     case MENU_ACTION.MAIN:
       await clearState(db, chatId);
-      return only(chatId, mainMenuReply());
+      return menuWithRegionCheck(db, chatId);
 
     case MENU_ACTION.FAQ:
       return only(chatId, faqHubReply());

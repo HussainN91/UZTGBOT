@@ -7,11 +7,40 @@
  * thing that cannot itself fail.
  */
 import { privacyNotice } from '../../config/privacy.js';
-import { backToMenuKeyboard, mainMenuKeyboard } from '../keyboards.js';
+import { backToMenuKeyboard, mainMenuKeyboard, regionCheckKeyboard } from '../keyboards.js';
 import type { Reply } from '../reply.js';
 
 export function mainMenuReply(): Reply {
   return { text: 'What would you like to do?', keyboard: mainMenuKeyboard() };
+}
+
+/**
+ * "Is the region we hold for you still right?" — D21, and the only
+ * teacher-visible change in stage 4.
+ *
+ * It says what the answer is *for*, because a question with no stated purpose is
+ * one people answer carelessly, and this one decides which staff receive their
+ * emergency. It also says plainly that nothing happens automatically, so that a
+ * teacher who taps "I have moved" and sees no change does not conclude the bot
+ * ignored them.
+ *
+ * Arrives as a second message beside the menu, never instead of it. The teacher
+ * can ignore it entirely and use the bot exactly as before; it comes back in six
+ * months.
+ */
+export function regionCheckReply(region: string): Reply {
+  return {
+    text: [
+      `📍 We have you in ${region}.`,
+      '',
+      'This is how we decide which of our staff sees your case, so it is worth ' +
+        'keeping right — if it is wrong, an urgent case could go to the wrong province.',
+      '',
+      'Is it still correct? Nothing changes automatically: if you have moved, one ' +
+        'of our staff will check and update it.',
+    ].join('\n'),
+    keyboard: regionCheckKeyboard(),
+  };
 }
 
 /**

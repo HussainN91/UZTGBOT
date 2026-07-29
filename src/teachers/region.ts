@@ -119,6 +119,74 @@ export async function clearRegionOverride(
 }
 
 /**
+ * Should this teacher be asked whether the region we hold is still right?
+ *
+ * Returns the region to put to them, or `null` for "do not ask". Four conditions,
+ * and each of them is a decision rather than a guard:
+ *
+ * - **Verified only.** The question is meaningless to a chat that has not signed
+ *   in, and asking would be the bot volunteering that it holds a record.
+ * - **We must actually hold a region.** There is nothing to confirm otherwise,
+ *   and D21's question is "is *this* still right". A teacher with no region is
+ *   already visible to every staff member (D10), so they are over-routed rather
+ *   than misrouted — the less urgent of the two failures, and not one this
+ *   question can fix.
+ * - **Not revoked.** Somebody whose access has ended is not asked to maintain
+ *   our records.
+ * - **Not asked recently.** `REGION_CONFIRM_AFTER_DAYS` since the question was
+ *   last shown, null meaning never asked.
+ *
+ * The clock is PostgreSQL's, like every other timestamp in this system that
+ * decides something, rather than this process's.
+ */
+export async function regionCheckDue(
+  db: Database,
+  chatId: string,
+  afterDays: number,
+): Promise<string | null> {
+  const rows = await db
+    .select({ region: sql<string | null>`coalesce(${teachers.regionOverride}, ${rosterEntries.region})` })
+    .from(teachers)
+    .leftJoin(rosterEntries, eq(teachers.identifier, rosterEntries.identifier))
+    .where(
+      and(
+        eq(teachers.chatId, chatId),
+        eq(teachers.verificationState, 'Verified'),
+        sql`${teachers.regionAskedAt} IS NULL OR ${teachers.regionAskedAt} < now() - make_interval(days => ${afterDays})`,
+      ),
+    )
+    .limit(1);
+
+  return rows[0]?.region ?? null;
+}
+
+/**
+ * Record that the question has been put to them.
+ *
+ * Called when the prompt is **shown**, not when it is answered. See the column's
+ * own comment: stamped on answer, a teacher who ignores the question is asked
+ * again on every visit to the menu, which is the nagging D21 rules out.
+ */
+export async function markRegionAsked(db: Database, chatId: string): Promise<void> {
+  await db.update(teachers).set({ regionAskedAt: sql`now()` }).where(eq(teachers.chatId, chatId));
+}
+
+/**
+ * The teacher says the region we hold is right after all.
+ *
+ * Writes no region — there is nothing to write, it is already what we hold — but
+ * it does clear any outstanding mismatch flag. A teacher who reported a move
+ * months ago that nobody acted on, and who now says the record is correct, has
+ * withdrawn the report; leaving it raised would keep it on `/regions` as work
+ * for a manager that the person who raised it no longer wants done.
+ *
+ * No audit row. Nothing changed that anybody has to answer for.
+ */
+export async function confirmRegion(db: Database, chatId: string): Promise<void> {
+  await db.update(teachers).set({ regionFlaggedAt: null }).where(eq(teachers.chatId, chatId));
+}
+
+/**
  * A teacher has said the region we hold is wrong.
  *
  * Writes a flag and nothing else. The teacher is the best source of the signal
