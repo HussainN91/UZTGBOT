@@ -40,7 +40,7 @@ import { TeacherNotVerifiedError, createCase } from '../cases/service.js';
 import { clearState, loadState, saveState, type ConversationState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
 import { logInteraction } from '../log/interactions.js';
-import { findTeacher } from '../teachers/repository.js';
+import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { verifyIdentifier } from '../teachers/verify.js';
 import type { Alert } from '../sync/alerts.js';
 import { CALLBACK, decodeCallback } from './callback-data.js';
@@ -649,7 +649,29 @@ async function requireSignIn(
   deps: RouterDeps,
 ): Promise<RouterOutcome | null> {
   const teacher = await findTeacher(db, chatId);
-  if (teacher?.verificationState === 'Verified') return null;
+  if (teacherHasAccess(teacher)) return null;
+
+  /**
+   * Access that has been taken away is not re-offered as a sign-in prompt.
+   *
+   * Two different reasons a verified teacher can fail the gate — a staff member
+   * ran `/revoke`, or their roster row was deactivated or removed — and neither
+   * is fixed by typing an email address again. Prompting would send them round a
+   * loop that `verifyIdentifier` refuses at the end, telling them nothing about
+   * why. It would also let somebody undo a deliberate revocation simply by
+   * signing in again, on the one path where `bindTeacher` clears `revoked_at`.
+   */
+  const hadAccess =
+    teacher !== null &&
+    (teacher.verificationState === 'Revoked' || teacher.verificationState === 'Verified');
+  if (hadAccess) {
+    return only(chatId, {
+      text:
+        'Your access to this bot has ended, so new cases cannot be opened from this chat.\n\n' +
+        `If you think this is a mistake, contact ${deps.supportContact}.`,
+      keyboard: backToMenuKeyboard(),
+    });
+  }
 
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0, resumeAction });
   return only(chatId, signInPromptReply(deps.supportContact));

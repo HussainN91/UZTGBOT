@@ -284,3 +284,34 @@ export const FAQ_CONFIDENT_SCORE = 2;
 
 /** Most recent cases shown by Check My Case (`MenuHandler.gs:266`). */
 export const CHECK_MY_CASE_CAP = 10;
+
+/**
+ * Cases shown in one staff list, before "and N more".
+ *
+ * A cap rather than pagination because a Telegram message has a hard 4096
+ * character limit and a list that silently loses its tail is worse than one that
+ * says how much it is not showing. The count of the rest is always reported, so
+ * a staff member can tell a long queue from a short one — `handleListCases_`
+ * showed twenty and said nothing, which made a backlog of two hundred look
+ * identical to a backlog of twenty.
+ */
+export const STAFF_CASE_LIST_CAP = 20;
+
+/**
+ * Notes shown when a staff member opens one case, most recent first.
+ *
+ * The rest are counted, not dropped silently. This is the number that stops
+ * `/case` reproducing the Apps Script failure where an internal thread
+ * accumulated inside `detail` until reading a case exceeded Telegram's limit.
+ */
+export const CASE_NOTES_SHOWN = 5;
+
+/**
+ * The longest a case may be snoozed for.
+ *
+ * A snooze suppresses chasing, not the case, and a cap is what stops it becoming
+ * a way to make an inconvenient case disappear. Ninety days is longer than any
+ * legitimate wait described in the FAQ bank and short enough that a snoozed case
+ * resurfaces inside one recruitment cycle.
+ */
+export const MAX_SNOOZE_DAYS = 90;

@@ -17,11 +17,12 @@ import {
   CASE_DEDUP_WINDOW_HOURS,
   CHECK_MY_CASE_CAP,
   type CaseCategory,
+  MAX_SNOOZE_DAYS,
   TIMEZONE,
 } from '../config/constants.js';
 import type { Database } from '../db/index.js';
-import { cases } from '../db/schema.js';
-import { findTeacher } from '../teachers/repository.js';
+import { type CaseImportance, cases } from '../db/schema.js';
+import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { allocateReference } from './reference.js';
 
 export type CaseStatus =
@@ -91,8 +92,14 @@ export async function createCase(
   db: Database,
   request: CreateCaseRequest,
 ): Promise<CreateCaseResult> {
+  /**
+   * Both halves of D17. Being `Verified` is not enough — the roster row must
+   * still list them. Before this check, deactivating a roster row (which the
+   * runbook presents as the way to revoke somebody) did nothing whatsoever to a
+   * teacher who had already signed in, because nothing re-read it after sign-in.
+   */
   const teacher = await findTeacher(db, request.chatId);
-  if (teacher === null || teacher.verificationState !== 'Verified') {
+  if (!teacherHasAccess(teacher)) {
     throw new TeacherNotVerifiedError(request.chatId);
   }
 
@@ -120,6 +127,17 @@ export async function createCase(
     teacherChatId: request.chatId,
     detail: request.detail,
     status: request.escalate === true ? 'Escalated' : 'New',
+    /**
+     * Set in the same insert as the status, never as a second write.
+     *
+     * `Escalated` is a status and a status moves — once this case is resolved it
+     * becomes `Completed` and nothing about it says it was ever an emergency, so
+     * stage 5's retention would remove it at the ordinary interval. The marker is
+     * what survives (R13). A code spent for a case not marked as what the code
+     * bought is the same shape of fault as a code spent with no case at all,
+     * which already has its own alarm.
+     */
+    importance: request.escalate === true ? 'Urgent' : 'Normal',
     lastActor: request.chatId,
   });
 
@@ -139,6 +157,15 @@ export async function createCase(
  * Stamped in Tashkent, by the database, for the same reason references are: a
  * follow-up filed at 00:30 is dated by the clock the reader uses.
  *
+ * **Importance is raised here and can never be lowered here.** This is the
+ * deduplicated urgent path — urgent-plus-deduplicated is the *common* case, not
+ * an edge one — so if it escalated the status and left importance alone, the
+ * commonest urgent case would be the one stage 5's retention throws away first
+ * (R13, third order). `GREATEST` does the raising: `case_importance` is declared
+ * `Normal < Urgent < Critical`, and PostgreSQL orders an enum by its declared
+ * order, so a case somebody has already judged `Critical` stays `Critical`
+ * rather than being demoted by an automatic follow-up.
+ *
  * Returns false when no such case exists, which the caller treats as ordinary —
  * a case can be removed by retention between the dedup read and this write.
  */
@@ -153,6 +180,7 @@ export async function appendUrgentFollowUp(
       detail = detail || E'\n[' || to_char(now() AT TIME ZONE ${TIMEZONE}, 'YYYY-MM-DD HH24:MI')
              || ' URGENT follow-up] ' || ${detail},
       status = 'Escalated',
+      importance = GREATEST(importance, 'Urgent'::case_importance),
       updated_at = now(),
       last_actor = ${actor}
     WHERE reference = ${reference}
@@ -207,6 +235,99 @@ export async function updateCase(
       lastActor: actor,
     })
     .where(eq(cases.reference, reference))
+    .returning({ reference: cases.reference });
+
+  return result.length > 0;
+}
+
+/**
+ * Mark how serious a case is.
+ *
+ * Its own function rather than a field on `CaseFields`, because it is a
+ * different kind of change: `CaseFields` is about where a case has got to, and
+ * this is about what it is. Keeping them apart is what stops a status write
+ * quietly resetting the marker that retention depends on.
+ *
+ * Unlike the urgent follow-up path this may lower as well as raise — a person
+ * reading a case is allowed to decide it is not critical after all, which is
+ * exactly the judgement the `Critical` level exists for.
+ */
+export async function markImportance(
+  db: Database,
+  reference: string,
+  importance: CaseImportance,
+  actor: string,
+): Promise<boolean> {
+  const result = await db
+    .update(cases)
+    .set({ importance, updatedAt: sql`now()`, lastActor: actor })
+    .where(eq(cases.reference, reference.trim().toUpperCase()))
+    .returning({ reference: cases.reference });
+
+  return result.length > 0;
+}
+
+/**
+ * Record when whoever holds this case said it would be done.
+ *
+ * Nothing chases this until stage 5 — a date that passes is visible to whoever
+ * looks and to nobody else, which is the same position `OVERDUE_DAYS` has been
+ * in since stage 2. It is written now so that stage adds a schedule to a field
+ * already holding real data, rather than a schedule and a field and the hope
+ * that staff have been filling it in.
+ *
+ * `null` clears it.
+ */
+export async function setDue(
+  db: Database,
+  reference: string,
+  dueAt: Date | null,
+  actor: string,
+): Promise<boolean> {
+  const result = await db
+    .update(cases)
+    .set({ dueAt, updatedAt: sql`now()`, lastActor: actor })
+    .where(eq(cases.reference, reference.trim().toUpperCase()))
+    .returning({ reference: cases.reference });
+
+  return result.length > 0;
+}
+
+export class SnoozeTooLongError extends Error {
+  constructor(readonly days: number) {
+    super(`a case cannot be snoozed for ${days} days; the limit is ${MAX_SNOOZE_DAYS}`);
+    this.name = 'SnoozeTooLongError';
+  }
+}
+
+/**
+ * Suppress chasing on a case until a date passes.
+ *
+ * A snooze never changes the case's status and never hides it from a list. It
+ * suppresses the chasing, not the work — a snoozed case still appears in
+ * `/cases`, still belongs to its owner, and is still open.
+ *
+ * Capped at `MAX_SNOOZE_DAYS`, which is what stops a snooze becoming a way to
+ * make an inconvenient case disappear. The cap is enforced here rather than at
+ * the command, so it holds for stage 5 and anything after it.
+ */
+export async function setSnooze(
+  db: Database,
+  reference: string,
+  days: number,
+  actor: string,
+): Promise<boolean> {
+  if (!Number.isFinite(days) || days <= 0) throw new SnoozeTooLongError(days);
+  if (days > MAX_SNOOZE_DAYS) throw new SnoozeTooLongError(days);
+
+  const result = await db
+    .update(cases)
+    .set({
+      snoozedUntil: sql`now() + make_interval(days => ${days})`,
+      updatedAt: sql`now()`,
+      lastActor: actor,
+    })
+    .where(eq(cases.reference, reference.trim().toUpperCase()))
     .returning({ reference: cases.reference });
 
   return result.length > 0;
