@@ -64,6 +64,7 @@ import {
   checkMyCaseReply,
 } from './handlers/cases.js';
 import {
+  accessEndedReply,
   helpReply,
   mainMenuReply,
   privacyReply,
@@ -375,6 +376,16 @@ async function menuWithRegionCheck(db: Database, chatId: string): Promise<Router
  * teacher lookup happens once. It is what decides whether the region question may
  * be asked alongside the menu: somebody being asked to sign in must not be asked
  * anything else on top of it.
+ *
+ * **A revoked chat is refused here, not prompted.** `requireSignIn` has always
+ * refused one, for the reason set out at `accessEndedReply` — sign-in reaches
+ * `bindTeacher`, which clears `revoked_at`. This path did not, and that made
+ * `/start` followed by an email address a complete self-service undo of a
+ * revocation. Found by Task 36's own test for exactly that (`does not let a
+ * restore be faked by signing in again`), in code committed three tasks earlier.
+ * The two doors into sign-in now behave the same way, and `verifyIdentifier`
+ * refuses a revoked chat as well, so a third door added later inherits the rule
+ * instead of reopening the hole.
  */
 async function startReply(
   db: Database,
@@ -383,6 +394,11 @@ async function startReply(
 ): Promise<{ readonly signedIn: boolean; readonly reply: Reply }> {
   const teacher = await findTeacher(db, chatId);
   if (teacher?.verificationState === 'Verified') return { signedIn: true, reply: mainMenuReply() };
+
+  if (teacher?.verificationState === 'Revoked') {
+    return { signedIn: false, reply: accessEndedReply(deps.supportContact) };
+  }
+
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0 });
   return { signedIn: false, reply: signInPromptReply(deps.supportContact) };
 }
@@ -403,6 +419,21 @@ async function handleIdentifier(
         `If you cannot sign in, contact ${deps.supportContact}.`,
       keyboard: backToMenuKeyboard(),
     });
+  }
+
+  /**
+   * Revoked mid-prompt — rare, and the one case the guard in `startReply` cannot
+   * catch, because that chat was already sitting at the identifier question when
+   * a staff member ended their access.
+   *
+   * The state is cleared rather than re-saved. Leaving them at the prompt would
+   * invite them to keep typing addresses at a question whose answer can no longer
+   * be right, and "check the address, including any dots" is actively misleading
+   * when the address was never the problem.
+   */
+  if (outcome.kind === 'refused' && outcome.reason === 'accessRevoked') {
+    await clearState(db, chatId);
+    return only(chatId, accessEndedReply(deps.supportContact));
   }
 
   if (outcome.kind === 'refused') {
@@ -880,14 +911,7 @@ async function requireSignIn(
   const hadAccess =
     teacher !== null &&
     (teacher.verificationState === 'Revoked' || teacher.verificationState === 'Verified');
-  if (hadAccess) {
-    return only(chatId, {
-      text:
-        'Your access to this bot has ended, so new cases cannot be opened from this chat.\n\n' +
-        `If you think this is a mistake, contact ${deps.supportContact}.`,
-      keyboard: backToMenuKeyboard(),
-    });
-  }
+  if (hadAccess) return only(chatId, accessEndedReply(deps.supportContact));
 
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0, resumeAction });
   return only(chatId, signInPromptReply(deps.supportContact));

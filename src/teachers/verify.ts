@@ -41,7 +41,12 @@ export type VerificationOutcome =
     }
   | {
       readonly kind: 'refused';
-      readonly reason: 'notOnRoster' | 'rosterRowDeactivated';
+      /**
+       * `accessRevoked` is not a failed sign-in and is never counted as one.
+       * It is a chat that already holds a roster identity and has had it taken
+       * away by a named person — see the refusal below.
+       */
+      readonly reason: 'notOnRoster' | 'rosterRowDeactivated' | 'accessRevoked';
       /** False when this chat is re-presenting the identity it already holds. */
       readonly consumedAttempt: boolean;
       readonly attempts: number;
@@ -70,6 +75,34 @@ export async function verifyIdentifier(
    * inactive, the teacher retries, and five honest retries exhaust the budget.
    */
   const isOwnIdentity = identifier !== '' && teacher?.identifier === identifier;
+
+  /**
+   * A revoked chat cannot sign itself back in, whatever it types.
+   *
+   * `bindTeacher` below clears `revoked_at` and writes `Verified` — that is
+   * correct for a teacher who changed phone, and catastrophic for one whose
+   * access a staff member deliberately ended. Without this check, `/revoke` is
+   * undone by typing an email address, and D27's `/restore` has no meaning
+   * because nobody needs it.
+   *
+   * The routes into sign-in refuse a revoked chat before it gets this far
+   * (`startReply` and `requireSignIn` both do). This is the guarantee rather
+   * than the courtesy: it is at the one function that writes, so a fourth route
+   * added in a later stage cannot reopen the hole, and it also covers the teacher
+   * who was revoked *while* already sitting at the identifier prompt.
+   *
+   * It costs no attempt. Nothing was guessed — this chat is presenting an
+   * identity, usually its own, and the answer would be the same every time.
+   */
+  if (teacher?.verificationState === 'Revoked') {
+    return {
+      kind: 'refused',
+      reason: 'accessRevoked',
+      consumedAttempt: false,
+      attempts: attemptsSoFar,
+      attemptsRemaining: Math.max(0, MAX_VERIFICATION_ATTEMPTS - attemptsSoFar),
+    };
+  }
 
   if (!isOwnIdentity && attemptsSoFar >= MAX_VERIFICATION_ATTEMPTS) {
     return { kind: 'lockedOut', attempts: attemptsSoFar };

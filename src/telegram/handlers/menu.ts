@@ -60,6 +60,30 @@ export function signInPromptReply(supportContact: string): Reply {
   };
 }
 
+/**
+ * Access that has been taken away, told to the person it was taken from.
+ *
+ * **This is never the sign-in prompt, and that is the whole point of it.** A
+ * revoked teacher offered the prompt would be sent round a loop, and — far worse
+ * — would arrive at `bindTeacher`, which clears `revoked_at`, and would thereby
+ * undo their own revocation by typing an email address. `/restore` exists (D27)
+ * because taking that access back is a decision for somebody with the authority
+ * to make it.
+ *
+ * The wording names neither reason. A teacher cannot act on either — a roster row
+ * is recruitment's and a revocation is a staff decision — so the useful thing to
+ * give them is the person to ask. Which of the two it was is told to *staff*, by
+ * `/restore`, where it can be acted on.
+ */
+export function accessEndedReply(supportContact: string): Reply {
+  return {
+    text:
+      'Your access to this bot has ended, so it cannot be used from this chat.\n\n' +
+      `If you think this is a mistake, contact ${supportContact}.`,
+    keyboard: backToMenuKeyboard(),
+  };
+}
+
 /** `/privacy`, which must work whether or not the teacher has signed in. */
 export function privacyReply(supportContact: string): Reply {
   return { text: privacyNotice(supportContact), keyboard: backToMenuKeyboard() };

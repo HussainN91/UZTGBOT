@@ -117,20 +117,53 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
       expect(await regionFor(db, CHAT)).toBe('Bukhara');
     });
 
-    it('still un-revokes a chat that verifies again', async () => {
-      // The same `set` object deliberately clears revoked_at. Fixing R11 must not
-      // break that — they are two columns in one statement and it is easy to
-      // widen the fix by one field too many.
+    it('refuses to re-verify a revoked chat, leaving the revocation standing', async () => {
+      /**
+       * **This test replaces one that asserted the opposite, and the inversion is
+       * deliberate — see D27 and Task 36.**
+       *
+       * It used to read "still un-revokes a chat that verifies again", guarding
+       * the fix for R11 against widening by one field: `bindTeacher`'s `set`
+       * object clears `revoked_at` in the same statement that writes the region,
+       * and the concern was that a careless fix would drop it.
+       *
+       * That behaviour is now the hole rather than the property. A revoked
+       * teacher who could sign in again would undo a staff member's deliberate
+       * decision by typing an email address, which is why `/restore` exists at
+       * `teacher.revoke` rather than being something the teacher can do for
+       * themselves. `verifyIdentifier` therefore refuses a revoked chat before it
+       * reaches `bindTeacher` at all.
+       *
+       * `bindTeacher` still clears the columns and that line is still correct —
+       * nothing stale should survive a rebind — but no revoked row can now reach
+       * it, so the guard the old test provided has nothing left to guard.
+       */
       await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
       await db.execute(
         sql`UPDATE teachers SET verification_state = 'Revoked', revoked_at = now(), revoked_by = ${MANAGER} WHERE chat_id = ${CHAT}`,
       );
 
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
 
+      expect(outcome.kind).toBe('refused');
       const teacher = await findTeacher(db, CHAT);
-      expect(teacher?.verificationState).toBe('Verified');
-      expect(teacher?.revokedAt).toBeNull();
+      expect(teacher?.verificationState).toBe('Revoked');
+      expect(teacher?.revokedAt).not.toBeNull();
+    });
+
+    it('does not spend a sign-in attempt refusing a revoked chat', async () => {
+      // Nothing was guessed. The chat is presenting an identity, usually its own,
+      // and the answer would be the same every time — so counting it would lock
+      // somebody out of a prompt they cannot pass anyway, and would make the
+      // attempt budget mean two different things.
+      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await db.execute(
+        sql`UPDATE teachers SET verification_state = 'Revoked', revoked_at = now() WHERE chat_id = ${CHAT}`,
+      );
+
+      const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+
+      expect(outcome.kind === 'refused' && outcome.consumedAttempt).toBe(false);
     });
 
     it('returns to the roster value when the override is cleared', async () => {
