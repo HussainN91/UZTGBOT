@@ -9,6 +9,7 @@
  *
  * Nothing here touches the database or Telegram.
  */
+import { TELEGRAM_MESSAGE_MAX_CHARS, TIMEZONE } from '../../config/constants.js';
 import type { Database } from '../../db/index.js';
 import type { Capability } from '../../staff/roles.js';
 import type { StaffRecord } from '../../staff/repository.js';
@@ -47,12 +48,83 @@ export interface StaffCommand {
   readonly handle: (ctx: StaffContext) => Promise<RouterOutcome>;
 }
 
-/** The single-message answer most commands give. */
+/**
+ * The single-message answer most commands give.
+ *
+ * Clamped, always, and that is not defensive tidiness. Telegram rejects a
+ * message over `TELEGRAM_MESSAGE_MAX_CHARS` with a 400; `send` turns that into a
+ * throw, `deliver` catches it and alerts — so the staff member who asked a
+ * question gets silence and an operator gets woken up. `/case` prints a
+ * teacher's own words and several staff notes, none of which have a length
+ * limit, so this is reachable by ordinary use rather than by abuse.
+ *
+ * Every staff command goes through here, so the guarantee is structural rather
+ * than something each command has to remember.
+ */
 export function reply(chatId: string, text: string, keyboard?: InlineKeyboard): RouterOutcome {
   return {
-    messages: [{ chatId, text, ...(keyboard !== undefined ? { keyboard } : {}) }],
+    messages: [{ chatId, text: clampToTelegram(text), ...(keyboard !== undefined ? { keyboard } : {}) }],
     alerts: [],
   };
+}
+
+/**
+ * Cut a message to something Telegram will actually deliver.
+ *
+ * The last line of defence, not the first: `/case` budgets the detail and each
+ * note so this never fires in practice. It exists because a budget is
+ * arithmetic — add a field, raise a cap, and the sum quietly stops fitting.
+ *
+ * It says what it did. A message that ends mid-sentence with no explanation
+ * reads as a bot that broke, and the staff member's next move is to retry it.
+ */
+export function clampToTelegram(text: string): string {
+  if (text.length <= TELEGRAM_MESSAGE_MAX_CHARS) return text;
+
+  const notice = `\n\n… cut short — ${text.length - TELEGRAM_MESSAGE_MAX_CHARS} more characters than Telegram will send.`;
+  return `${text.slice(0, TELEGRAM_MESSAGE_MAX_CHARS - notice.length)}${notice}`;
+}
+
+/**
+ * A timestamp as the person reading it experiences it.
+ *
+ * Tashkent, always — a Linux server runs in UTC, which is five hours behind, so
+ * an unqualified date on a case would be five hours early for everybody who
+ * reads it. `constants.ts` states the whole argument at `TIMEZONE`.
+ *
+ * `Intl` here, and `to_char(... AT TIME ZONE ...)` in `notify.ts`, which is not
+ * an inconsistency: these values come through the drizzle query builder, which
+ * parses `timestamptz` into a real `Date`, whereas `notify.ts` reads through
+ * `db.execute`, which hands back the raw string PostgreSQL sent. Formatting a
+ * `Date` is the right tool for a `Date`; formatting in SQL is the right tool for
+ * something that was never parsed.
+ */
+export function formatTashkent(when: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIMEZONE,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(when);
+}
+
+/**
+ * How long ago, in the shortest form that is still honest.
+ *
+ * Measured against the process clock rather than the database's. That is
+ * deliberate and is safe *here* precisely because it is not safe anywhere a
+ * value is stored: this is a rounded age for a person to glance at, not a
+ * stamp anything is compared against. Every timestamp that decides something —
+ * `updated_at`, `closed_at`, the dedup window — is written by `now()` inside
+ * PostgreSQL and never by this process.
+ */
+export function ageInDays(since: Date): string {
+  const days = Math.floor((Date.now() - since.getTime()) / 86_400_000);
+  if (days <= 0) return 'today';
+  return days === 1 ? '1 day' : `${days} days`;
 }
 
 /** A staff row, reduced to the two axes the visibility predicate reads. */

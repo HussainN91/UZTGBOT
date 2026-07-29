@@ -51,8 +51,14 @@ const tsz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date'
 /**
  * The eight case statuses from the original proposal. Carried over unchanged —
  * they reflect how MoPSE actually works a case, not a spreadsheet limitation.
+ *
+ * The array is the source and the enum is derived from it, rather than the two
+ * being written out separately. They were, and `CaseStatus` in `service.ts` was
+ * a third hand-written copy of the same eight strings — three lists that had to
+ * agree with nothing enforcing it. `/cases <status>` needs to validate what a
+ * staff member typed against *the* list, and there has to be exactly one.
  */
-export const caseStatusEnum = pgEnum('case_status', [
+export const CASE_STATUS_ORDER = [
   'New',
   'Received',
   'Under review',
@@ -61,7 +67,11 @@ export const caseStatusEnum = pgEnum('case_status', [
   'Completed',
   'Closed',
   'Duplicate',
-]);
+] as const;
+
+export type CaseStatus = (typeof CASE_STATUS_ORDER)[number];
+
+export const caseStatusEnum = pgEnum('case_status', CASE_STATUS_ORDER);
 
 /**
  * How serious a case is, as a person judged it — not as its status says.
@@ -82,14 +92,21 @@ export const caseImportanceEnum = pgEnum('case_importance', ['Normal', 'Urgent',
 export const CASE_IMPORTANCE_ORDER = ['Normal', 'Urgent', 'Critical'] as const;
 export type CaseImportance = (typeof CASE_IMPORTANCE_ORDER)[number];
 
-/** Statuses that count as still open, for the 24-hour duplicate window. */
+/**
+ * Statuses that count as still open, for the 24-hour duplicate window and for
+ * every staff-facing list.
+ *
+ * `satisfies` is what stops this drifting from `CASE_STATUS_ORDER`: renaming a
+ * status above without renaming it here is a compile error rather than a filter
+ * that silently matches nothing.
+ */
 export const OPEN_CASE_STATUSES = [
   'New',
   'Received',
   'Under review',
   'Action required',
   'Escalated',
-] as const;
+] as const satisfies readonly CaseStatus[];
 
 /**
  * One role system, replacing three.

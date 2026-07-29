@@ -326,6 +326,42 @@ export const NEW_CASE_NOTIFY_CAP = 20;
 export const CASE_NOTES_SHOWN = 5;
 
 /**
+ * Telegram's hard limit on one message, in characters.
+ *
+ * Not a preference and not adjustable: past this the API returns a 400, `send`
+ * throws, and the staff member who asked for something gets nothing while an
+ * operator gets an alarm. `/case` is the command that can reach it — it prints a
+ * teacher's own words, which have no length limit and which the urgent path
+ * appends to, plus several staff notes that have none either.
+ *
+ * This is the failure `handleCaseDetail_` carried a comment about, and the
+ * reason D8 moved notes out of `cases.detail`: an internal thread accumulating
+ * inside a field that also held the teacher's original description, until
+ * reading a case exceeded what Telegram would deliver. Moving the notes stopped
+ * the field growing without limit; it did not make either one short.
+ */
+export const TELEGRAM_MESSAGE_MAX_CHARS = 4096;
+
+/**
+ * How much of a teacher's own words `/case` shows before it says it is
+ * truncating.
+ *
+ * The two budgets below are chosen to fit inside the limit above with the
+ * header, the fields and five notes: 1200 + 5 × 280 = 2600, leaving room for
+ * everything else and a wide margin. They are the *stated* protection; the clamp
+ * applied to every staff message is the guarantee, because a budget is
+ * arithmetic and arithmetic goes wrong quietly.
+ *
+ * Truncated with a marker saying how much is missing, never silently. A staff
+ * member who cannot see the last paragraph must know there is one — the whole
+ * argument behind `STAFF_CASE_LIST_CAP` reporting its total.
+ */
+export const CASE_DETAIL_SHOWN_CHARS = 1200;
+
+/** The same, per note. Five of these fit alongside the detail above. */
+export const CASE_NOTE_SHOWN_CHARS = 280;
+
+/**
  * The longest a case may be snoozed for.
  *
  * A snooze suppresses chasing, not the case, and a cap is what stops it becoming

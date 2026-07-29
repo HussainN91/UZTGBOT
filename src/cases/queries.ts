@@ -160,6 +160,28 @@ export async function casesOwnedBy(
 }
 
 /**
+ * The overdue threshold, or `null` when nobody has set a usable one.
+ *
+ * Exported because `/urgent` has to tell two situations apart that look
+ * identical from an empty list: **no case is overdue**, and **nobody has said
+ * what overdue means**. A staff member shown "nothing overdue" by a feature
+ * that is switched off draws exactly the wrong conclusion, and that is the
+ * "looks configured and does nothing" failure this rebuild exists to remove.
+ *
+ * The validation lives here rather than in each caller, so the command's
+ * *wording* and the query's *behaviour* can never disagree — an `OVERDUE_DAYS`
+ * of `abc` must not have the command announce a threshold the query then
+ * ignores.
+ */
+export async function overdueDays(db: Database): Promise<number | null> {
+  const raw = await getSetting(db, SETTING.OVERDUE_DAYS);
+  if (raw === null || raw.trim() === '') return null;
+
+  const days = Number.parseInt(raw.trim(), 10);
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+/**
  * Open cases nobody has touched for longer than `OVERDUE_DAYS`.
  *
  * One of two ideas of "late", and the other one is `casesPastDue` — a promise
@@ -173,11 +195,8 @@ export async function casesOwnedBy(
  * caller because a caller is a thing that forgets.
  */
 export async function staleCases(db: Database, scope: StaffScope): Promise<StaffCaseList> {
-  const raw = await getSetting(db, SETTING.OVERDUE_DAYS);
-  if (raw === null || raw.trim() === '') return EMPTY_LIST;
-
-  const days = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(days) || days <= 0) return EMPTY_LIST;
+  const days = await overdueDays(db);
+  if (days === null) return EMPTY_LIST;
 
   const where = and(
     visibleToStaff(scope),

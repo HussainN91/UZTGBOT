@@ -35,11 +35,14 @@
 | R10 | `OutgoingMessage.purpose` | ✅ **pulled forward from Task 39** — see R10 |
 | 31 | Dispatcher, deny path, `/whoami` | ✅ `src/telegram/commands/{index,context,staff}.ts` |
 | 32 | New-case notification | ✅ `src/cases/notify.ts`, wired into both filing paths |
-| **33–39, 41, 45, 46** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
+| 33 | Case reading — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ `src/telegram/commands/cases.ts`, plus the status vocabulary in `src/cases/status.ts` |
+| **34–39, 41, 45, 46** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
 
 **All four audit faults are now closed.** Revocation revokes, a corrected region reaches the visibility rule, the staff table has a reader and a writer, and — as of Task 32 — a case that is filed reaches the people who can work it. `Received` has a writer for the first time, and a case nobody can act on raises a critical alert instead of sitting unseen.
 
-**Next is Task 33**, case reading: `/cases` `/mycases` `/urgent` `/case` `/search`. Every query it needs already exists in `src/cases/queries.ts`; the commands are thin over it, and the dispatcher gives them their scope.
+**Next is Task 34**, case mutation: `/reply` `/await` `/close` `/reopen` `/note`, as corrected by D26. It is the first task in this stage that writes to a case, so R2's rule applies to every statement in it — the chat lock is the *sender's*, so two staff on one case hold two different locks and any read-modify-write races.
+
+**Two things Task 33 changed outside its own file, both recorded as departures 13 and 14:** the case-status vocabulary was collapsed into one list, and `/case` had to bound its own output because `send.ts` does not split messages. Details in the departures list; neither is optional to know before Task 34, which adds four more writers of that vocabulary.
 
 **All three remaining questions were answered on 29 July** and are recorded as **D26** (`Action required` means the teacher must act, and `Closed` gets a writer), **D27** (`/restore`, added to Task 36) and **D28** (retention: unresolved cases kept indefinitely, resolved ones 7 days, urgent and critical 6 months, the interaction log 3 days). No question in this plan is open.
 
@@ -1461,11 +1464,17 @@ it('caps recipients at twenty', async () => { /* R9 */ });
 
 **Files:** Create `src/telegram/commands/cases.ts` and its test
 
-- [ ] **Step 1: Tests**, including `/case` showing the last few notes and the count of the rest, and `/cases unassigned` as the intake backlog.
+- [x] **Step 1: Tests**, including `/case` showing the last few notes and the count of the rest, and `/cases unassigned` as the intake backlog.
 
-- [ ] **Step 2: Implement.** Every one takes the staff scope from the dispatcher; none of them re-derives visibility.
+- [x] **Step 2: Implement.** Every one takes the staff scope from the dispatcher; none of them re-derives visibility.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
+
+**Two things this task found that the plan did not anticipate.**
+
+**The case-status vocabulary existed three times.** `caseStatusEnum` in the schema, a hand-written eight-value union in `service.ts`, and — worse — `OPEN_CASE_STATUSES` defined in *both* `schema.ts` and `service.ts`, with `queries.ts` importing one copy and `service.ts` using the other. They agreed by luck. `/cases <status>` has to validate what a staff member typed against *the* list, and there was no such thing. Collapsed: `CASE_STATUS_ORDER` in the schema is the source, the enum and the type derive from it, and `src/cases/status.ts` holds the parser and the open/closed split exactly as `importance.ts` holds the other axis. A test asserts the two halves partition all eight, because a status in neither list would be invisible to `/cases` and immortal to stage 5's retention.
+
+**`send.ts` does not split long messages, and `/case` can produce one.** Telegram rejects anything over 4096 characters; `send` throws, `deliver` catches it and alerts, so the staff member gets silence and an operator gets woken. `/case` prints `cases.detail` — which has no length limit and which `appendUrgentFollowUp` appends to — plus up to five notes with none either. This is reachable by ordinary use, and it is the failure `handleCaseDetail_` carried a comment about: D8 stopped the field growing without limit, it did not make either one short. The detail and each note are budgeted (`CASE_DETAIL_SHOWN_CHARS`, `CASE_NOTE_SHOWN_CHARS`), and `reply` clamps whatever comes out, so the guarantee is structural rather than arithmetic. **Task 34 inherits this**: `/note` and `/reply` carry staff free text of unbounded length, and their confirmations must go through `reply` like everything else.
 
 ---
 

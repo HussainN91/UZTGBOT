@@ -21,34 +21,32 @@ import {
   TIMEZONE,
 } from '../config/constants.js';
 import type { Database } from '../db/index.js';
-import { type CaseImportance, cases } from '../db/schema.js';
+import {
+  type CaseImportance,
+  type CaseStatus,
+  OPEN_CASE_STATUSES,
+  cases,
+} from '../db/schema.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { allocateReference } from './reference.js';
-
-export type CaseStatus =
-  | 'New'
-  | 'Received'
-  | 'Under review'
-  | 'Action required'
-  | 'Escalated'
-  | 'Completed'
-  | 'Closed'
-  | 'Duplicate';
+import { isClosedStatus } from './status.js';
 
 /**
- * What counts as "still open" for the duplicate check (`CaseManager.gs:22`).
+ * Both re-exported from the schema rather than restated here.
  *
- * Completed, Closed and Duplicate are excluded deliberately: a teacher whose
- * case was closed yesterday and who has the same problem again today is raising
- * a new case, not repeating one.
+ * They *were* restated: this file held its own eight-value `CaseStatus` union
+ * and its own `OPEN_CASE_STATUSES` array, while `queries.ts` imported the
+ * schema's copy of the latter. Two definitions of one list, reached by different
+ * importers, agreeing only by luck — and the schema is the honest home, because
+ * that is where the database enum they must match is declared.
+ *
+ * What "still open" means has not changed (`CaseManager.gs:22`): Completed,
+ * Closed and Duplicate are excluded deliberately, because a teacher whose case
+ * was closed yesterday and who has the same problem again today is raising a new
+ * case, not repeating one.
  */
-export const OPEN_CASE_STATUSES = [
-  'New',
-  'Received',
-  'Under review',
-  'Action required',
-  'Escalated',
-] as const satisfies readonly CaseStatus[];
+export type { CaseStatus };
+export { OPEN_CASE_STATUSES };
 
 export class TeacherNotVerifiedError extends Error {
   constructor(readonly chatId: string) {
@@ -236,8 +234,6 @@ export interface CaseFields {
   readonly publicUpdate?: string;
 }
 
-/** Statuses that end a case, and so stamp `closed_at`. */
-const TERMINAL_STATUSES: readonly CaseStatus[] = ['Completed', 'Closed', 'Duplicate'];
 
 /**
  * Apply a change, stamping who did it and when.
@@ -252,9 +248,7 @@ export async function updateCase(
   actor: string,
 ): Promise<boolean> {
   const closedAt =
-    fields.status !== undefined && TERMINAL_STATUSES.includes(fields.status)
-      ? sql`now()`
-      : undefined;
+    fields.status !== undefined && isClosedStatus(fields.status) ? sql`now()` : undefined;
 
   const result = await db
     .update(cases)
