@@ -369,10 +369,43 @@ the artifact (§10) under "what we need from you".
   asked and record the cost. See §3.
 - **Say what you did not do.** A gap named in this document is cheap; a gap discovered in November
   is not.
-- **The artifact** at `https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53` is
-  their document, in plain English. Update it **in place** by passing that URL as `url`. Never mint
-  a new one; favicon 🤖, keep it. **It is at v7, current through Task 45 — Task 46 is not in it
-  yet.** To update it: `WebFetch` the URL (it saves the full HTML and prints the path), strip the
-  `<!doctype>`/`<head>` frame wrapper and the trailing `</body></html>`, edit the remainder, and
-  republish that file with `url` set. Do not rewrite it from scratch — the design system and every
-  section you are not changing survive intact that way.
+
+## 11. Ending a session — the three things that must be current
+
+Do all three **before** saying the session is finished. Each one has been left behind at least once,
+and each time the next session started from something that was quietly wrong.
+
+**1. This document, rewritten in place.** Not patched — rewritten. It has been amended five times in
+a single session before, and the result contradicted itself in three places. There is one of it and
+it is the first thing the next session reads.
+
+**2. The plan's "Where this stands" table**, at the top of `docs/plans/2026-07-28-stage-4-staff.md`,
+plus the checkboxes on any task that was finished, with its commit hash.
+
+**3. The artifact — `https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53`.**
+
+> **It is the head of project's document, not an input to this one.** Do not read it to get up to
+> speed and do not copy anything out of it: a second copy of this content is exactly the drift this
+> project keeps finding in its own documents, and the header of this file says so. It flows one
+> way — from what was actually built, to them.
+
+Update it **in place** by passing that URL as `url`. Never mint a new one; favicon 🤖, keep it.
+**Currently v8, current through Task 46.**
+
+The mechanism, because getting it wrong costs a whole rewrite:
+
+- `WebFetch` the URL. It saves the full HTML to a local file and prints the path.
+- Strip the `<!doctype>`/`<head>` frame wrapper and the trailing `</body></html>`. What remains —
+  starting at `<title>` — is what gets republished.
+- **Edit the remainder; never rewrite it from scratch.** The design system and every section you
+  are not touching survive intact that way, and the document stays theirs rather than becoming a
+  new one each time.
+- Bump the version in three places — the sidebar, the masthead eyebrow, and the footer — and update
+  the six numbers in the metrics row. State only figures that were actually run.
+- Republish with `url` set and the same favicon.
+
+What belongs in it, in their words rather than the code's: what a person can now *do* that they
+could not before; anything that changes what a teacher sees; every fault found, including the ones
+in already-committed code; anything that cost more than the plan said it would; and what is still
+waiting on MoPSE. What does not belong: file names, function names, task numbers as the *subject*
+of a sentence, or any figure nobody ran.
