@@ -416,6 +416,140 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
     });
   });
 
+  describe('/assign', () => {
+    // case.assign is Lead and above, so the Support members above cannot use it.
+    const LEAD = '995004';
+
+    beforeEach(async () => {
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, regions, active)
+        VALUES (${LEAD}, 'The Lead', 'Lead', 'All', ARRAY[]::text[], true)
+      `);
+    });
+
+    const auditRows = async (): Promise<{ action: string; subject: string | null }[]> => {
+      const rows = await db.execute<{ action: string; subject: string | null }>(
+        sql`SELECT action, subject FROM audit_log`,
+      );
+      return rows.rows;
+    };
+
+    const ownerOf = async (reference: string): Promise<string | null> => {
+      const rows = await db.execute<{ owner: string | null }>(
+        sql`SELECT owner FROM cases WHERE reference = ${reference}`,
+      );
+      return rows.rows[0]?.owner ?? null;
+    };
+
+    it('refuses an id that is not active staff, before touching the case', async () => {
+      // R3. cases.owner is a foreign key: writing an unknown id raises a
+      // constraint error, which reaches bot.catch, which acknowledges the update
+      // and says nothing — so the assigner reads silence as success and nobody
+      // is working the case.
+      const body = await run(`/assign ${VISA_REF} 999999`, LEAD);
+
+      expect(body).toMatch(/not an active staff member/i);
+      expect(await ownerOf(VISA_REF)).toBeNull();
+    });
+
+    it('refuses a member who has been deactivated', async () => {
+      // Their cases would appear in nobody's /mycases, because casesOwnedBy is
+      // asked by a person who can no longer ask.
+      await db.execute(sql`UPDATE staff SET active = false WHERE telegram_id = ${ACCOM_STAFF}`);
+
+      await run(`/assign ${ACCOM_REF} ${ACCOM_STAFF}`, LEAD);
+
+      expect(await ownerOf(ACCOM_REF)).toBeNull();
+    });
+
+    it('refuses somebody who could not see the case', async () => {
+      // The check a foreign key cannot make. An id can be real staff and still
+      // be the wrong person: the case leaves /cases unassigned and is invisible
+      // in the new owner's /mycases, which is worse than leaving it unowned.
+      const body = await run(`/assign ${VISA_REF} ${ACCOM_STAFF}`, LEAD);
+
+      expect(body).toMatch(/cannot see/i);
+      expect(body).toContain('Accommodation');
+      expect(await ownerOf(VISA_REF)).toBeNull();
+    });
+
+    it('assigns to somebody whose queue does cover it, and tells them', async () => {
+      const outcome = await command(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+
+      expect(await ownerOf(VISA_REF)).toBe(VISA_STAFF);
+
+      const told = outcome.messages.filter((m) => m.chatId === VISA_STAFF);
+      expect(told).toHaveLength(1);
+      expect(told[0]?.text).toContain(VISA_REF);
+      // R10 — deliver names this in the alarm it raises if the send fails.
+      expect(told[0]?.purpose).toMatch(/assigned/i);
+    });
+
+    it('puts the case in the new owner’s /mycases and out of the backlog', async () => {
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+
+      expect(await run('/mycases', VISA_STAFF)).toContain(VISA_REF);
+      expect(await run('/cases unassigned', VISA_STAFF)).not.toContain(VISA_REF);
+    });
+
+    it('records who handed the case to whom', async () => {
+      // D18. recordAudit propagates its errors on purpose — an assignment that
+      // cannot be recorded should not happen.
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+
+      expect(await auditRows()).toEqual([{ action: 'CASE_ASSIGNED', subject: VISA_REF }]);
+    });
+
+    it('writes no audit row when it refused', async () => {
+      await run(`/assign ${VISA_REF} 999999`, LEAD);
+
+      expect(await auditRows()).toHaveLength(0);
+    });
+
+    it('names the previous owner when a case moves hands', async () => {
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+
+      expect(await run(`/assign ${VISA_REF} ${LEAD}`, LEAD)).toContain(VISA_STAFF);
+    });
+
+    it('does not message somebody about their own action', async () => {
+      // Assigning a case to yourself is the commonest use of this.
+      const outcome = await command(`/assign ${VISA_REF} ${LEAD}`, LEAD);
+
+      expect(outcome.messages).toHaveLength(1);
+      expect(outcome.messages[0]?.text).toMatch(/your \/mycases/i);
+    });
+
+    it('says so, and writes nothing, when the case is already theirs', async () => {
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+      await db.execute(sql`DELETE FROM audit_log`);
+
+      expect(await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD)).toMatch(/already belongs/i);
+      expect(await auditRows()).toHaveLength(0);
+    });
+
+    it('is not available to Support, who may work a case but not hand it on', async () => {
+      const body = await run(`/assign ${VISA_REF} ${VISA_STAFF}`, VISA_STAFF);
+
+      expect(body).toMatch(/rank/i);
+      expect(await ownerOf(VISA_REF)).toBeNull();
+    });
+
+    it('refuses a case the assigner themselves cannot see', async () => {
+      // The assigner is scoped too. resolveCase runs under their scope before
+      // anything about the assignee is considered.
+      await db.execute(sql`UPDATE staff SET queue = 'Visa' WHERE telegram_id = ${LEAD}`);
+
+      await run(`/assign ${ACCOM_REF} ${ACCOM_STAFF}`, LEAD);
+
+      expect(await ownerOf(ACCOM_REF)).toBeNull();
+    });
+
+    it('asks for an id rather than guessing', async () => {
+      expect(await run(`/assign ${VISA_REF}`, LEAD)).toMatch(/who should own it/i);
+    });
+  });
+
   describe('length', () => {
     it('keeps both messages inside what Telegram will deliver', async () => {
       // A reply carries staff free text of unbounded length, and a reply that

@@ -37,11 +37,12 @@
 | 32 | New-case notification | ✅ `src/cases/notify.ts`, wired into both filing paths |
 | 33 | Case reading — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ `src/telegram/commands/cases.ts`, plus the status vocabulary in `src/cases/status.ts` |
 | 34 | Case mutation — `/reply` `/await` `/close` `/reopen` `/note` | ✅ same file; fixed `updateCase` leaving a stale `closed_at` on reopen |
-| **35–39, 41, 45, 46** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
+| 35 | `/assign` | ✅ same file; both R3 checks before the write, plus a `CASE_ASSIGNED` audit row |
+| **36–39, 41, 45, 46** | **The rest of layer 3, and layers 4–5** | ⬜ **not started** |
 
 **All four audit faults are now closed.** Revocation revokes, a corrected region reaches the visibility rule, the staff table has a reader and a writer, and — as of Task 32 — a case that is filed reaches the people who can work it. `Received` has a writer for the first time, and a case nobody can act on raises a critical alert instead of sitting unseen.
 
-**Next is Task 35**, `/assign` — R3, and the first command that writes `cases.owner`, which is a foreign key to `staff.telegram_id`. Assigning an id with no staff row raises a constraint error that reaches `bot.catch`, which says nothing at all, so the assigner believes it worked and nobody is working the case. It validates the assignee is active staff **and** can see the case, before the write.
+**Next is Task 45**, `/region` `/regions` `/mark` `/due` `/snooze` — the commands over Tasks 43 and 44, built after Task 35 as the build order says. It is where `importance`, `due_at` and `snoozed_until` finally get writers, and where R15 stops being a live concern rather than a displayed one.
 
 **What the last two tasks changed outside their own files** — departures 13 to 15, and none of them optional to know: the case-status vocabulary was collapsed into one list; `/case` bounds its own output because `send.ts` does not split messages; and `updateCase` now clears `closed_at` when a case leaves a terminal status, which was a live fault against D28's retention.
 
@@ -1584,7 +1585,11 @@ it('refuses an assignee who could not see the case', async () => {
 it('reports back when the assignee could not be notified', async () => { /* … */ });
 ```
 
-- [ ] **Step 2: Implement. Step 3: Commit**
+- [x] **Step 2: Implement. Step 3: Commit**
+
+**The third test above needed rewording, because in this architecture nothing can report a failed notification at the moment of assigning.** Delivery happens after the commit, in `deliver`, which is the only thing that learns whether Telegram accepted a message. What `/assign` can do is name what the message was, so a failure is reported as *"a notice that a case has been assigned to somebody"* rather than as the vague fallback — which is R10, done at Task 31. The test asserts the `purpose` is set.
+
+**Two things not in the sketch.** `/assign` writes a `CASE_ASSIGNED` audit row, because D18 lists case assignment among the privileged actions and `recordAudit` propagates its errors — an assignment that cannot be recorded does not happen. And assigning a case to *yourself* sends no notification: it is the commonest use of the command, and being messaged about your own action is noise.
 
 ---
 

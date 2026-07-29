@@ -37,7 +37,9 @@ import {
 } from '../../cases/queries.js';
 import { updateCase } from '../../cases/service.js';
 import { caseStatusList, isOpenStatus, parseCaseStatus } from '../../cases/status.js';
+import { recordAudit } from '../../log/audit.js';
 import { CAPABILITY } from '../../staff/roles.js';
+import { findStaff } from '../../staff/repository.js';
 import { findTeacher, teacherHasAccess } from '../../teachers/repository.js';
 import type { OutgoingMessage, RouterOutcome } from '../router.js';
 import {
@@ -47,6 +49,7 @@ import {
   formatTashkent,
   reply,
   replyAndTell,
+  scopeOf,
 } from './context.js';
 import { splitReference } from './parse.js';
 
@@ -697,6 +700,140 @@ export const noteOnCase: StaffCommand = {
   },
 };
 
+/**
+ * `/assign <ref> <telegram id>` — give a case an owner. Implements R3.
+ *
+ * **Both checks happen before the write, and both are the point of the command.**
+ *
+ * `cases.owner` is a foreign key to `staff.telegram_id`. Assigning an id with no
+ * staff row raises a constraint error, which propagates to `bot.catch` — and
+ * `bot.catch` acknowledges the update and says nothing at all. The assigner sees
+ * silence, reads it as success, and the case is owned by nobody.
+ * `AdminCommands.gs:742-751` validated the same two things and recorded why:
+ * cases were "routinely assigned to typos and to people who are not admins — the
+ * case then looked handled and nobody was working it".
+ *
+ * The second check is the one a foreign key cannot make. An id can be real staff
+ * and still be the wrong person: assigning a Visa case to somebody holding only
+ * the Accommodation queue puts it in a name, out of `/cases unassigned`, and
+ * invisible to the owner's own `/mycases`. That is worse than leaving it
+ * unassigned, because an unassigned case is still on a list somebody reads.
+ *
+ * Writes an audit row (D18). "Who handed this case to whom" is an accountability
+ * question, and `recordAudit` propagates its errors on purpose — an assignment
+ * that cannot be recorded does not happen.
+ */
+export const assignCase: StaffCommand = {
+  name: '/assign',
+  capability: CAPABILITY.CASE_ASSIGN,
+  handle: async (ctx) => {
+    const usage = '/assign VISA-2026-00001 991001   — the owner’s Telegram id, from /staff';
+
+    const resolved = await resolveCase(ctx, usage);
+    if (!resolved.ok) return reply(ctx.member.telegramId, resolved.text);
+
+    const { row, rest } = resolved;
+    const assigneeId = rest.trim();
+    if (assigneeId === '') {
+      return reply(ctx.member.telegramId, `Who should own it?\n\n${usage}`);
+    }
+
+    /**
+     * `findStaff` returns active rows only, so a deactivated member is refused
+     * here without a second check. That matters: their cases would appear in
+     * nobody's `/mycases`, because `casesOwnedBy` is asked by a person who can
+     * no longer ask.
+     */
+    const assignee = await findStaff(ctx.db, assigneeId);
+    if (assignee === null) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${assigneeId} is not an active staff member, so the case has not been moved.`,
+          '',
+          'Check the id with /staff. A case assigned to a typo looks handled and is not.',
+        ].join('\n'),
+      );
+    }
+
+    if (row.owner === assignee.telegramId) {
+      return reply(ctx.member.telegramId, `${row.reference} already belongs to ${describeStaff(assignee)}.`);
+    }
+
+    /**
+     * Can the person receiving it actually see it? Asked by running the same
+     * lookup under *their* scope, rather than by re-deriving the queue and
+     * region rules here — one expression of visibility, as everywhere else.
+     */
+    const theirs = await findCase(ctx.db, scopeOf(assignee), row.reference);
+    if (theirs === null) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${describeStaff(assignee)} cannot see ${row.reference}, so it has not been moved.`,
+          '',
+          `Their queue is ${assignee.queue} and this case is ${row.category}.`,
+          'Assigning it anyway would take it off the unassigned list and put it',
+          'somewhere nobody is looking.',
+        ].join('\n'),
+      );
+    }
+
+    const written = await updateCase(
+      ctx.db,
+      row.reference,
+      { owner: assignee.telegramId },
+      ctx.member.telegramId,
+    );
+    if (!written) return reply(ctx.member.telegramId, `${row.reference} has gone. Nothing was changed.`);
+
+    await recordAudit(ctx.db, {
+      actor: ctx.member.telegramId,
+      action: 'CASE_ASSIGNED',
+      subject: row.reference,
+      detail: { from: row.owner, to: assignee.telegramId },
+    });
+
+    const handover =
+      row.owner === null
+        ? `${row.reference} is now owned by ${describeStaff(assignee)}.`
+        : `${row.reference} has moved from ${row.owner} to ${describeStaff(assignee)}.`;
+
+    /**
+     * The new owner is told, unless they are the person who typed the command —
+     * assigning a case to yourself is the commonest use of this, and being
+     * messaged about your own action is noise.
+     */
+    if (assignee.telegramId === ctx.member.telegramId) {
+      return reply(ctx.member.telegramId, `${handover}\n\nIt is in your /mycases now.`);
+    }
+
+    return replyAndTell(
+      ctx.member.telegramId,
+      `${handover}\n\nThey have been told, and it is in their /mycases.`,
+      [
+        {
+          chatId: assignee.telegramId,
+          purpose: 'a notice that a case has been assigned to somebody',
+          text: [
+            `📋 ${row.reference} has been assigned to you`,
+            '',
+            `Category: ${row.category}`,
+            `Status: ${row.status}`,
+            `Given to you by: ${describeStaff(ctx.member)}`,
+            '',
+            `/case ${row.reference} — read it, including what the teacher wrote`,
+          ].join('\n'),
+        },
+      ],
+    );
+  },
+};
+
+/** A staff member as another staff member should see them named. */
+const describeStaff = (member: { telegramId: string; name: string | null }): string =>
+  member.name === null ? member.telegramId : `${member.name} (${member.telegramId})`;
+
 export const CASE_COMMANDS: readonly StaffCommand[] = [
   cases,
   myCases,
@@ -708,4 +845,5 @@ export const CASE_COMMANDS: readonly StaffCommand[] = [
   closeCase,
   reopenCase,
   noteOnCase,
+  assignCase,
 ];
