@@ -190,6 +190,38 @@ export async function appendUrgentFollowUp(
 }
 
 /**
+ * Record that a new case reached somebody who can act on it — D25.
+ *
+ * This is what finally gives `Received` a writer. The status has existed since
+ * stage 2 and nothing has ever written it, so "filed, and somebody can see it"
+ * and "filed, and nobody could" were the same word; now they are not, and no
+ * staff member has to maintain the difference by hand.
+ *
+ * Not reachable through `updateCase`, and the `AND status = 'New'` guard is the
+ * reason. An urgent case is filed at `Escalated`, and `Escalated` is what puts a
+ * case in `/urgent` while it is open — demoting one to `Received` because
+ * somebody was notified would take an emergency out of the list that exists to
+ * show emergencies. `updateCase` cannot express a conditional write, and adding
+ * a `where` to it would hand every caller a way to write a status that depends
+ * on the current one.
+ *
+ * One statement, so it is safe under R2: two staff commands on one case take two
+ * different chat locks, and any read-modify-write between them races.
+ *
+ * `last_actor` is deliberately untouched. Nobody did this; the system did, and
+ * overwriting the teacher who filed the case would lose the only record of who
+ * that was.
+ */
+export async function markCaseReceived(db: Database, reference: string): Promise<boolean> {
+  const result = await db.execute<{ reference: string }>(sql`
+    UPDATE cases SET status = 'Received', updated_at = now()
+    WHERE reference = ${reference} AND status = 'New'
+    RETURNING reference
+  `);
+  return result.rows.length > 0;
+}
+
+/**
  * The only fields anything may change after a case exists.
  *
  * `reference`, `category`, `teacherChatId` and `createdAt` are absent on

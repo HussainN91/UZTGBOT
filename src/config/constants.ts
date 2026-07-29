@@ -298,6 +298,25 @@ export const CHECK_MY_CASE_CAP = 10;
 export const STAFF_CASE_LIST_CAP = 20;
 
 /**
+ * The most staff members one new case may notify.
+ *
+ * A latency bound, not a policy. `deliver` sends sequentially inside the webhook
+ * request, which `src/web/main.ts:40-44` configures with a 25-second timeout and
+ * `onTimeout: 'return'` — twenty sends at Telegram's response times is a second
+ * or two, and an unbounded fan-out is how one busy afternoon turns into
+ * timed-out webhooks for everybody.
+ *
+ * Apps Script called it `NEW_CASE_NOTIFY_MAX_ADMINS_`. It lives here rather than
+ * in a prose reference to a deleted file because a number that governs how long
+ * a webhook request takes has to be findable.
+ *
+ * If the staff list ever grows past this, the answer is to move the fan-out to
+ * the worker rather than to raise it — which is the same threshold `/announce`
+ * will have to respect in stage 5.
+ */
+export const NEW_CASE_NOTIFY_CAP = 20;
+
+/**
  * Notes shown when a staff member opens one case, most recent first.
  *
  * The rest are counted, not dropped silently. This is the number that stops

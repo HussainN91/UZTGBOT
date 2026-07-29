@@ -87,6 +87,28 @@ export const queueForCategory = (category: string): Queue =>
  * and granting sight of every teacher's case on the strength of a typo is the
  * wrong direction to fail.
  */
+/**
+ * The queues from which a case of this category can be seen.
+ *
+ * The inverse of `categoriesVisibleTo`, and it exists because notification asks
+ * the question the other way round: given one case, which staff rows match?
+ * That has to be a SQL `IN` list over `staff.queue` rather than a map evaluated
+ * per row.
+ *
+ * The two must agree for every pair, and there is a test that walks all of them
+ * — two expressions of one rule is precisely what `adminCanSeeCase_` became.
+ * They do agree because both read `QUEUE_FOR_CATEGORY`: a category whose home
+ * queue is `All` is visible from every queue, which is the uncategorised case
+ * reaching everybody, and `None` sees nothing from either direction.
+ */
+export const queuesCovering = (category: string): readonly Queue[] => {
+  const home = queueForCategory(category);
+  return ALL_QUEUES.filter(
+    (queue) =>
+      queue !== QUEUE.NONE && (queue === QUEUE.ALL || home === QUEUE.ALL || home === queue),
+  );
+};
+
 export const categoriesVisibleTo = (queue: string): readonly CaseCategory[] => {
   if (queue === QUEUE.ALL) return Object.values(CASE_CATEGORY);
   if (!isQueue(queue) || queue === QUEUE.NONE) return [];

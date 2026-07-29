@@ -7,6 +7,7 @@ import {
   categoriesVisibleTo,
   isQueue,
   queueForCategory,
+  queuesCovering,
 } from './queues.js';
 
 describe('queue routing', () => {
@@ -76,6 +77,41 @@ describe('categoriesVisibleTo', () => {
     // build does not know is a misconfiguration; widening their sight to
     // everything on the strength of a typo is the wrong direction to fail.
     expect(categoriesVisibleTo('Recruitment')).toEqual([]);
+  });
+});
+
+describe('queuesCovering', () => {
+  it('agrees with categoriesVisibleTo for every queue and every category', () => {
+    // The two are inverses of one rule, asked from opposite ends: "which cases
+    // may this person see" and "which people may see this case". Two
+    // expressions of one rule is exactly what `adminCanSeeCase_` became, applied
+    // by hand at six call sites; this walks all thirty-six pairs so they cannot
+    // drift apart.
+    for (const queue of ALL_QUEUES) {
+      const visible: readonly string[] = categoriesVisibleTo(queue);
+      for (const category of Object.values(CASE_CATEGORY)) {
+        expect(queuesCovering(category).includes(queue)).toBe(visible.includes(category));
+      }
+    }
+  });
+
+  it('sends an uncategorised case to every queue except None', () => {
+    // Contact Support is by definition the case nobody has classified. Routing
+    // it to a specialist would be guessing.
+    expect([...queuesCovering(CASE_CATEGORY.CONTACT_SUPPORT)].sort()).toEqual(
+      ALL_QUEUES.filter((q) => q !== QUEUE.NONE).sort(),
+    );
+  });
+
+  it('sends a categorised case to its own queue and to All, and nowhere else', () => {
+    expect([...queuesCovering(CASE_CATEGORY.VISA)].sort()).toEqual([QUEUE.ALL, QUEUE.VISA].sort());
+  });
+
+  it('sends a category this build does not know to every queue', () => {
+    // The same direction `queueForCategory` fails in: seen by too many people is
+    // a nuisance, seen by nobody is what this system exists to prevent.
+    expect(queuesCovering('Recruitment')).toContain(QUEUE.VISA);
+    expect(queuesCovering('Recruitment')).not.toContain(QUEUE.NONE);
   });
 });
 

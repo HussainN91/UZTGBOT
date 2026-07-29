@@ -36,7 +36,17 @@ export function privacyReply(supportContact: string): Reply {
   return { text: privacyNotice(supportContact), keyboard: backToMenuKeyboard() };
 }
 
-export function helpReply(supportContact: string): Reply {
+/**
+ * `staffSection` is appended only for an active staff member, and is `null` for
+ * everybody else.
+ *
+ * It arrives as a finished block rather than being built here, because deciding
+ * *which* commands to name is an authorization question and this file is the one
+ * place in the bot that must never fail. `Webhook.gs:249` kept the same split:
+ * a teacher offered `/close` is a teacher who will type it, and then be refused
+ * by the bot that suggested it.
+ */
+export function helpReply(supportContact: string, staffSection: string | null = null): Reply {
   return {
     text:
       'This bot answers common questions and opens support cases for teachers ' +
@@ -44,6 +54,7 @@ export function helpReply(supportContact: string): Reply {
       '/start — the main menu\n' +
       '/privacy — what data is held about you\n' +
       '/help — this message\n\n' +
+      (staffSection === null ? '' : `${staffSection}\n\n`) +
       `If you need a person, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };

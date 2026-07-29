@@ -63,6 +63,18 @@ const FLOOR: Readonly<Record<Capability, StaffRole>> = {
 
 export const ALL_CAPABILITIES = Object.values(CAPABILITY);
 
+/**
+ * The lowest rank that holds a capability, for a refusal that says what is
+ * missing.
+ *
+ * Read only to explain a denial. Telling somebody "that needs System" is worth
+ * more than "you may not", because the recovery is asking a named person for a
+ * rank rather than guessing which of five they need — and taking the answer from
+ * the same table that enforced the refusal is what stops the explanation
+ * drifting from the rule.
+ */
+export const floorFor = (capability: Capability): StaffRole => FLOOR[capability];
+
 /** Where a role sits on the ladder. Higher index is more authority. */
 const rankOf = (role: StaffRole): number => STAFF_ROLE_ORDER.indexOf(role);
 
@@ -97,6 +109,19 @@ export const can = (principal: StaffPrincipal | null, capability: Capability): b
   if (principal === null || !principal.active) return false;
   return atLeast(principal.role, FLOOR[capability]);
 };
+
+/**
+ * Every rank that holds a capability, in ladder order.
+ *
+ * The inverse of `can()`, and it exists for exactly one kind of question: "who
+ * should be told about this", where the answer has to become a SQL `IN` list
+ * rather than a decision taken one row at a time. Derived from `FLOOR`, so a
+ * fan-out cannot reach a rank the gates would refuse — new-case notification
+ * filters on `case.update` (R14), and hand-listing the ranks that hold it is how
+ * an Observer ends up being paged about work they cannot do.
+ */
+export const rolesHolding = (capability: Capability): readonly StaffRole[] =>
+  STAFF_ROLE_ORDER.filter((role) => atLeast(role, FLOOR[capability]));
 
 /**
  * Everything a role may do, in ladder order.

@@ -32,11 +32,13 @@
 import {
   CASE_TOPIC_CHOICES,
   MAX_CASE_DETAIL_ATTEMPTS,
+  URGENT_CASE_CATEGORY,
   caseTopicByKey,
 } from '../config/constants.js';
 import { isMaintenanceMode } from '../config/settings.js';
 import { fileUrgentCase, checkUrgentCode } from '../cases/urgent.js';
 import { TeacherNotVerifiedError, createCase } from '../cases/service.js';
+import { NO_NOTIFICATION, notifyNewCase, type NotificationOutcome } from '../cases/notify.js';
 import { clearState, loadState, saveState, type ConversationState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
 import { logInteraction } from '../log/interactions.js';
@@ -44,6 +46,7 @@ import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { verifyIdentifier } from '../teachers/verify.js';
 import type { Alert } from '../sync/alerts.js';
 import { CALLBACK, decodeCallback } from './callback-data.js';
+import { routeStaffCommand, staffHelpSection } from './commands/index.js';
 import {
   answerReply,
   faqHubReply,
@@ -164,6 +167,27 @@ function only(chatId: string, reply: Reply): RouterOutcome {
 }
 
 /**
+ * The teacher's answer, followed by everybody else's.
+ *
+ * `messages[0]` stays the reply to whoever wrote in — `deliver` relies on that
+ * and words its failure alarm from it — so the notification is appended, never
+ * prepended. Nothing here sends: the notification was computed inside the
+ * transaction and goes out after the commit, the same rule as the duplicate
+ * sign-in notice, because announcing something that can still roll back is
+ * worse than announcing it a moment later.
+ */
+function withNotice(
+  chatId: string,
+  reply: Reply,
+  notice: NotificationOutcome,
+): RouterOutcome {
+  return {
+    messages: [{ chatId, text: reply.text, keyboard: reply.keyboard }, ...notice.messages],
+    alerts: [...skippedAlert(reply), ...notice.alerts],
+  };
+}
+
+/**
  * An answer left out of a keyboard is an answer no teacher can reach.
  *
  * The keyboard builders report it rather than alerting, because they are pure —
@@ -210,7 +234,32 @@ async function routeText(
     return only(update.chatId, await startReply(db, update.chatId, deps));
   }
   if (text === '/privacy') return only(update.chatId, privacyReply(deps.supportContact));
-  if (text === '/help') return only(update.chatId, helpReply(deps.supportContact));
+  if (text === '/help') {
+    // The staff half is appended only for an active staff row, so a teacher is
+    // never shown a command they would be refused for typing.
+    const staffSection = await staffHelpSection(db, update.chatId);
+    return only(update.chatId, helpReply(deps.supportContact, staffSection));
+  }
+
+  /**
+   * Staff commands, before the teacher state machine — D9.
+   *
+   * A staff member part-way through their own case must still be able to run
+   * /close, for the same reason a teacher mid-case must still be able to reach
+   * /help.
+   *
+   * Returns null when the text is not a command word this build has, and *also*
+   * when the sender is not active staff. Both look identical from outside, which
+   * is the point: the denial is logged, and the message falls through to
+   * ordinary handling rather than being answered with a rejection that both
+   * confirms the command exists and discards what they typed.
+   *
+   * The state is handed down so the denial is redacted by the same rule the
+   * message was. Without it, refusing a command is a second route by which a
+   * teacher's case detail reaches the interaction log.
+   */
+  const staffOutcome = await routeStaffCommand(db, update.chatId, text, state, deps);
+  if (staffOutcome !== null) return staffOutcome;
 
   switch (state?.kind) {
     case 'AwaitingIdentifier':
@@ -395,9 +444,29 @@ async function handleCaseDetail(
       detail: text,
     });
     await clearState(db, chatId);
-    return only(
+
+    /**
+     * D11. Only a genuinely new case is announced.
+     *
+     * A second tap inside the 24-hour duplicate window returns the case that
+     * already exists, and staff were told about it when it was filed. Announcing
+     * it again would page up to twenty people for something they have already
+     * seen, which is how a notification becomes one people ignore. The urgent
+     * path is deliberately different — see `handleUrgentDetail`.
+     */
+    const notice = result.isNew
+      ? await notifyNewCase(db, {
+          reference: result.reference,
+          category: state.category,
+          teacherChatId: chatId,
+          urgent: false,
+        })
+      : NO_NOTIFICATION;
+
+    return withNotice(
       chatId,
       result.isNew ? caseFiledReply(result.reference) : caseDeduplicatedReply(result.reference),
+      notice,
     );
   } catch (err) {
     if (err instanceof TeacherNotVerifiedError) {
@@ -503,6 +572,29 @@ async function handleUrgentDetail(
     });
     await clearState(db, chatId);
 
+    /**
+     * Announced whether or not the case is new — the opposite of the ordinary
+     * path above, and deliberately.
+     *
+     * Urgent cases have no topic picker, so every one of them files under the
+     * general category and so does every ordinary Contact Support case: a
+     * teacher who opened one yesterday always deduplicates against it. Urgent
+     * plus deduplicated is the *common* path, not an edge case. Announcing only
+     * on an insert would mean the escalation nobody hears about is the one a
+     * teacher spent a single-use code on.
+     *
+     * It is announced when the code would not spend, too. The case was filed at
+     * `Escalated` by `createCase` before the code was touched, so a teacher who
+     * described an emergency reaches somebody either way; the failed
+     * consumption has its own alarm below.
+     */
+    const notice = await notifyNewCase(db, {
+      reference: result.reference,
+      category: URGENT_CASE_CATEGORY,
+      teacherChatId: chatId,
+      urgent: true,
+    });
+
     if (!result.escalated) {
       /**
        * The code was good when they typed it and is not good now. The case is
@@ -517,8 +609,10 @@ async function handleUrgentDetail(
             text: urgentCaseNotEscalatedReply(result.reference, deps.supportContact).text,
             keyboard: backToMenuKeyboard(),
           },
+          ...notice.messages,
         ],
         alerts: [
+          ...notice.alerts,
           {
             severity: 'critical',
             title: 'An urgent code was accepted and then would not spend',
@@ -535,11 +629,12 @@ async function handleUrgentDetail(
       };
     }
 
-    return only(
+    return withNotice(
       chatId,
       result.isNew
         ? urgentCaseFiledReply(result.reference, deps.supportContact)
         : urgentCaseEscalatedReply(result.reference, deps.supportContact),
+      notice,
     );
   } catch (err) {
     if (err instanceof TeacherNotVerifiedError) {
