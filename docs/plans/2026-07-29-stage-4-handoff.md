@@ -204,6 +204,34 @@ Things already argued, so do not re-derive them:
 - **Task 41** — larger than it looks. §4.7 of the runbook is deleted, "archive" becomes "delete",
   and `Action required` has to be defined in the runbook in D26's words.
 
+### A loose end that is not a task: the layer rule has no mechanical enforcement
+
+The architecture rests on one rule — **nothing may import from a layer above it** — and today that
+rule is enforced by whoever is reading carefully. Everything else load-bearing in this project is a
+compile error when it breaks; this is not.
+
+**`dependency-cruiser` was tried on 29 July and does not work here.** It supports
+`typescript >=2.0.0 <7.0.0`; this project is on `typescript ^7.0.2`. It installs, initialises, and
+then cruises **0 modules while printing a green tick** — which is the exact "looks configured and
+does nothing" failure this rebuild exists to remove, so it was uninstalled rather than left in
+place. Do not reach for it again until it supports TypeScript 7, and **do not downgrade TypeScript
+to suit a linting tool.**
+
+**The alternative, if the head of project wants it.** The layers map cleanly onto directories —
+`src/staff/roles.ts` and `src/cases/status.ts` are pure leaves, `src/cases/queries.ts` and the
+repositories are stores, `src/telegram/commands/` is layer 3. A script of roughly thirty lines can
+read the import lines of every file and fail on one that points upward. No dependency, no coupling
+to a TypeScript version, and it does the single job actually wanted. Three things it should know
+about, all met already in this codebase:
+
+- Entry points (`src/web/main.ts`, `src/worker/main.ts`, `src/scripts/*`) and `*.test.ts` files are
+  imported by nothing, and that is correct — they are not orphans.
+- Nothing in `src/` may import a `*.test.ts` file.
+- **A type-only import may point upward and is not a violation.** `import type { OutgoingMessage }
+  from '../telegram/router.js'` in `src/cases/notify.ts` and in the command files is deliberate:
+  type imports are erased at compile time, which is what lets a lower layer borrow a shape without
+  depending on it at run time, and it is how the dispatcher and the router avoid a real cycle.
+
 ## 9. Open questions
 
 **None.** All four original questions and both follow-ups are answered — see §3. If a new one
