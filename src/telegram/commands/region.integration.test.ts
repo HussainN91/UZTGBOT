@@ -137,7 +137,7 @@ describe.skipIf(!TEST_DATABASE_URL)('a teacher’s region', () => {
     });
 
     it('refuses a region nobody has ever heard of, and names the ones it knows', async () => {
-      // A typo written happily puts the teacher in a province no staff member
+      // A typo written happily puts the teacher in a region no staff member
       // covers: their cases visible only to all-region staff, routed nowhere,
       // and wrong in a way nothing would report.
       const body = await run(`/region ${TASHKENT_TEACHER} Tashkant`, EVERYWHERE_LEAD);

@@ -12,7 +12,7 @@ describe('parseAudience', () => {
      * `all` is a word this module owns, so it can be typed however somebody
      * types it. The region is a value the *database* owns, and normalising its
      * spelling here would put a second canonicalisation beside the one
-     * `knownRegions` already performs — which is how a province ends up stored
+     * `knownRegions` already performs — which is how a region ends up stored
      * two ways. This keeps what was typed and hands it on.
      */
     expect(parseAudience('  ALL ')).toEqual({ kind: 'all' });
@@ -30,7 +30,7 @@ describe('parseAudience', () => {
 
   it('refuses a region containing the separator, which cannot round-trip', () => {
     // The stored form is `region:<name>`, so a name with a colon in it would
-    // parse back as something else. No Uzbek province has one; a value that
+    // parse back as something else. No Uzbek region has one; a value that
     // does is a paste accident.
     expect(parseAudience('region:Bukhara:2')).toBeNull();
   });

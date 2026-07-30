@@ -192,7 +192,7 @@ export async function confirmRegion(db: Database, chatId: string): Promise<void>
  * Writes a flag and nothing else. The teacher is the best source of the signal
  * and the worst source of the record: region decides who receives their
  * emergency, so a menu of regions is a menu of whose problem this becomes, and a
- * wrong tap routes an emergency to the wrong province. A manager makes the
+ * wrong tap routes an emergency to the wrong region. A manager makes the
  * actual change through `setRegionOverride`.
  *
  * No audit row. Nothing changed that anyone needs to answer for, and the flag
@@ -214,7 +214,7 @@ export async function flagRegionMismatch(db: Database, chatId: string): Promise<
  * with the real names rather than written, and a region nobody covers is a
  * teacher whose cases only all-region staff can see: routed nowhere, visibly
  * wrong to nobody. And `tashkent` becomes `Tashkent`, so `/case` and `/regions`
- * do not grow a second spelling of one province. (Visibility itself already
+ * do not grow a second spelling of one region. (Visibility itself already
  * compares case-insensitively, so this is legibility rather than correctness —
  * but two spellings on screen is how a person concludes there are two places.)
  *
@@ -258,7 +258,7 @@ export interface RegionFlag {
  * Teachers who have reported that their region is wrong.
  *
  * Ordered oldest first: a report that has been waiting longest is the one most
- * likely to be routing somebody's emergency to the wrong province.
+ * likely to be routing somebody's emergency to the wrong region.
  *
  * **Scoped by the region we currently hold, which is the only one we know.** A
  * report says "the region on my record is wrong" — so the person who should see

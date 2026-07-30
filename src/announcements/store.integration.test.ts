@@ -127,7 +127,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the announcement store', () => {
 
     it('reads a region the way everything else reads it, override first', async () => {
       // R12. The roster is recruitment's copy and goes stale; a staff-set
-      // override beats it, and this is a message going to somebody's province.
+      // override beats it, and this is a message going to somebody's region.
       await seedTeacher('930001', { region: 'Tashkent', override: 'Bukhara' });
       await seedTeacher('930002', { region: 'Bukhara', override: null });
       await seedTeacher('930003', { region: 'Samarkand' });
@@ -165,7 +165,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the announcement store', () => {
     });
 
     it('writes a draft with nobody in it rather than refusing', async () => {
-      // "Nobody is in that province" is a thing the sender needs told, and zero
+      // "Nobody is in that region" is a thing the sender needs told, and zero
       // is more useful than an error about an empty audience.
       const { recipients } = await createDraft(db, {
         content: 'x',

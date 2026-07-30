@@ -110,7 +110,7 @@ export interface DraftRequest {
  * be messaged — the flaw the schema describes, closed at the only point where
  * it can be.
  *
- * A draft with no recipients is still written. "Nobody is in that province" is a
+ * A draft with no recipients is still written. "Nobody is in that region" is a
  * thing the sender needs told, and reporting zero is more useful than refusing
  * with an error about an empty audience.
  */

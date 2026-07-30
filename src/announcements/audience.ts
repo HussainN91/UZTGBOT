@@ -1,10 +1,10 @@
 /**
  * Who an announcement goes to.
  *
- * Two audiences and no more: everybody, or one province. Pure — the *shape* is
+ * Two audiences and no more: everybody, or one region. Pure — the *shape* is
  * decided here and the *name* is resolved against the database by the store,
  * because canonicalising a region is something `knownRegions` already does for
- * `/region` and `/staff_add`, and a second canonicalisation is how a province
+ * `/region` and `/staff_add`, and a second canonicalisation is how a region
  * ends up stored two ways.
  *
  * The stored form is what sits in `announcements.audience`, which the schema
@@ -37,7 +37,7 @@ export function parseAudience(raw: string): Audience | null {
     const region = trimmed.slice(REGION_PREFIX.length).trim();
     if (region === '') return null;
     // The stored form separates on a colon, so a name containing one would not
-    // survive the round trip. No Uzbek province has one.
+    // survive the round trip. No Uzbek region has one.
     if (region.includes(':')) return null;
     return { kind: 'region', region };
   }
