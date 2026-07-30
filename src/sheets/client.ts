@@ -14,10 +14,17 @@ import { env } from '../config/env.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 
-/** The tabs the sync reads. Nothing else in the spreadsheet is touched. */
+/**
+ * The tabs the sync reads. Nothing else in the spreadsheet is touched.
+ *
+ * `FORMS` carries the document links (D24). The response tabs are NOT listed
+ * here: there is one per form, each named by its own `FORMS` row, so they are
+ * discovered at run time rather than known at compile time.
+ */
 export const SHEET_TABS = {
   FAQ: 'FAQ',
   ROSTER: 'ROSTER',
+  FORMS: 'FORMS',
 } as const;
 
 const serviceAccountSchema = z.object({
@@ -60,6 +67,35 @@ export interface SheetReader {
   readTab(tab: string): Promise<string[][]>;
 }
 
+/**
+ * One cell, as text, without `String()` on something that is not a primitive.
+ *
+ * `values` is typed `unknown[][]` because that is honestly what arrives, and
+ * `String(cell)` over it would turn any object into the literal text
+ * `[object Object]` — a cell that looks filled in, compares equal to nothing,
+ * and explains nothing to whoever has to find out why. That is this project's
+ * recurring shape, and oxlint named this exact line.
+ *
+ * It is not currently reachable — with `UNFORMATTED_VALUE` the Sheets API sends
+ * primitives — with one real exception: **a cell holding a formula error comes
+ * back as an object**, e.g. `{ errorType, message }`. Stage 6 made that more
+ * likely rather than less, because a form's responses tab is a live sheet that
+ * people put formulas in. Serialising it means the reason appears in the
+ * rejection message instead of being flattened away.
+ */
+function cellToText(cell: unknown): string {
+  if (cell === null || cell === undefined) return '';
+  if (typeof cell === 'string') return cell;
+  if (typeof cell === 'number' || typeof cell === 'boolean' || typeof cell === 'bigint') {
+    return String(cell);
+  }
+  try {
+    return JSON.stringify(cell) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export function createSheetReader(): SheetReader {
   return {
     async readTab(tab: string): Promise<string[][]> {
@@ -95,7 +131,7 @@ export function createSheetReader(): SheetReader {
       const values = payload.values ?? [];
       // A short row simply stops early in the API response, so every row is
       // padded to the header width by the parser rather than here.
-      return values.map((row) => row.map((cell) => (cell === null || cell === undefined ? '' : String(cell))));
+      return values.map((row) => row.map(cellToText));
     },
   };
 }

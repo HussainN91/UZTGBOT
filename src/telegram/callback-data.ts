@@ -125,6 +125,35 @@ export function encodeCallback(prefix: CallbackPrefix, ...parts: readonly string
   return data;
 }
 
+/**
+ * Why `part` could not travel in a payload under `prefix`, or null if it can.
+ *
+ * The same two rules `encodeCallback` enforces, asked as a question instead of
+ * thrown as an error — and it exists for exactly one reason.
+ *
+ * `encodeCallback` throwing is right when the value comes from our own code: an
+ * oversized payload is a programming error and a test should catch it. It is
+ * quite wrong when the value comes from **the spreadsheet**. A FORMS row whose
+ * TYPE holds a colon, or is long enough to overflow the 64-byte limit, would
+ * throw while the forms list was being built — and one bad cell typed by one
+ * person would take the whole list away from every teacher, with the failure
+ * appearing nowhere near the sheet that caused it.
+ *
+ * So the parser asks first and rejects that row with its number, the way every
+ * other bad cell in this system is handled. Both callers read the rules from
+ * here rather than keeping a second copy of the limit.
+ */
+export function callbackPartProblem(prefix: CallbackPrefix, part: string): string | null {
+  if (part.includes(SEPARATOR)) {
+    return `it contains "${SEPARATOR}", which separates the fields of a button's payload`;
+  }
+  const bytes = byteLength([prefix, part].join(SEPARATOR));
+  if (bytes > CALLBACK_DATA_MAX_BYTES) {
+    return `it is too long — a button can carry ${CALLBACK_DATA_MAX_BYTES} bytes and this needs ${bytes}`;
+  }
+  return null;
+}
+
 export interface DecodedCallback {
   readonly prefix: string;
   readonly parts: readonly string[];

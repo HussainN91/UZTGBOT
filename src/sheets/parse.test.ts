@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EmailColumnError,
   HeaderMismatchError,
+  findEmailColumn,
   normaliseIdentifier,
   parseActive,
   parseFaqTab,
+  parseFormsTab,
+  parseResponsesTab,
   parseRosterTab,
 } from './parse.js';
 
@@ -214,5 +218,312 @@ describe('normaliseIdentifier', () => {
   it('is idempotent', () => {
     const once = normaliseIdentifier('  Foo@Bar.COM ');
     expect(normaliseIdentifier(once)).toBe(once);
+  });
+});
+
+describe('forms parsing', () => {
+  const FORMS_HEADER = ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE'];
+  const FORM = 'https://docs.google.com/forms/d/e/1FAIpQL/viewform';
+
+  const formRow = (over: Partial<Record<string, string>> = {}): string[] => [
+    over['TYPE'] ?? 'PASSPORT',
+    over['BUTTON_TEXT'] ?? '🛂 Passport copy',
+    over['URL'] ?? FORM,
+    over['RESPONSES_TAB'] ?? 'PASSPORT_RESPONSES',
+    over['ACTIVE'] ?? 'TRUE',
+  ];
+
+  it('reads a well-formed row', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow()]);
+    expect(result.rejections).toEqual([]);
+    expect(result.rows[0]).toMatchObject({
+      type: 'PASSPORT',
+      buttonText: '🛂 Passport copy',
+      url: FORM,
+      responsesTab: 'PASSPORT_RESPONSES',
+      active: true,
+    });
+  });
+
+  it('records the spreadsheet row so the order staff arranged is the order teachers see', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow(), formRow({ TYPE: 'VISA' })]);
+    expect(result.rows.map((r) => r.sheetRow)).toEqual([2, 3]);
+  });
+
+  /**
+   * D39. A form whose responses nobody has linked yet must still reach teachers
+   * — they can submit, the bot simply cannot read the answers back. Rejecting
+   * the row would mean a form cannot be published until the plumbing is done.
+   */
+  it('accepts a row with no responses tab rather than withholding the form', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow({ RESPONSES_TAB: '' })]);
+    expect(result.rejections).toEqual([]);
+    expect(result.rows[0]?.responsesTab).toBeNull();
+  });
+
+  it('does not require the RESPONSES_TAB column to exist at all', () => {
+    const result = parseFormsTab([
+      ['TYPE', 'BUTTON_TEXT', 'URL'],
+      ['PASSPORT', 'Passport copy', FORM],
+    ]);
+    expect(result.rows[0]?.responsesTab).toBeNull();
+  });
+
+  it('requires the URL column to exist', () => {
+    expect(() => parseFormsTab([['TYPE', 'BUTTON_TEXT'], ['PASSPORT', 'Passport']])).toThrow(
+      HeaderMismatchError,
+    );
+  });
+
+  it('rejects a duplicate type rather than letting the later row overwrite the earlier', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow(), formRow({ BUTTON_TEXT: 'Different' })]);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.buttonText).toBe('🛂 Passport copy');
+    expect(result.rejections[0]?.reason).toMatch(/more than once/);
+  });
+
+  it('rejects a row whose button would go nowhere', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow({ URL: '' })]);
+    expect(result.rows).toEqual([]);
+    expect(result.rejections[0]?.reason).toMatch(/empty URL/);
+  });
+
+  it('skips a blank spacer line without calling it an error', () => {
+    const result = parseFormsTab([FORMS_HEADER, ['', '', '', '', ''], formRow()]);
+    expect(result.rejections).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+  });
+
+  it('treats blank ACTIVE as active so adding the column cannot switch every form off', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow({ ACTIVE: '' })]);
+    expect(result.rows[0]?.active).toBe(true);
+  });
+
+  it('reads FALSE as inactive so a half-ready form cannot reach a teacher', () => {
+    const result = parseFormsTab([FORMS_HEADER, formRow({ ACTIVE: 'FALSE' })]);
+    expect(result.rows[0]?.active).toBe(false);
+  });
+
+  /**
+   * The whole forms list is ONE message carrying every button. Telegram refuses
+   * a message containing a malformed button URL, so one bad cell would take the
+   * list away from every teacher rather than just its own row.
+   */
+  describe('a URL that would break the list for everybody is rejected here', () => {
+    it('rejects something that is not a web address at all', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ URL: 'ask Dilnoza for the link' })]);
+      expect(result.rows).toEqual([]);
+      expect(result.rejections[0]?.reason).toMatch(/not a web address/);
+    });
+
+    it('rejects plain http rather than sending 1,800 teachers to it', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ URL: 'http://forms.example.uz/visa' })]);
+      expect(result.rows).toEqual([]);
+      expect(result.rejections[0]?.reason).toMatch(/https/);
+    });
+
+    it('says the consequence, because the fix belongs to whoever owns the sheet', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ URL: 'not a url' })]);
+      expect(result.rejections[0]?.reason).toMatch(/No form buttons would be shown/);
+    });
+
+    it('does not restrict the host, so MoPSE can move off Google without a developer', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ URL: 'https://forms.example.uz/visa' })]);
+      expect(result.rejections).toEqual([]);
+      expect(result.rows).toHaveLength(1);
+    });
+  });
+
+  /**
+   * TYPE travels inside a button's payload, where `encodeCallback` throws on a
+   * value it cannot carry. Thrown at render time it would break the list far
+   * from the sheet that caused it, so it is caught here and reported by row.
+   */
+  describe('a TYPE that cannot travel in a button is rejected here, not thrown later', () => {
+    it('rejects a type containing the field separator', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ TYPE: 'DOC:PASSPORT' })]);
+      expect(result.rows).toEqual([]);
+      expect(result.rejections[0]?.reason).toMatch(/separates the fields/);
+    });
+
+    it('rejects a type too long for a 64-byte payload', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ TYPE: 'P'.repeat(70) })]);
+      expect(result.rows).toEqual([]);
+      expect(result.rejections[0]?.reason).toMatch(/too long/);
+    });
+
+    it('counts bytes rather than characters, because Telegram does', () => {
+      // Cyrillic is two bytes a letter in UTF-8, so 40 letters is 80 bytes.
+      const result = parseFormsTab([FORMS_HEADER, formRow({ TYPE: 'Ж'.repeat(40) })]);
+      expect(result.rows).toEqual([]);
+      expect(result.rejections[0]?.reason).toMatch(/too long/);
+    });
+
+    it('suggests what a usable type looks like', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow({ TYPE: 'A:B' })]);
+      expect(result.rejections[0]?.reason).toMatch(/PASSPORT/);
+    });
+
+    it('names the row number so it can be found in the sheet', () => {
+      const result = parseFormsTab([FORMS_HEADER, formRow(), formRow({ TYPE: 'BAD:TYPE' })]);
+      expect(result.rejections[0]?.row).toBe(3);
+    });
+  });
+
+  it('keeps the good rows when one row is bad', () => {
+    const result = parseFormsTab([
+      FORMS_HEADER,
+      formRow(),
+      formRow({ TYPE: 'VISA', URL: 'nonsense' }),
+      formRow({ TYPE: 'CONTRACT' }),
+    ]);
+    expect(result.rows.map((r) => r.type)).toEqual(['PASSPORT', 'CONTRACT']);
+    expect(result.rejections).toHaveLength(1);
+  });
+});
+
+describe('finding the email column in a form responses tab', () => {
+  /**
+   * Google heads each column with the question as it was typed, so there is no
+   * fixed name to require. Exactly one heading may contain "email".
+   */
+  it('finds the column however the question was worded', () => {
+    expect(findEmailColumn('T', ['Timestamp', 'Recruitment email', 'Passport'])).toBe(1);
+    expect(findEmailColumn('T', ['Timestamp', 'Your Email Address'])).toBe(1);
+    expect(findEmailColumn('T', ['E-MAIL'])).toBe(0);
+  });
+
+  it('refuses when two questions mention email rather than guessing between them', () => {
+    expect(() => findEmailColumn('VISA_RESPONSES', ['Your email', "Supervisor's email"])).toThrow(
+      EmailColumnError,
+    );
+  });
+
+  it('names both clashing headings so the form can be corrected', () => {
+    try {
+      findEmailColumn('VISA_RESPONSES', ['Your email', "Supervisor's email"]);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect((err as Error).message).toMatch(/Your email/);
+      expect((err as Error).message).toMatch(/Supervisor's email/);
+      expect((err as Error).message).toMatch(/Nothing was filed/);
+    }
+  });
+
+  it('says filing under the wrong person is the reason, not tidiness', () => {
+    try {
+      findEmailColumn('T', ['Your email', 'Manager email']);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect((err as Error).message).toMatch(/worse than not filing them/);
+    }
+  });
+
+  it('refuses when no question mentions email', () => {
+    expect(() => findEmailColumn('VISA_RESPONSES', ['Timestamp', 'Passport'])).toThrow(
+      EmailColumnError,
+    );
+  });
+
+  it('tells the operator how to fix an absent column', () => {
+    try {
+      findEmailColumn('VISA_RESPONSES', ['Timestamp']);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect((err as Error).message).toMatch(/RESPONSES_TAB/);
+      expect((err as Error).message).toMatch(/must contain/);
+    }
+  });
+});
+
+describe('reading form submissions', () => {
+  const HEADER = ['Timestamp', 'Your email address', 'Passport number'];
+
+  it('reads a submission and normalises the address the roster will be matched on', () => {
+    const result = parseResponsesTab('T', [
+      HEADER,
+      ['31/07/2026 14:02:11', ' A.Karimov@Example.com ', 'AA1234567'],
+    ]);
+    expect(result.rejections).toEqual([]);
+    expect(result.rows[0]).toEqual({
+      sheetRow: 2,
+      email: 'a.karimov@example.com',
+      submittedAt: '31/07/2026 14:02:11',
+    });
+  });
+
+  /**
+   * The row number is the idempotency key, so it must be the number a person
+   * reading the spreadsheet would count — not an index into the array.
+   */
+  it('numbers rows as the spreadsheet does', () => {
+    const result = parseResponsesTab('T', [
+      HEADER,
+      ['t', 'a@example.com', 'x'],
+      ['t', 'b@example.com', 'y'],
+    ]);
+    expect(result.rows.map((r) => r.sheetRow)).toEqual([2, 3]);
+  });
+
+  /**
+   * Unlike every other parser here. Corrected documents and second pages are
+   * normal, and each submission is its own row and its own case.
+   */
+  it('does NOT reject the same teacher submitting twice', () => {
+    const result = parseResponsesTab('T', [
+      HEADER,
+      ['t', 'a@example.com', 'first'],
+      ['t', 'a@example.com', 'corrected'],
+    ]);
+    expect(result.rejections).toEqual([]);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.map((r) => r.sheetRow)).toEqual([2, 3]);
+  });
+
+  it('rejects a submission with no address, naming its row', () => {
+    const result = parseResponsesTab('T', [HEADER, ['t', '', 'AA1']]);
+    expect(result.rows).toEqual([]);
+    expect(result.rejections[0]?.row).toBe(2);
+    expect(result.rejections[0]?.reason).toMatch(/cannot be matched/);
+  });
+
+  it('keeps the good submissions when one has no address', () => {
+    const result = parseResponsesTab('T', [
+      HEADER,
+      ['t', 'a@example.com', 'x'],
+      ['t', '', 'y'],
+      ['t', 'c@example.com', 'z'],
+    ]);
+    expect(result.rows.map((r) => r.email)).toEqual(['a@example.com', 'c@example.com']);
+    expect(result.rejections).toHaveLength(1);
+  });
+
+  it('skips a wholly blank row without calling it an error', () => {
+    const result = parseResponsesTab('T', [HEADER, ['', '', ''], ['t', 'a@example.com', 'x']]);
+    expect(result.rejections).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+  });
+
+  it('copes with a tab that has no Timestamp column', () => {
+    const result = parseResponsesTab('T', [['Your email'], ['a@example.com']]);
+    expect(result.rows[0]?.submittedAt).toBeNull();
+  });
+
+  it('tolerates a short row where trailing cells are simply absent', () => {
+    const result = parseResponsesTab('T', [HEADER, ['t', 'a@example.com']]);
+    expect(result.rows).toHaveLength(1);
+  });
+
+  /**
+   * The whole tab, not one row. A tab whose email column cannot be identified
+   * has no row that can be filed, and filing none of them is the right answer.
+   */
+  it('refuses the whole tab when the email column is ambiguous', () => {
+    expect(() =>
+      parseResponsesTab('VISA_RESPONSES', [
+        ['Your email', "Supervisor's email"],
+        ['a@example.com', 'b@example.com'],
+      ]),
+    ).toThrow(EmailColumnError);
   });
 });

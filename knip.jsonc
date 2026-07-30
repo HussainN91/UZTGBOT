@@ -12,6 +12,25 @@
   //   npm run knip         tests count as users
   //   npm run knip:prod    production entry points only, tests excluded
   //
+  // ⚠️ BOTH RUNS NEED FREE MEMORY, AND THE HEAP FLAG DOES NOT FIX IT.
+  // oxc-parser allocates one large ArrayBuffer, which is external memory rather
+  // than V8 heap, so `--max-old-space-size` does not govern it — the flag is in
+  // the scripts because it does no harm, not because it works. On this 8 GB
+  // machine knip dies with
+  //
+  //   RangeError: Array buffer allocation failed
+  //
+  // whenever Docker Desktop is running, WITH the flag set.
+  //
+  // Stopping the test CONTAINER is not enough — measured, twice. Docker
+  // Desktop's own virtual machine holds the memory:
+  //
+  //   docker desktop stop        →  knip:prod succeeds
+  //   docker desktop start       →  bring it back for the tests
+  //
+  // Measured on 31 July 2026. An earlier note in this file credited the heap
+  // flag with fixing this, and that was wrong.
+  //
   // Anything in the second list that is not in the first is reached by a test
   // and by nothing else. On 30 July 2026 the two lists were identical, 63 items
   // each — which is the result that says the fault is currently absent. Run

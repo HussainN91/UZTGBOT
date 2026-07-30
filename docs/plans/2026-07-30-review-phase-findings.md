@@ -416,10 +416,18 @@ npm run knip        # tests count as users
 npm run knip:prod   # production entry points only
 ```
 
-Both allocate a 4 GB heap explicitly, because oxc-parser allocates one large buffer and knip
-crashed intermittently with `RangeError: Array buffer allocation failed` on an 8 GB machine with
-Docker running. The scripts call `node --max-old-space-size=4096` directly rather than setting
-`NODE_OPTIONS`, so they behave the same in PowerShell and in bash.
+Both call `node --max-old-space-size=4096` directly rather than setting `NODE_OPTIONS`, so they
+behave the same in PowerShell and in bash.
+
+> **Corrected later on 31 July: the heap flag does not fix the crash.** oxc-parser allocates one
+> large **ArrayBuffer**, which is external memory rather than V8 heap, so `--max-old-space-size`
+> never governed it. `knip:prod` was seen dying with `RangeError: Array buffer allocation failed`
+> **with the flag set**. The flag stays because it is harmless; **the actual fix is free memory.**
+>
+> **Stopping the test container is not enough** — measured twice. Docker Desktop's own virtual
+> machine is what holds the memory, so `docker desktop stop` is the thing that works, and
+> `docker desktop start` puts it back for the tests. Recorded because crediting the wrong cause is
+> how the next person spends an hour raising a number that was never the problem.
 
 ### On `npm audit`
 

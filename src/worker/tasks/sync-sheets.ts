@@ -12,7 +12,8 @@ import type { Task } from 'graphile-worker';
 import { getDb } from '../../db/index.js';
 import { log } from '../../log.js';
 import { createSheetReader } from '../../sheets/client.js';
-import { syncFaq, syncRoster, type SyncReport } from '../../sync/sheets-sync.js';
+import { syncFormResponses } from '../../sync/form-responses.js';
+import { syncFaq, syncForms, syncRoster, type SyncReport } from '../../sync/sheets-sync.js';
 import { telegramAlerter } from '../../telegram/alerter.js';
 import { createApi } from '../../telegram/bot.js';
 import { recordJobRun } from '../job-run.js';
@@ -35,14 +36,43 @@ async function runSync(): Promise<void> {
   // was wired up, both were written to a log and reached nobody.
   const alerter = telegramAlerter(createApi());
 
-  // Settled, not all: one failing sync must not prevent the other from running,
-  // and both record their own outcome regardless.
-  const [faq, roster] = await Promise.allSettled([
+  // Settled, not all: one failing sync must not prevent the others from running,
+  // and each records its own outcome regardless.
+  const [faq, roster, forms] = await Promise.allSettled([
     syncFaq(db, reader, { alerter }),
     syncRoster(db, reader, { alerter }),
+    syncForms(db, reader, { alerter }),
   ]);
 
-  const outcomes = [describe('FAQ', faq), describe('ROSTER', roster)];
+  /**
+   * The responses run AFTER the links, and sequentially rather than beside them.
+   *
+   * It reads `form_links` to learn which tabs to open, so running it in the same
+   * batch would have it working from the previous cycle's list — and on a fresh
+   * deployment, from no list at all. Ten minutes late for one cycle is nothing;
+   * a form published this morning whose submissions are ignored until somebody
+   * notices is not.
+   *
+   * ⚠️ This is the part of the sync whose cost grows. It opens one tab per form
+   * with a responses tab, so ten forms is ten more round trips to Google inside
+   * a worker that runs `concurrency: 1`. A long run starves the five-minute
+   * heartbeat, and the first symptom is a FALSE alarm that the sheet sync has
+   * stopped. If the form count grows, this is the thing to move to its own
+   * schedule.
+   */
+  const responses = await syncFormResponses(db, reader, { alerter }).then(
+    (r) => ({ status: 'fulfilled' as const, value: r }),
+    (reason: unknown) => ({ status: 'rejected' as const, reason }),
+  );
+
+  const outcomes = [
+    describe('FAQ', faq),
+    describe('ROSTER', roster),
+    describe('FORMS', forms),
+    responses.status === 'rejected'
+      ? `FORM_RESPONSES: threw — ${String(responses.reason)}`
+      : `FORM_RESPONSES: ${responses.value.outcome} (${responses.value.message})`,
+  ];
   log.info({ outcomes }, 'scheduled sheet sync finished');
 
   /**
@@ -51,10 +81,10 @@ async function runSync(): Promise<void> {
    * *refused* by the damage limit did its job correctly: it already alerted, and
    * retrying it every few seconds would just repeat the alarm.
    */
-  const crashed = [faq, roster].filter((r) => r.status === 'rejected');
+  const crashed = [faq, roster, forms, responses].filter((r) => r.status === 'rejected');
   if (crashed.length > 0) {
     throw new AggregateError(
-      crashed.map((r) => (r as PromiseRejectedResult).reason),
+      crashed.map((r) => (r as { reason: unknown }).reason),
       'one or more sheet syncs threw unexpectedly',
     );
   }

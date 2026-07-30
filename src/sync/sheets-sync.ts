@@ -13,14 +13,32 @@
  */
 import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
-import { faqEntries, rosterEntries, syncRuns } from '../db/schema.js';
+import { faqEntries, formLinks, rosterEntries, syncRuns } from '../db/schema.js';
 import { log } from '../log.js';
 import { assessDamage, type DamageLimitOptions } from '../sheets/damage-limit.js';
 import { SHEET_TABS, type SheetReader } from '../sheets/client.js';
-import { HeaderMismatchError, parseFaqTab, parseRosterTab, type Rejection } from '../sheets/parse.js';
+import {
+  HeaderMismatchError,
+  parseFaqTab,
+  parseFormsTab,
+  parseRosterTab,
+  type Rejection,
+} from '../sheets/parse.js';
 import { loggingAlerter, neverThrows, type Alerter } from './alerts.js';
 
-export type SyncSource = 'FAQ' | 'ROSTER';
+/**
+ * `FORMS` is the document-link tab (D24). `FORM_RESPONSES` is deliberately a
+ * separate source rather than part of it (D42): the two fail for completely
+ * different reasons — a bad link row versus an unreadable responses tab — and
+ * one masking the other is the thing that keeps FAQ and ROSTER apart too.
+ *
+ * `sync_runs.source` is a plain text column, so adding a source needs no
+ * migration.
+ */
+export type SyncSource = 'FAQ' | 'ROSTER' | 'FORMS' | 'FORM_RESPONSES';
+
+/** The tables the damage limit counts. Not every sync has one — see the response sync. */
+type SyncedTable = 'faq_entries' | 'roster_entries' | 'form_links';
 
 export type SyncOutcome = 'applied' | 'refused' | 'failed';
 
@@ -173,6 +191,69 @@ export async function syncRoster(
   });
 }
 
+/**
+ * The document links, from the FORMS tab (D24).
+ *
+ * Identical in shape to the other two on purpose. The bot never accepts or
+ * stores a file; all it does is show the right links to the right people, and
+ * a link is content, so the spreadsheet owns it exactly as it owns an FAQ
+ * answer. In the Apps Script version these lived in code, which is why all seven
+ * sat as `PLACEHOLDER_VISA` until the feature was abandoned.
+ */
+export async function syncForms(
+  db: Database,
+  reader: SheetReader,
+  options: SyncOptions = {},
+): Promise<SyncReport> {
+  return runSync(db, 'FORMS', options, async () => {
+    const raw = await reader.readTab(SHEET_TABS.FORMS);
+    const { rows, rejections } = parseFormsTab(raw);
+    return {
+      rejections,
+      rowsSeen: Math.max(raw.length - 1, 0),
+      apply: async (tx: Database, runStart: Date) => {
+        const activeBefore = await countActive(tx, 'form_links');
+        for (const batch of chunked(rows)) {
+          await tx
+            .insert(formLinks)
+            .values(
+              batch.map((r) => ({
+                type: r.type,
+                sheetRow: r.sheetRow,
+                buttonText: r.buttonText,
+                url: r.url,
+                responsesTab: r.responsesTab,
+                active: r.active,
+                syncedAt: runStart,
+              })),
+            )
+            .onConflictDoUpdate({
+              target: formLinks.type,
+              set: {
+                sheetRow: sql`excluded.sheet_row`,
+                buttonText: sql`excluded.button_text`,
+                url: sql`excluded.url`,
+                responsesTab: sql`excluded.responses_tab`,
+                active: sql`excluded.active`,
+                syncedAt: sql`excluded.synced_at`,
+              },
+            });
+        }
+        return { activeBefore, upserted: rows.length };
+      },
+      deactivate: async (tx: Database, runStart: Date) => {
+        const result = await tx
+          .update(formLinks)
+          .set({ active: false })
+          .where(and(eq(formLinks.active, true), lt(formLinks.syncedAt, runStart)));
+        return result.rowCount ?? 0;
+      },
+      countStale: async (tx: Database, runStart: Date) =>
+        countWhere(tx, 'form_links', sql`active = true AND synced_at < ${runStart}`),
+    };
+  });
+}
+
 interface SyncPlan {
   readonly rejections: readonly Rejection[];
   readonly rowsSeen: number;
@@ -306,16 +387,26 @@ async function record(
   }
 }
 
-async function countActive(tx: Database, table: 'faq_entries' | 'roster_entries'): Promise<number> {
+async function countActive(tx: Database, table: SyncedTable): Promise<number> {
   return countWhere(tx, table, sql`active = true`);
 }
 
 async function countWhere(
   tx: Database,
-  table: 'faq_entries' | 'roster_entries',
+  table: SyncedTable,
   predicate: ReturnType<typeof sql>,
 ): Promise<number> {
-  const identifier = table === 'faq_entries' ? sql`faq_entries` : sql`roster_entries`;
+  /**
+   * Spelled out per table rather than interpolated. A table name cannot be a
+   * bound parameter, so the only safe way to put one into SQL is to choose from
+   * a fixed set the compiler checks — which is what `SyncedTable` is for.
+   */
+  const identifier =
+    table === 'faq_entries'
+      ? sql`faq_entries`
+      : table === 'roster_entries'
+        ? sql`roster_entries`
+        : sql`form_links`;
   const result = await tx.execute<{ count: string }>(
     sql`SELECT count(*)::text AS count FROM ${identifier} WHERE ${predicate}`,
   );

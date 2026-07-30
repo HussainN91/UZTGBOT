@@ -76,6 +76,7 @@ const LAYERS = [
       'src/conversation/',
       'src/db/',
       'src/faq/',
+      'src/forms/',
       'src/retention/',
       'src/sheets/',
       'src/staff/',
@@ -99,10 +100,21 @@ const LAYERS = [
  *   inside `src/`. It is a leaf, which is exactly why `/export` can depend on it
  *   from layer 3 without a cycle, and why a store may depend on it later without
  *   that being a violation.
+ *
+ *   `telegram/callback-data.ts` is the same case and was added in Stage 6. It is
+ *   a pure codec — it imports `config/constants.ts` and nothing else, touches no
+ *   database and no network, and `send.ts`'s reasoning applies to it word for
+ *   word. The sheet parser needs it: a FORMS row whose TYPE contains the field
+ *   separator, or is long enough to overflow Telegram's 64-byte payload, makes
+ *   `encodeCallback` THROW when the forms list is rendered — so one bad
+ *   spreadsheet cell would break the button list for every teacher. That row has
+ *   to be rejected at parse time, which means the parser must know the real
+ *   budget rather than a second copy of it.
  */
 const LAYER_OVERRIDES = {
   'src/config/settings.ts': 2,
   'src/telegram/send.ts': 1,
+  'src/telegram/callback-data.ts': 1,
 };
 
 /**

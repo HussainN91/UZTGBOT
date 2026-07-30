@@ -200,6 +200,50 @@ export async function scrubSyncRunRejections(
  * Its period is a constant rather than a setting, because it governs
  * operational bookkeeping rather than anything the privacy notice states.
  */
+/**
+ * Take the email off a form submission once its case is gone — D44.
+ *
+ * **Anonymises; never deletes.** That distinction is the whole function, and
+ * getting it the other way round would be a slow disaster rather than a bug.
+ *
+ * `form_submissions` is what stops a submission being filed twice. The bot reads
+ * the whole responses tab every ten minutes, and Google's sheet keeps row 42 for
+ * ever, so the marker is the only thing that says "row 42 has been dealt with".
+ * Delete the marker and row 42 looks new again — a fresh case, every ten
+ * minutes, for the life of the system.
+ *
+ * So what goes is the address, which is the entire personal content of the row.
+ * What stays is `("PASSPORT", 42, Filed)`, which identifies nobody.
+ *
+ * Two ways a row qualifies:
+ *
+ *   `Filed` with no `case_reference` — the case it created has been purged, and
+ *   `ON DELETE SET NULL` is what left the marker behind rather than taking it.
+ *
+ *   Anything else, past the ordinary case period — an unmatched submission or
+ *   one from a teacher who never signed in. It never became a case, so nothing
+ *   else will ever clear it, and it must not sit there indefinitely.
+ *
+ * Returns 0 and touches nothing when the period is unset (D30). Safe: with no
+ * period, no case is ever purged, so no `Filed` marker loses its reference
+ * either.
+ */
+export async function anonymiseFormSubmissions(
+  db: Database,
+  caseDays: number | null,
+): Promise<number> {
+  if (caseDays === null) return 0;
+
+  const result = await db.execute(sql`
+    UPDATE form_submissions
+    SET submitter_email = NULL
+    WHERE submitter_email IS NOT NULL
+      AND case_reference IS NULL
+      AND (outcome = 'Filed' OR seen_at < now() - make_interval(days => ${caseDays}))
+  `);
+  return result.rowCount ?? 0;
+}
+
 export async function pruneAnnouncementRecipients(db: Database, days: number): Promise<number> {
   const result = await db.execute(sql`
     DELETE FROM announcement_recipients

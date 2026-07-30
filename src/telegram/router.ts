@@ -44,6 +44,7 @@ import { TeacherNotVerifiedError, createCase } from '../cases/service.js';
 import { NO_NOTIFICATION, notifyNewCase, type NotificationOutcome } from '../cases/notify.js';
 import { clearState, loadState, saveState, type ConversationState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
+import { activeFormByType, activeForms } from '../forms/repository.js';
 import { logInteraction } from '../log/interactions.js';
 import { privacyAcceptance, recordAcceptance } from '../teachers/privacy.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
@@ -94,7 +95,7 @@ import {
   urgentCodeRejectedReply,
   urgentUnavailableReply,
 } from './handlers/urgent.js';
-import { MENU_ACTION, backToMenuKeyboard, mainMenuKeyboard } from './keyboards.js';
+import { MENU_ACTION, backToMenuKeyboard, formsKeyboard, mainMenuKeyboard } from './keyboards.js';
 import type { Reply } from './reply.js';
 
 /** One update, reduced to the only things routing depends on. */
@@ -866,6 +867,18 @@ async function routeCallback(
       return chooseCaseTopic(db, update.chatId, first, deps);
 
     /**
+     * A document form was tapped — D24.
+     *
+     * Behind both gates for the same reason the other three actions are: the
+     * form asks for the teacher's recruitment email, and a chat that has not
+     * signed in has no business being handed one.
+     */
+    case CALLBACK.DOC_TYPE:
+      return (await requireSignIn(db, update.chatId, MENU_ACTION.SUBMIT_DOCS, deps))
+        ?? (await requireReconsent(db, update.chatId, MENU_ACTION.SUBMIT_DOCS, deps))
+        ?? only(update.chatId, await chooseDocForm(db, first, deps));
+
+    /**
      * The re-consent accept button — D32.
      *
      * Safe to receive from a chat that was never gated, or gated an hour ago and
@@ -976,6 +989,11 @@ async function routeMenu(
       return (await requireSignIn(db, chatId, MENU_ACTION.URGENT_CASE, deps))
         ?? (await requireReconsent(db, chatId, MENU_ACTION.URGENT_CASE, deps))
         ?? only(chatId, await startUrgent(db, chatId, deps));
+
+    case MENU_ACTION.SUBMIT_DOCS:
+      return (await requireSignIn(db, chatId, MENU_ACTION.SUBMIT_DOCS, deps))
+        ?? (await requireReconsent(db, chatId, MENU_ACTION.SUBMIT_DOCS, deps))
+        ?? only(chatId, await submitDocsReply(db, deps));
 
     default:
       return only(chatId, mainMenuReply());
@@ -1143,6 +1161,95 @@ async function acceptPrivacyNotice(
  * creating work for anyone, and turning the whole bot off would tell them
  * nothing at all (`BOT-SPEC.md:172`).
  */
+/**
+ * The list of document forms — D24, and the whole teacher-facing half of Stage 6.
+ *
+ * **The bot never accepts, holds or stores a file.** It hands out links to Google
+ * Forms and reads the answers back later; `sendDocument` exists for `/export`
+ * and has no receive path, deliberately.
+ *
+ * Paused by maintenance mode alongside Contact Support and Urgent Case. A
+ * submission becomes a case, so it is work arriving, and the reason for pausing
+ * new cases applies to it unchanged.
+ *
+ * An empty list is its own message rather than an empty keyboard. Before the
+ * FORMS tab is filled in this is what every teacher sees, and "no forms are
+ * available yet" is an answer where a menu with one Home button is a puzzle.
+ */
+async function submitDocsReply(db: Database, deps: RouterDeps): Promise<Reply> {
+  if (await isMaintenanceMode(db)) {
+    return {
+      text:
+        'Document submission is paused while the support team deals with something.\n\n' +
+        'The FAQ and Check My Case still work. ' +
+        `If this cannot wait, contact ${deps.supportContact}.`,
+      keyboard: backToMenuKeyboard(),
+    };
+  }
+
+  const forms = await activeForms(db);
+  if (forms.length === 0) {
+    return {
+      text:
+        'There are no document forms available at the moment.\n\n' +
+        `If you were asked to send a document, contact ${deps.supportContact}.`,
+      keyboard: backToMenuKeyboard(),
+    };
+  }
+
+  return {
+    text:
+      '*Submit Documents*\n\n' +
+      'Choose what you need to send. Each one opens a form.\n\n' +
+      '⚠️ Use the same email address you sign in here with, or we cannot match ' +
+      'your documents to you.',
+    keyboard: formsKeyboard(forms),
+  };
+}
+
+/**
+ * One form's link, looked up again at the moment of the tap.
+ *
+ * Re-read rather than trusted from the payload, and `activeFormByType` checks
+ * the active flag again. A teacher can tap a button in scrollback weeks later,
+ * and a form staff withdrew this morning must not still be reachable through it.
+ *
+ * The email warning is repeated here and not only on the list. This is the last
+ * message before the teacher leaves Telegram, and matching the submission back
+ * to a person depends entirely on their typing the address the roster holds.
+ */
+async function chooseDocForm(db: Database, type: string, deps: RouterDeps): Promise<Reply> {
+  if (await isMaintenanceMode(db)) {
+    return {
+      text:
+        'Document submission has just been paused while the support team deals with something.\n\n' +
+        `If this cannot wait, contact ${deps.supportContact}.`,
+      keyboard: backToMenuKeyboard(),
+    };
+  }
+
+  const form = await activeFormByType(db, type);
+  if (form === null) {
+    return {
+      text:
+        'That form is no longer available.\n\n' +
+        'It may have been replaced — open Submit Documents again for the current list.',
+      keyboard: backToMenuKeyboard(),
+    };
+  }
+
+  return {
+    text:
+      `*${form.buttonText}*\n\n` +
+      `${form.url}\n\n` +
+      '⚠️ The form asks for your email. Use the same address you signed in here ' +
+      'with — that is how we know the documents are yours.\n\n' +
+      'You do not need to send anything back to me. Once you submit the form, ' +
+      'it reaches us on its own.',
+    keyboard: backToMenuKeyboard(),
+  };
+}
+
 async function startCase(db: Database, chatId: string, deps: RouterDeps): Promise<Reply> {
   if (await isMaintenanceMode(db)) {
     return {

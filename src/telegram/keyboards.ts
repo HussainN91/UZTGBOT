@@ -53,6 +53,8 @@ export const MENU_ACTION = {
   URGENT_CASE: 'URGENT_CASE',
   /** "Who covers my region?" — Q2. Deliberately not behind the sign-in gate. */
   MY_MANAGER: 'MY_MANAGER',
+  /** The document forms — D24. Stage 6. */
+  SUBMIT_DOCS: 'SUBMIT_DOCS',
 } as const;
 
 const HOME_BUTTON: InlineButton = {
@@ -75,10 +77,15 @@ function topicButton(code: string, emoji: string, label: string): InlineButton {
  * Only the four highest-traffic topics get a shortcut; all eleven would be a
  * seventeen-button wall, and everything stays reachable through the FAQ hub.
  *
- * Submit Documents is absent until Stage 6 — `mainMenuKeyboard_` hid it behind
- * `documentSubmissionEnabled_()` for the same reason, that offering it would
- * send a teacher who had just verified to a dead end. Change Language is absent
- * for the same reason: the translations are promised, not written.
+ * Submit Documents is here as of Stage 6. It was absent for five stages for a
+ * reason worth keeping in view: `mainMenuKeyboard_` hid it behind
+ * `documentSubmissionEnabled_()` because offering it would send a teacher who
+ * had just verified to a dead end. It is offered now because there is somewhere
+ * for it to go — and under D24 that somewhere is a Google Form, not an upload.
+ * **The bot never accepts, holds or stores a file.**
+ *
+ * Change Language is still absent, for the original reason: the translations are
+ * promised, not written.
  */
 export function mainMenuKeyboard(): InlineKeyboard {
   const rows: InlineKeyboardRow[] = FAQ_TOPICS.filter((t) => t.onMainMenu).map((t) => [
@@ -91,6 +98,12 @@ export function mainMenuKeyboard(): InlineKeyboard {
     {
       text: '🔍 Check My Case',
       callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.CHECK_CASE),
+    },
+  ]);
+  rows.push([
+    {
+      text: '📄 Submit Documents',
+      callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.SUBMIT_DOCS),
     },
   ]);
   rows.push([CONTACT_SUPPORT_BUTTON]);
@@ -154,6 +167,28 @@ export function caseTopicKeyboard(): InlineKeyboard {
       text: `${choice.emoji} ${choice.label}`,
       callback_data: encodeCallback(CALLBACK.CASE_TOPIC, choice.key),
     },
+  ]);
+  rows.push([HOME_BUTTON]);
+  return rows;
+}
+
+/**
+ * The document forms on offer, one button each — D24.
+ *
+ * These carry a callback rather than the form's URL directly, and that is a
+ * deliberate trade of one extra tap for one real guarantee: the form is looked
+ * up again, and its active flag checked again, at the moment the teacher taps.
+ * A menu sitting in scrollback from last week is a live route, and a form staff
+ * withdrew this morning must not still be reachable through it. The same
+ * reasoning put the re-consent gate on `chooseCaseTopic`.
+ *
+ * `encodeCallback` cannot throw here. A `type` that will not fit in a payload is
+ * rejected by `parseFormsTab` with its row number before it ever reaches the
+ * database, which is the whole reason that check lives in the parser.
+ */
+export function formsKeyboard(forms: readonly { type: string; buttonText: string }[]): InlineKeyboard {
+  const rows: InlineKeyboardRow[] = forms.map((f) => [
+    { text: f.buttonText, callback_data: encodeCallback(CALLBACK.DOC_TYPE, f.type) },
   ]);
   rows.push([HOME_BUTTON]);
   return rows;

@@ -274,6 +274,47 @@ export const rosterEntries = pgTable(
   (t) => [index('roster_entries_active_idx').on(t.active)],
 );
 
+/**
+ * The document forms a teacher can open, from the spreadsheet's FORMS tab.
+ *
+ * D24 keeps documents in Google Forms and cancels the planned Telegram upload:
+ * the bot never accepts, holds or stores a file. All it does is show the right
+ * links to the right people, and read back who submitted what.
+ *
+ * In the Apps Script version these links lived in code, which is exactly why all
+ * seven sat as `PLACEHOLDER_VISA` until the feature was abandoned — changing one
+ * needed a developer. In a tab a new form reaches teachers within ten minutes,
+ * like an FAQ answer, and a blank or inactive row does not render at all, so a
+ * half-ready form cannot reach anybody.
+ */
+export const formLinks = pgTable(
+  'form_links',
+  {
+    /** The sheet's TYPE column, e.g. PASSPORT. Stable across edits, and what a button payload carries. */
+    type: text('type').primaryKey(),
+    /** Ordering only, exactly as `faq_entries.sheet_row` — the order staff arranged is the order teachers see. */
+    sheetRow: integer('sheet_row').notNull().default(0),
+    buttonText: text('button_text').notNull(),
+    url: text('url').notNull(),
+    /**
+     * The tab this form's responses land in, or null if nobody has linked them yet.
+     *
+     * Nullable on purpose (D39). A row with a link but no responses tab still
+     * renders its button: teachers can submit, and the bot simply does not read
+     * the answers back. That split is what lets MoPSE publish a form before the
+     * plumbing is finished rather than after — and the alternative, a naming
+     * convention the bot derives, is the `FORM_URLS` mistake wearing a different
+     * hat, because a convention nobody can see cannot be corrected by the person
+     * who owns the sheet.
+     */
+    responsesTab: text('responses_tab'),
+    active: boolean('active').notNull().default(true),
+    /** When the sync last saw this row in the sheet. */
+    syncedAt: tsz('synced_at').notNull().defaultNow(),
+  },
+  (t) => [index('form_links_active_idx').on(t.active, t.sheetRow)],
+);
+
 // ---------------------------------------------------------------------------
 // Owned by the database.
 // ---------------------------------------------------------------------------
@@ -877,6 +918,66 @@ export const jobRuns = pgTable(
     alertedAt: tsz('alerted_at'),
   },
   (t) => [index('job_runs_success_idx').on(t.lastSuccessAt)],
+);
+
+/**
+ * Every response row the bot has already dealt with, and what it decided.
+ *
+ * This table is the reason a submission is filed once rather than every ten
+ * minutes. It is unlike every other sync in the system: the FAQ and the roster
+ * are *records* to be kept up to date, upserted on a natural key and deactivated
+ * when they disappear. A form response is an *event*, and re-reading it must not
+ * re-fire it. Nothing else here has needed that.
+ *
+ * A row is written for EVERY outcome, not only the filed ones. An unmatched
+ * submission that produced no marker would raise the same alert every ten
+ * minutes for ever — which is how a real alarm becomes background noise that
+ * nobody reads.
+ *
+ * ⚠️ **The key is the row number, and that is a real dependency on the
+ * spreadsheet.** It is the only stable identifier Google gives us; a content
+ * hash would survive deletion but collide legitimately, because two teachers
+ * submitting the same form on the same day with the same answers is normal.
+ * **Deleting a row from a responses tab shifts every row below it up by one and
+ * the bot re-files all of them.** The runbook says so in those words.
+ */
+export const formSubmissions = pgTable(
+  'form_submissions',
+  {
+    /** `form_links.type`. Not a foreign key: a submission outlives the removal of its form. */
+    formType: text('form_type').notNull(),
+    /** 1-based row in the responses tab, as a person reading the sheet would count it. */
+    sheetRow: integer('sheet_row').notNull(),
+    /** `Filed`, `RosterNoChat` or `Unmatched`. The three outcomes of Q1 and D24's matching. */
+    outcome: text('outcome').notNull(),
+    /**
+     * The case this became, when it became one.
+     *
+     * `set null` rather than `cascade`, and the distinction is load-bearing. If
+     * the marker died with its case, the response row — which lives in Google's
+     * sheet for ever — would be seen as new on the very next sync and filed
+     * again, and again, every ten minutes for the life of the system. Purging a
+     * case must not resurrect the submission that created it.
+     */
+    caseReference: text('case_reference').references(() => cases.reference, { onDelete: 'set null' }),
+    /**
+     * The recruitment email the teacher typed into the form. Nulled, not deleted,
+     * when the case it produced is purged.
+     *
+     * This is the whole of the personal data here. What remains afterwards is
+     * "row 42 of the passport form has been dealt with", which identifies nobody
+     * and is what stops the duplicate above. Retention therefore anonymises this
+     * table rather than emptying it.
+     */
+    submitterEmail: text('submitter_email'),
+    /** The form's own timestamp, as Google recorded it. */
+    submittedAt: tsz('submitted_at'),
+    seenAt: tsz('seen_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.formType, t.sheetRow] }),
+    index('form_submissions_case_idx').on(t.caseReference),
+  ],
 );
 
 /**

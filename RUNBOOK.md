@@ -202,9 +202,15 @@ They will also, once, **be asked to read the privacy notice again** before Conta
 Support, Urgent Case or Check My Case. One tap, and it puts them back on what they
 were doing. The answer bank and `/privacy` are left open deliberately.
 
-**What they cannot do:** upload documents, or use the bot in Russian or Uzbek.
-Both are absent deliberately rather than half-built — offering either would send a
-teacher who had just signed in to a dead end.
+They can **submit documents**, through Submit Documents on the menu. It gives them
+a link to a Google Form; the bot never receives the file itself. What comes back
+is a case saying they submitted, so it can be tracked and so they can see it in
+Check My Case. §4.18 is how a form is published.
+
+**What they cannot do:** send a file to the bot in chat, or use it in Russian or
+Uzbek. Both are absent deliberately rather than half-built — offering either would
+send a teacher who had just signed in to a dead end. A photo or file sent in chat
+is refused with a message pointing at Submit Documents.
 
 ## 1.6 Honest risk summary
 
@@ -394,6 +400,9 @@ doing it — which is the exact failure this whole rebuild exists to remove.
 | **The support contact address** | `.env` | Teachers are given a blank where an address should be |
 | **Each staff member's Telegram handle** | `/username`, by that person, for themselves | Teachers asking who covers their region are shown a name and the support address, and cannot tap through. This is a degradation, not a fault |
 | **The FAQ answers and the teacher roster** | The spreadsheet, synced every ten minutes | The bot can answer nothing and nobody can sign in |
+| **The `FORMS` tab** | The spreadsheet, synced every ten minutes | Submit Documents says "there are no document forms available at the moment" to every teacher. The button still appears |
+| **Each form's responses linked into the same spreadsheet** | §4.18 — and this is the one with a procedure of its own | Teachers can still submit. **Nothing is read back**, so no case is filed, nobody is chased, and no alarm sounds — because from the bot's side nothing has happened |
+| **The word "email" in each form's email question, and in no other question** | When the form is built. §4.18 | That form's responses are refused whole, with an alarm naming it. **This one does complain** |
 
 ### The regions, specifically — this one is being done later, on purpose
 
@@ -627,6 +636,39 @@ Set a handle on a staff account covering the test teacher's region with
 main menu. The name must be right, and tapping the handle must open a chat with
 that same person.
 
+### 13. A document form reaches a teacher, and comes back as a case
+
+**Only if the `FORMS` tab has been filled in.** If it has not, tap **📄 Submit
+Documents** anyway: the correct answer at that point is *"there are no document
+forms available at the moment"*, not an error and not an empty menu.
+
+With at least one form published (§4.18):
+
+1. From the test teacher's main menu, tap **📄 Submit Documents**. The forms you
+   put in the sheet must be listed, in the order the sheet lists them.
+2. Tap one. You must get its link, with a warning to use the same email address
+   they signed in with.
+3. Open that link and submit the form, **using the test teacher's recruitment
+   email**.
+4. Wait ten minutes, then run `/cases` as a staff member. A **Submit Documents**
+   case must exist for that teacher, carrying a note naming the form.
+5. Check the teacher's side: **Check My Case** must show it.
+
+**Then submit the same form a second time** and wait another ten minutes. You
+must still have **one** case, now with **two** notes. A second case means the
+duplicate protection is not working and must be investigated before launch.
+
+> **Also confirm nothing is filed twice on its own.** Leave it an hour and check
+> the case count for that teacher has not grown. The bot re-reads the whole
+> responses sheet every ten minutes, so a fault here shows as a case every ten
+> minutes rather than as an error.
+
+### 14. The bot refuses a file sent in chat
+
+Send a photo or a PDF straight to the bot as the test teacher. It must refuse
+politely and point at Submit Documents. **The bot never accepts, holds or stores
+a file**, and this is the check that says so.
+
 ### The four that need a night or a morning to pass
 
 These cannot be run in ten minutes. Run them on the first deploy of the retention
@@ -645,16 +687,27 @@ release and write down that you did.
    three days, and confirm the **teacher** receives the reminder carrying the text
    that was typed — not the staff member.
 
-### 13. Clean up
+### 15. Clean up
 
 ```sql
 DELETE FROM cases WHERE teacher_chat_id = '<the test chat id>';
 DELETE FROM urgent_codes WHERE used_at IS NULL AND case_reference IS NULL;
 DELETE FROM announcement_recipients WHERE chat_id = '<the test chat id>';
+DELETE FROM form_submissions WHERE submitter_email = '<the test teacher's email>';
 ```
 
 Leave the roster row and the teacher record. They are harmless, and the next smoke
 test reuses them.
+
+> **Why `form_submissions` is on that list, and why it is the one line to get
+> right.** Those rows are how the bot remembers which submissions it has already
+> dealt with. Leaving them means check 13 **cannot be run a second time** — your
+> test submission is still marked as handled, so no case appears and it looks
+> like a fault when it is not.
+>
+> **Delete them only for the test teacher, by their email, exactly as above.**
+> Emptying the whole table would make the bot re-file every real submission still
+> sitting in a responses sheet — one new case per teacher, per form.
 
 ---
 
@@ -1320,7 +1373,163 @@ This was accepted knowingly, against the alternative of teachers not knowing who
 covers their region at all. **If case volume falls after this ships, read it as
 work moving rather than as work disappearing.**
 
+## 4.18 Publishing a document form — the whole procedure
+
+**Do all six steps. Steps 3 and 4 are the ones that go wrong**, and when they do
+the bot looks perfectly healthy while quietly reading nothing.
+
+The bot never receives a file. Teachers fill in a Google Form; the documents stay
+in Google; what the bot reads back is the fact that somebody submitted, and who.
+
+### 1. Build the form in Google Forms
+
+Whatever questions you need. One rule, and it is the only one:
+
+> **Exactly one question must have the word "email" in its title, and it must be
+> the one asking for the teacher's recruitment email.**
+
+"Your email address", "Recruitment email", "E-mail" all work — the bot ignores
+capitals, spaces and hyphens. What breaks it is a **second** question mentioning
+email, such as "Your supervisor's email": the bot then cannot tell which address
+identifies the teacher, and it refuses that form's responses rather than guess.
+Filing somebody's documents under their supervisor is worse than not filing them.
+
+**Make the email question required.** A submission with no address can never be
+matched to anybody.
+
+### 2. Send the responses to the right spreadsheet
+
+**This is the step that decides whether anything works.** In the form:
+
+1. Open the **Responses** tab at the top of the form editor.
+2. Click **Link to Sheets** (a green spreadsheet icon). If the form is already
+   linked to the wrong place, use the ⋮ menu → **Unlink form** first.
+3. Choose **Select existing spreadsheet**.
+4. Pick **the same spreadsheet that holds `FAQ`, `ROSTER` and `FORMS`.** Not a
+   new one, not a copy. The bot can read one spreadsheet and only one.
+5. Google adds a new tab to that spreadsheet. **Write down its exact name** — it
+   is usually "Form Responses 1", or the form's title.
+
+### 3. Note the tab's exact name
+
+Open the spreadsheet and look at the new tab along the bottom. Copy its name
+character for character, including spaces and capitals. `Form Responses 1` is not
+the same as `Form responses 1`.
+
+Renaming the tab to something meaningful — `PASSPORT_RESPONSES` — is a good idea,
+and easier to get right later. Do it now, before step 4, not after.
+
+### 4. Add the row to the `FORMS` tab
+
+| Column | What goes in it |
+|---|---|
+| `TYPE` | A short code, capitals, no spaces or punctuation — `PASSPORT`, `VISA`. This travels inside the button, so it must be short and plain |
+| `BUTTON_TEXT` | What the teacher sees on the button. An emoji is fine — `🛂 Passport copy` |
+| `URL` | The form's link, from **Send → 🔗** in Google Forms. Must start with `https://` |
+| `RESPONSES_TAB` | **The exact tab name from step 3.** These two must match perfectly |
+| `ACTIVE` | `TRUE` to show it, `FALSE` to hide it |
+
+Leave `RESPONSES_TAB` blank if the form is not linked yet. The button still
+appears and teachers can still submit — the bot just will not read anything back
+until you fill it in.
+
+### 5. Wait ten minutes
+
+The sync runs every ten minutes. Then open the bot as a teacher would and tap
+**Submit Documents**. The new button should be there.
+
+**If the row was wrong**, the operations chat gets a message naming the row
+number and what to fix. Fix the sheet; the next sync recovers on its own.
+
+### 6. Check it reads back — do not wait for a real teacher
+
+Submit the form yourself, using **the recruitment email of a teacher who has
+already signed in to the bot** (your own, if you are on the roster). Within ten
+minutes:
+
+- A `Submit Documents` case should exist for that teacher — check with `/cases`.
+- The case should carry a note naming the form.
+
+**If nothing appears**, it is almost always step 2 or step 4: the responses went
+to a different spreadsheet, or `RESPONSES_TAB` does not match the tab name.
+Compare the two, character for character.
+
+> ### ⚠️ Never delete or reorder rows in a responses tab
+>
+> The bot remembers which submissions it has dealt with **by row number** —
+> that is the only stable identifier Google gives it. Deleting a row shifts every
+> row below it up by one, and the bot will file all of them again as new
+> submissions.
+>
+> If a submission is wrong, leave the row alone and close the case instead.
+
+### What staff see when a submission cannot be filed
+
+Two different alarms, and they mean different things:
+
+**"Submissions from teachers who have not signed in"** — the address is on the
+roster, so we know exactly who they are, but they have never opened the bot.
+There is nothing to file the case against. **Their documents are safely
+submitted**; ask them to open the bot and sign in, and the next thing they send
+will file normally.
+
+**"Submissions that matched no teacher"** — the address is on no active roster
+row. Either the teacher used a different address from their recruitment one, or
+the roster is missing them. The documents are still in the form's responses.
+
 # PART 5 — When something is wrong
+
+## 5.0 Every alarm the bot can send, and what to do — the index
+
+**Search this table for the words in the message you received.** The titles below
+are exactly what arrives in the operations chat, character for character, so you
+can match them without knowing anything about how the bot works.
+
+**These are the only messages the bot ever sends to the operations chat.** If you
+receive something not on this list, it did not come from the bot.
+
+🔴 = act now · 🟠 = act today · 🔵 = for information, no action
+
+### The sheet syncs
+
+| Alarm | 🚦 | What it means | What to do |
+|---|---|---|---|
+| `FAQ sync failed` · `ROSTER sync failed` · `FORMS sync failed` | 🔴 | That tab could not be read at all. Usually a renamed or deleted column. **Nothing was changed** — the previous good data is still live | The message names the missing column. Restore its name in the sheet. The next sync recovers on its own, within ten minutes. §5.4 |
+| `FAQ sync refused` · `ROSTER sync refused` · `FORMS sync refused` | 🔴 | The sheet would have switched off more rows than the safety limit allows — usually a filter left on, or rows deleted by accident. **Nothing was changed** | Look at the tab. If rows were removed by mistake, paste them back. If the removal is genuine, §5.4 has the override |
+| `FAQ rows rejected` · `ROSTER rows rejected` · `FORMS rows rejected` | 🟠 | Some rows could not be used. **Everything else synced normally** | The message names each row number and the reason. Fix those rows. §4.1 for answers, §4.18 for forms |
+
+### Documents
+
+| Alarm | 🚦 | What it means | What to do |
+|---|---|---|---|
+| `Submissions from teachers who have not signed in` | 🟠 | Their email IS on the roster, but they have never opened the bot, so there is no case to file against. **Their documents are safely submitted** | Ask each named teacher to open the bot and sign in. Nothing is lost. §4.18 |
+| `Submissions that matched no teacher` | 🟠 | The address is on no active roster row. Either they used a different address, or the roster is missing them | Check the roster for that person. If they belong there, add them; the next thing they submit will file normally. §4.18 |
+| `Form “…” could not be read` | 🔴 | One form's responses tab could not be opened, or its email question is wrong. **That form's submissions are not reaching anybody.** Every other form is unaffected | Almost always `RESPONSES_TAB` not matching the real tab name, or two questions mentioning "email". §4.18, steps 3 and 4 |
+| `Form submissions rejected` | 🟠 | Individual submissions had no email address in them | Nothing to fix in the bot. If it keeps happening, make the email question **required** in that form. §4.18 |
+| `Form responses sync failed` | 🔴 | The whole document read-back failed, not one form | §5.4, then check the operations chat for a sync alarm alongside it |
+
+### Retention and deletion
+
+| Alarm | 🚦 | What it means | What to do |
+|---|---|---|---|
+| `Nothing is being deleted, because no retention period is set` | 🟠 | Repeats **every night** until somebody sets a period. The bot is working correctly; it has simply been told to keep everything, and the privacy notice is telling teachers exactly that | Set the three periods — §2.4 or `/retention`. §4.11 |
+| `The nightly deletion pass did not finish` | 🟠 | One or more tables were not cleaned. The others were. Nothing is lost — deletion is simply late | Read which table failed. If it repeats two nights running, it needs a person with database access |
+
+### Cases and teachers
+
+| Alarm | 🚦 | What it means | What to do |
+|---|---|---|---|
+| `Scheduled job "…" has stopped` | 🔴 | A job has not succeeded for longer than it should have. **This is the alarm that tells you the bot has gone quiet** | §5.5 |
+| `A teacher was not told what happened` | 🔴 | Staff replied, or closed a case, and the message did not reach the teacher. **The work happened; the teacher does not know** | §5.7 |
+| `Somebody was not told about something that happened` | 🟠 | As above, for a message that was not the first one | §5.7 |
+| `An urgent code was accepted and then would not spend` | 🔴 | A teacher used a valid urgent code and no case opened | §5.6 |
+| `… urgent code(s) spent without opening a case` | 🔴 | The nightly check found codes used with no case behind them | §5.6 |
+| `A teacher identity is now held by more than one chat` | 🟠 | Two Telegram accounts signed in with the same recruitment email. Both can see that teacher's cases | Find out which is genuine — usually a new phone. Revoke the other with `/revoke`. §4.3 |
+| `A published Telegram handle stopped matching its owner` | 🔵 | A staff member changed or removed their Telegram username. The bot has **already cleared it** so no teacher is sent to the wrong person | Ask that person to run `/username` again. Until they do, teachers are shown their name and the support address. §4.17 |
+| `An FAQ answer could not be shown as a button` | 🟠 | An answer's button text is too long for Telegram, so that answer is unreachable for teachers | Shorten `BUTTON_TEXT` for the named row. §4.1 |
+
+> **If an alarm repeats every ten minutes, it is a sync**; every night, retention;
+> every hour, a job. That alone usually tells you which table above to read.
 
 ## 5.1 Stop the bot immediately
 
@@ -1445,7 +1654,7 @@ Listed so nobody goes looking for them.
 | **Turning the morning digest off** | Deliberately not. No per-person opt-out and no frequency setting: a digest people can switch off is a digest that stops arriving for the people who most need it. If it is wrong for somebody, that is a conversation |
 | **Anything about districts** | Never. Uzbekistan has regions and districts and this bot is concerned with regions only |
 | **A list of "action required" types** | Later. Until then `/await` carries free text — §4.6a |
-| **Document submission** | Later, and **through the existing Google Forms rather than the bot.** An earlier version of this document called Telegram upload "the only genuinely new feature in the rebuild"; that direction was reversed. The bot will never accept or store a file. What arrives is a third spreadsheet tab holding the form links, with submissions matched to teachers by their recruitment email — the same identity check as signing in, and stronger than the old system's editable hidden field |
+| **Document submission** | ✅ **Built in Stage 6**, and **through the existing Google Forms rather than the bot.** An earlier version of this document called Telegram upload "the only genuinely new feature in the rebuild"; that direction was reversed. The bot never accepts or stores a file. It publishes form links from a third spreadsheet tab, and matches submissions to teachers by their recruitment email — the same identity check as signing in, and stronger than the old system's editable hidden field. **§4.18 is the procedure for publishing a form**, and it is not optional reading: two of its steps fail silently |
 | **Russian and Uzbek** | Not scheduled. The interface is built so that translating it is a display change, with no effect on how buttons route |
 
 ---

@@ -24,6 +24,7 @@ import { log } from '../../log.js';
 import {
   deleteOldMessages,
   deleteResolvedCases,
+  anonymiseFormSubmissions,
   pruneAnnouncementRecipients,
   pruneConversationStates,
   pruneUrgentCodeAttempts,
@@ -85,6 +86,13 @@ export async function runRetention(db: Database): Promise<PurgeReport> {
       table: 'announcement_recipients',
       run: () => pruneAnnouncementRecipients(db, ANNOUNCEMENT_RECIPIENT_RETENTION_DAYS),
     },
+    /**
+     * Anonymised rather than deleted, and it must stay that way — D44. The
+     * marker is what stops a submission being filed a second time; deleting it
+     * would make every purged submission look new again on the next sync.
+     * Counted as "removed" like the others, which here means addresses removed.
+     */
+    { table: 'form_submissions.email', run: () => anonymiseFormSubmissions(db, periods.caseDays) },
   ];
 
   const lines: PurgeLine[] = [];

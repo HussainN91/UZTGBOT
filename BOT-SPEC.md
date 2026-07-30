@@ -48,9 +48,10 @@ Uzbekistan (MoPSE) for the September 2026 intake.
 **Explicit non-goals:**
 
 - Not a chat relay to human staff — staff act through commands, not live chat.
-- **Not a file store.** The bot never accepts uploads in chat; all documents go
-  through Google Forms. This is now a settled decision rather than an
-  interim state — see §10, which reverses a planned move to Telegram upload.
+- **Not a file store.** The bot never accepts, holds or stores a file; all
+  documents go through Google Forms. Settled rather than interim, and **built
+  that way in Stage 6** — see §10, which reverses a planned move to Telegram
+  upload. `sendDocument` exists for `/export` and has no receive path.
 - Not multilingual at launch. English only; the language button exists and says so.
 - **Not a group-chat bot.** Private chats only; it leaves any group it is added
   to, except the operations chat. **Built in this stage** — this line described
@@ -1267,25 +1268,82 @@ matches without paging — those are ranked results, so paging is not meaningful
 
 ---
 
-## 10. Document submission — **not built, and the direction has reversed**
+## 10. Document submission — ✅ **rebuilt in Stage 6**
 
-**Documents stay in Google Forms. The bot will never accept or store a file.**
+**Documents stay in Google Forms. The bot never accepts, holds or stores a file.**
 
 That reverses a planned direction and is recorded here because two documents said
 the opposite: an earlier `RUNBOOK.md` called Telegram upload *"the only genuinely
 new feature in the rebuild"*, while this section described the Apps Script Forms
-flow as current. Both are now corrected, in one pass, rather than leaving a third
-version for somebody to find.
+flow as current. Both were corrected in Stage 5, and Stage 6 built what they
+describe.
 
-**What is planned, when it is built:**
+**What exists, in the order the data moves:**
 
-1. Form links live in a third spreadsheet tab, synced exactly as the roster and
-   the FAQ are — so a half-ready form is rejected with its row number and cannot
-   reach a teacher, which is the shape the existing sync already has.
-2. A teacher taps **Submit Documents**, passes the sign-in gate, picks a document
-   type and is sent to the form.
-3. Submissions are matched to teachers **by the recruitment email the form
-   collects**, checked against the roster.
+1. Form links live in the **`FORMS` tab**, synced exactly as the roster and the
+   FAQ are — a half-ready row is rejected with its row number and cannot reach a
+   teacher. Columns: `TYPE`, `BUTTON_TEXT`, `URL`, `RESPONSES_TAB`, `ACTIVE`.
+2. A teacher taps **Submit Documents**, passes the sign-in and re-consent gates,
+   picks a document type and is given that form's link.
+3. Every form writes its responses into a tab of the same spreadsheet. The bot
+   reads each one and matches submissions to teachers **by the recruitment email
+   the form collects**, checked against the roster.
+4. A match files a `Submit Documents` case under that teacher, with a note naming
+   the form. The documents themselves stay in Google.
+
+**Two rows in the `FORMS` tab are worth understanding as a pair.** `URL` is what
+a teacher is sent to; `RESPONSES_TAB` is where their answers land. A row with a
+`URL` and no `RESPONSES_TAB` **still shows its button** — teachers can submit and
+the bot simply does not read the answers back. That split is deliberate: it lets
+a form be published before its plumbing is finished rather than after.
+
+**Three things are refused rather than guessed at**, each reported with its row
+or its tab, because each would otherwise fail far from its cause:
+
+- A `TYPE` holding a colon, or long enough to overflow Telegram's 64-byte button
+  payload. It would throw while the list was being rendered, taking the whole
+  list away from every teacher.
+- A `URL` that is not `https`, or is not a web address at all. Telegram refuses a
+  message containing a malformed button URL, and the forms list is **one message
+  carrying every button** — so one bad cell would take the list from everybody,
+  not just its own row. The host is deliberately not restricted to Google.
+- A responses tab with no email column, **or more than one**. Exactly one column
+  heading may contain the word "email". Two would mean guessing between a
+  teacher's address and their supervisor's, and filing somebody's documents under
+  the wrong person is a silent, plausible, wrong answer.
+
+**Reading a submission twice must file one case, and this is the only event-shaped
+sync in the system.** The FAQ and the roster are records: upsert on a key,
+deactivate what vanished, run twice and nothing changes. A response is an event.
+`form_submissions` holds one row per response the bot has looked at — keyed on
+`(form_type, sheet_row)`, written **in the same transaction as the case** — and
+that marker is the only thing between this design and a duplicate case every ten
+minutes.
+
+> ⚠️ **The row number is the identity, so a responses tab must not have rows
+> deleted or reordered.** Deleting one shifts every row below it up by one and
+> the bot re-files all of them. It is the only stable identifier Google gives us;
+> a content hash would survive deletion but collide legitimately, because two
+> teachers submitting the same form on the same day with the same answers is
+> ordinary.
+
+**Retention anonymises that marker; it never deletes it** (D44). When a case is
+purged the marker survives with its `case_reference` nulled, and the nightly job
+clears the email. What remains is *"row 42 of the passport form has been dealt
+with"*, which identifies nobody. Deleting the marker instead would make the
+response row look new on the very next sync — for ever.
+
+**A submission that cannot be filed is reported, never invented.** Three
+outcomes, and the middle one is its own message:
+
+| Outcome | What it means | What happens |
+|---|---|---|
+| `Filed` | The address matches a roster row **and** a signed-in teacher | A case, plus a note naming the form |
+| `RosterNoChat` | On the roster, but has never opened the bot | **No case is possible** — `cases.teacher_chat_id` is a non-null foreign key. Staff are told the name and address so a person can chase them |
+| `Unmatched` | On no active roster row at all | Staff are told the address and which form |
+
+`RosterNoChat` deliberately does **not** say "we do not know this email". We know
+exactly who they are, which is precisely why somebody can act on it.
 
 **Matching on the roster identifier is stronger than the mechanism it replaces**,
 and this is the substantive change rather than a detail. Google Forms has no
@@ -1312,7 +1370,7 @@ scheduled runs inside the webhook.
 
 | Entry | Job | What |
 |---|---|---|
-| `*/10 * * * *` | sync | Copy the answer bank and the roster out of the spreadsheet |
+| `*/10 * * * *` | sync | Copy the answer bank, the roster and the form links out of the spreadsheet, then read each form's responses and file what arrived |
 | `*/5 * * * *` | heartbeat | Alarm on any job that has stopped |
 | `0 21 * * *` | retention | The nightly deletion pass — **02:00 Tashkent** |
 | `0 2 * * *` | digest | The morning lists, the teacher chase, the handle re-check — **07:00 Tashkent** |
@@ -1555,8 +1613,9 @@ and §11.0 the schedule.
 staff command set, the ordered-rank capability table, staff lifecycle commands,
 new-case notification, case notes, importance, promised dates and snoozes, region
 correction and the teacher's region prompt, teacher revocation and restoration,
-`/maintenance`, urgent-code issuance, the group gate, and alarms fanning out to
-System staff.)*
+`/maintenance`, urgent-code issuance, the group gate, alarms fanning out to
+System staff, and — in Stage 6 — **document submission through Google Forms**,
+which is §10 and is the last feature the rebuild was carrying.)*
 
 ### Superseded documents
 
