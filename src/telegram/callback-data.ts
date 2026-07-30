@@ -63,9 +63,24 @@ export const CALLBACK = {
    * Also carries nothing, and that is the decision rather than an omission. A
    * payload naming the new region would make this a picker, and a menu of
    * regions is a menu of whose problem this becomes — one wrong tap routes an
-   * emergency to the wrong province. It raises a flag; a manager decides.
+   * emergency to the wrong region. It raises a flag; a manager decides.
    */
   REGION_MOVED: 'RMV',
+  /**
+   * "I have read the privacy notice", e.g. `PRIV:2026-07-30.1:7-180-3`.
+   *
+   * It carries the wording version **and the three periods the teacher was
+   * shown**, because both can move between the notice being sent and the button
+   * being tapped — a period is a settings row somebody can change while a
+   * teacher is reading (R20). A payload that carried only the version would let
+   * an acceptance be recorded for numbers the teacher never saw, which is the
+   * one thing this record exists to prevent.
+   *
+   * The periods travel as one hyphen-joined field because `:` is the separator.
+   * `PRIV:2026-07-30.1:7-180-3` is 26 bytes against a 64-byte limit; a test
+   * measures it with real values rather than trusting the arithmetic here.
+   */
+  PRIVACY_ACCEPTED: 'PRIV',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];

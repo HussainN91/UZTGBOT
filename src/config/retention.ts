@@ -108,6 +108,46 @@ export function isLongerThan(a: number | null, b: number | null): boolean {
 }
 
 /**
+ * The three periods as one short field, for a callback payload.
+ *
+ * `7-180-3`, and `x` for a period that is not set — a literal that cannot be
+ * confused with a number and survives a round trip. It exists so the button a
+ * teacher taps carries the numbers they were shown, and `parsePeriodsField`
+ * reads it back; the pair are here together so neither can be changed alone.
+ */
+export function renderPeriodsField(periods: RetentionPeriods): string {
+  const part = (days: number | null): string => (days === null ? 'x' : String(days));
+  return [part(periods.caseDays), part(periods.urgentCaseDays), part(periods.messageDays)].join('-');
+}
+
+/**
+ * Read back what `renderPeriodsField` wrote, or `null` if it is not that.
+ *
+ * Nothing here trusts the input: a callback payload arrives from the network and
+ * anybody can hand-craft one. A malformed field is refused rather than
+ * part-parsed, because the caller's response to `null` is to show the notice
+ * again — which is always safe — while a half-read set of periods would record
+ * an acceptance for numbers nobody was shown.
+ */
+export function parsePeriodsField(raw: string): RetentionPeriods | null {
+  const parts = raw.split('-');
+  if (parts.length !== 3) return null;
+
+  const read = (part: string): number | null | undefined => {
+    if (part === 'x') return null;
+    const days = parsePeriod(part);
+    return days === null ? undefined : days;
+  };
+
+  const [caseDays, urgentCaseDays, messageDays] = parts.map(read);
+  if (caseDays === undefined || urgentCaseDays === undefined || messageDays === undefined) {
+    return null;
+  }
+
+  return { caseDays, urgentCaseDays, messageDays };
+}
+
+/**
  * What a teacher agreed to: a wording, and the numbers that wording stated.
  *
  * Both halves are needed and neither is enough. The wording version alone cannot

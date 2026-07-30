@@ -38,6 +38,22 @@ const conversationStateSchema = z.discriminatedUnion('kind', [
     /** What the teacher was trying to do before being asked to sign in. */
     resumeAction: z.string().optional(),
   }),
+  /**
+   * Shown the privacy notice again, and not yet accepted — D32.
+   *
+   * It exists only to carry `resumeAction`, which is why it reuses that field
+   * name and is resumed by the same `resumeAfterSignIn` the sign-in gate uses. A
+   * second resume mechanism beside the first is how the two drift.
+   *
+   * Nothing reads this state in the router's text branch: a teacher who types
+   * instead of tapping falls through to ordinary handling, which is correct.
+   * They are gated again the moment they tap one of the three actions, so the
+   * state going stale costs nothing.
+   */
+  z.object({
+    kind: z.literal('AwaitingPrivacyAcceptance'),
+    resumeAction: z.string().optional(),
+  }),
   z.object({ kind: z.literal('AwaitingCaseTopic') }),
   /**
    * A question typed before any topic was chosen.

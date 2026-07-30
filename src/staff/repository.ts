@@ -12,10 +12,11 @@
  * hand — by SQL over the SSH tunnel, documented in the runbook (D13) — because
  * every automated alternative is a permanent back door.
  */
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { type StaffRole, staff } from '../db/schema.js';
 import { recordAudit } from '../log/audit.js';
+import { CAPABILITY, rolesHolding } from './roles.js';
 
 export interface StaffRecord {
   readonly telegramId: string;
@@ -27,6 +28,8 @@ export interface StaffRecord {
   readonly active: boolean;
   readonly addedBy: string | null;
   readonly addedAt: Date;
+  /** `@handle` without the `@`, or null for "not published" (D47). */
+  readonly telegramUsername: string | null;
 }
 
 /** Thrown when `addStaff` is given somebody who already has a row, active or not. */
@@ -46,6 +49,7 @@ const COLUMNS = {
   active: staff.active,
   addedBy: staff.addedBy,
   addedAt: staff.addedAt,
+  telegramUsername: staff.telegramUsername,
 };
 
 /**
@@ -256,4 +260,213 @@ export async function listStaff(
     ? await query.orderBy(asc(staff.telegramId))
     : await query.where(eq(staff.active, true)).orderBy(asc(staff.telegramId));
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// The handle a teacher is shown, and the person behind it — Task 66, D47
+// ---------------------------------------------------------------------------
+
+/**
+ * The one thing this module needs from Telegram.
+ *
+ * Narrowed to a single method so the rule can be exercised with three lines of
+ * fake rather than a bot, and so nothing here can grow the ability to *send*.
+ * `getChat('@handle')` returns the chat; comparing its id to the staff row's
+ * `telegram_id` is the whole of the check.
+ */
+export interface TelegramLookup {
+  getChat(handle: string): Promise<{ id: number | string }>;
+}
+
+/**
+ * Telegram's own rule for a username: 5–32 of `[A-Za-z0-9_]`, starting with a
+ * letter. Checked before the API call so an obvious typo costs nothing, and
+ * because the value is interpolated into a message 1,800 people read.
+ */
+const HANDLE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
+
+/** `@karimov`, `karimov` and `https://t.me/karimov` are the same handle. */
+export function normaliseHandle(raw: string): string | null {
+  const trimmed = raw.trim().replace(/^https?:\/\/(t\.me|telegram\.me)\//i, '').replace(/^@/, '');
+  return HANDLE.test(trimmed) ? trimmed : null;
+}
+
+export type SetUsernameOutcome =
+  | { readonly ok: true; readonly handle: string }
+  /** Not a Telegram username at all. Refused before any API call. */
+  | { readonly ok: false; readonly reason: 'malformed' }
+  /** Telegram has never heard of it, or it belongs to nobody right now. */
+  | { readonly ok: false; readonly reason: 'unknown' }
+  /**
+   * It resolves, to somebody else. **The column is not written.**
+   *
+   * The failure R33 exists for: a released handle can be claimed by anybody, so
+   * a wrong one here would point 1,800 teachers at a stranger under the
+   * ministry's name.
+   */
+  | { readonly ok: false; readonly reason: 'belongsToSomebodyElse' };
+
+/**
+ * Publish a staff member's Telegram handle, having checked it is theirs.
+ *
+ * **Verified, never trusted** (D47). The check is one API call against a value
+ * that changes about never, and it turns a silent wrong answer into a refusal
+ * the staff member reads immediately.
+ *
+ * Nothing is written unless the handle resolves to this exact row, so every
+ * failure leaves the previous state alone — including the state "not published",
+ * which is the safe one.
+ */
+export async function setUsername(
+  db: Database,
+  api: TelegramLookup,
+  telegramId: string,
+  raw: string,
+): Promise<SetUsernameOutcome> {
+  const handle = normaliseHandle(raw);
+  if (handle === null) return { ok: false, reason: 'malformed' };
+
+  let resolved: string;
+  try {
+    const chat = await api.getChat(`@${handle}`);
+    resolved = String(chat.id);
+  } catch {
+    // Telegram answers "chat not found" for a handle nobody holds, which is a
+    // legitimate answer to the question rather than a fault to propagate.
+    return { ok: false, reason: 'unknown' };
+  }
+
+  if (resolved !== telegramId) return { ok: false, reason: 'belongsToSomebodyElse' };
+
+  await db.update(staff).set({ telegramUsername: handle }).where(eq(staff.telegramId, telegramId));
+  return { ok: true, handle };
+}
+
+/**
+ * Stop publishing a handle.
+ *
+ * Called by `/username clear` and by the daily check when a handle stops
+ * matching. Returns what was cleared so the alarm can name it — "your handle was
+ * removed" is not actionable; "@karimov no longer resolves to you" is.
+ */
+export async function clearUsername(db: Database, telegramId: string): Promise<string | null> {
+  /**
+   * The old value comes from a sub-select, not from `RETURNING`.
+   *
+   * `RETURNING` on an `UPDATE` yields the row **after** the write, so returning
+   * `telegram_username` there is always `null` — the write is what made it null.
+   * The sub-select is evaluated against the pre-update snapshot, which is the
+   * only way to get the handle back out in one statement.
+   */
+  const result = await db.execute<{ was: string | null }>(sql`
+    UPDATE staff SET telegram_username = NULL
+    FROM (SELECT telegram_username AS was FROM staff WHERE telegram_id = ${telegramId}) AS before
+    WHERE staff.telegram_id = ${telegramId} AND staff.telegram_username IS NOT NULL
+    RETURNING before.was
+  `);
+
+  return result.rows[0]?.was ?? null;
+}
+
+/** Every active staff member with a handle published, for the daily re-check. */
+export async function publishedUsernames(
+  db: Database,
+): Promise<{ telegramId: string; handle: string }[]> {
+  const rows = await db
+    .select({ telegramId: staff.telegramId, handle: staff.telegramUsername })
+    .from(staff)
+    .where(and(eq(staff.active, true), sql`${staff.telegramUsername} IS NOT NULL`))
+    .orderBy(asc(staff.telegramId));
+
+  return rows.map((r) => ({ telegramId: r.telegramId, handle: r.handle! }));
+}
+
+export interface RegionManager {
+  readonly telegramId: string;
+  readonly name: string | null;
+  readonly telegramUsername: string | null;
+  readonly region: string;
+}
+
+/**
+ * The person a teacher should be sent to — Q2, and the second teacher-visible
+ * change in this stage.
+ *
+ * **The lowest rank that covers them, and exactly one of them** (step 3). A list
+ * of five names is a teacher deciding who to bother, and the senior people are
+ * the ones who get chosen.
+ *
+ * The rules, and what each rules out:
+ *
+ *   Holds `case.update`, so they can actually reply, close and take a case.
+ *   R14, for the third time: naming an Observer sends a teacher to somebody who
+ *   is not permitted to move their problem.
+ *
+ *   Active. A removed staff member is exactly the stale value this feature must
+ *   not publish.
+ *
+ *   Their region covers the teacher's, resolved through `regionFor` by the
+ *   caller — never `teachers.region`, which is the sign-in snapshot (R12).
+ *
+ *   Their queue is not `None`. A teacher has no category, so there is no queue
+ *   question to ask them — but somebody who sees no cases at all is nobody's
+ *   contact.
+ *
+ * **A staff member who names the teacher's region explicitly is preferred over
+ * one who covers every region**, before rank is considered. That is a
+ * judgement the plan did not settle and it decides who 1,800 people are pointed
+ * at: an empty `regions` array means "every region", so without this tie-break
+ * the first all-region Support member in id order becomes the named manager of
+ * the entire country. One `ORDER BY` clause changes it if that is wrong.
+ */
+export async function regionManagerFor(
+  db: Database,
+  region: string | null,
+): Promise<RegionManager | null> {
+  // An unplaced teacher has no region, so there is no regional person to name.
+  // The support contact is the honest answer and the caller gives it.
+  if (region === null || region.trim() === '') return null;
+
+  const roles = [...rolesHolding(CAPABILITY.CASE_UPDATE)];
+  if (roles.length === 0) return null;
+
+  const covers = sql`lower(${region}) IN (SELECT lower(r) FROM unnest(${staff.regions}) AS r)`;
+
+  const rows = await db
+    .select({
+      telegramId: staff.telegramId,
+      name: staff.name,
+      telegramUsername: staff.telegramUsername,
+      explicit: sql<boolean>`${covers}`,
+    })
+    .from(staff)
+    .where(
+      and(
+        eq(staff.active, true),
+        inArray(staff.role, roles),
+        sql`${staff.queue} <> 'None'`,
+        sql`(cardinality(${staff.regions}) = 0 OR ${covers})`,
+      ),
+    )
+    /**
+     * Explicitly regional first, then the lowest rank, then the id so the same
+     * teacher is given the same name every time. `array_position` reads the
+     * ladder out of the enum rather than restating it here.
+     */
+    .orderBy(
+      sql`${staff.regions} <> ARRAY[]::text[] DESC`,
+      sql`array_position(enum_range(NULL::staff_role), ${staff.role})`,
+      asc(staff.telegramId),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (row === undefined) return null;
+
+  return {
+    telegramId: row.telegramId,
+    name: row.name,
+    telegramUsername: row.telegramUsername,
+    region,
+  };
 }

@@ -20,12 +20,13 @@ import type { Database } from '../db/index.js';
 import { withChatLock } from '../conversation/lock.js';
 import { log } from '../log.js';
 import type { Alerter } from '../sync/alerts.js';
+import type { TelegramLookup } from '../staff/repository.js';
 import { telegramAlerter } from './alerter.js';
 import { verdictForChat } from './chat-gate.js';
 import { claimUpdate } from './dedup.js';
 import type { InboundUpdate, RouterOutcome } from './router.js';
 import { route } from './router.js';
-import { send } from './send.js';
+import { send, sendDocument } from './send.js';
 import type { InlineKeyboard } from './keyboards.js';
 
 /**
@@ -58,6 +59,25 @@ async function deliver(
 ): Promise<void> {
   for (const [index, message] of outcome.messages.entries()) {
     try {
+      /**
+       * A file, when the router asked for one, with the text as its caption.
+       *
+       * `sendDocument` throws exactly as `send` does, so an export that did not
+       * arrive raises the alarm below rather than being indistinguishable from
+       * one that did — which for a report somebody is about to plan from is the
+       * whole point.
+       */
+      if (message.document !== undefined) {
+        await sendDocument(
+          api,
+          message.chatId,
+          message.document.filename,
+          message.document.contents,
+          message.text,
+        );
+        continue;
+      }
+
       const replyMarkup = toReplyMarkup(message.keyboard);
       await send(api, message.chatId, message.text, {
         ...(replyMarkup !== undefined ? { replyMarkup } : {}),
@@ -116,6 +136,14 @@ export async function processUpdate(
   updateId: number | string,
   update: InboundUpdate,
   supportContact: string,
+  /**
+   * The one Telegram *read* the router makes, for `/username` (D47).
+   *
+   * Optional so the suite can drive this with no Telegram at all, exactly as
+   * before. `/username` refuses to write an unchecked handle when it is absent,
+   * which is the safe direction — see `RouterDeps.telegram`.
+   */
+  telegram?: TelegramLookup,
 ): Promise<RouterOutcome | null> {
   /**
    * Step 1, and outside the chat lock on purpose.
@@ -127,7 +155,9 @@ export async function processUpdate(
   if (!(await claimUpdate(db, updateId))) return null;
 
   // Steps 2 to 5. One lock, one transaction, taken in exactly one place.
-  return withChatLock(db, update.chatId, (tx) => route(tx, update, { supportContact }));
+  return withChatLock(db, update.chatId, (tx) =>
+    route(tx, update, { supportContact, ...(telegram !== undefined ? { telegram } : {}) }),
+  );
 }
 
 /** `/help@TheBotName` is the same command as `/help`. */
@@ -207,6 +237,12 @@ export function createBot(): Bot {
       ctx.update.update_id,
       update,
       supportContact,
+      /**
+       * `getChat` only, narrowed at the boundary so nothing reachable from the
+       * router can grow the ability to send. The handle check is a read; every
+       * send in this file happens after the transaction commits.
+       */
+      { getChat: (handle: string) => ctx.api.getChat(handle) },
     );
     if (outcome !== null) await deliver(ctx.api, alerter, outcome);
   };

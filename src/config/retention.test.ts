@@ -10,6 +10,8 @@ import {
   type RetentionPeriods,
   isLongerThan,
   parsePeriod,
+  parsePeriodsField,
+  renderPeriodsField,
   requiresReconsent,
 } from './retention.js';
 
@@ -141,5 +143,39 @@ describe('requiresReconsent', () => {
         { version: '2026-07-30.1', periods: PERIODS },
       ),
     ).toBe(true);
+  });
+});
+
+/**
+ * The periods as they travel inside a button.
+ *
+ * Round-tripped rather than checked one way, because the two halves are only
+ * useful together: the notice a teacher was shown and the acceptance recorded
+ * when they tap are matched by comparing what came back against what is current
+ * (R20), and a render that does not parse back would silently show every teacher
+ * the notice twice.
+ */
+describe('the periods field carried in a callback payload', () => {
+  it('round-trips real values', () => {
+    expect(parsePeriodsField(renderPeriodsField(PERIODS))).toEqual(PERIODS);
+  });
+
+  it('round-trips “kept indefinitely”, which is a value and not an absence', () => {
+    expect(renderPeriodsField(INDEFINITE)).toBe('x-x-x');
+    expect(parsePeriodsField('x-x-x')).toEqual(INDEFINITE);
+  });
+
+  it('round-trips a mixture, which is the likeliest real misconfiguration', () => {
+    const mixed: RetentionPeriods = { caseDays: 7, urgentCaseDays: null, messageDays: 3 };
+    expect(parsePeriodsField(renderPeriodsField(mixed))).toEqual(mixed);
+  });
+
+  it('refuses anything malformed rather than part-reading it', () => {
+    // The payload arrives from the network and anybody can hand-craft one. The
+    // caller's answer to null is to show the notice again, which is always safe;
+    // a half-read set of periods would record an acceptance nobody gave.
+    for (const raw of ['', '7-180', '7-180-3-4', '7--3', 'a-b-c', '7-180-0', '-7-180-3']) {
+      expect(parsePeriodsField(raw)).toBeNull();
+    }
   });
 });

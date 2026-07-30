@@ -6,6 +6,8 @@ import {
 } from '../config/constants.js';
 import type { StaffCaseRow } from '../cases/queries.js';
 import {
+  announcementMessage,
+  announcementOverBy,
   announcementReport,
   chaseExhaustedMessage,
   staffDigest,
@@ -150,6 +152,38 @@ describe('telling an owner the teacher has stopped answering', () => {
     // fact is how a message starts lying after somebody tunes the cap, and it
     // is the drift this project keeps finding in its own documents.
     expect(chaseExhaustedMessage(row())).toContain(String(TEACHER_CHASE_MAX));
+  });
+});
+
+describe('an announcement, as a teacher receives it', () => {
+  it('says who is speaking and where to go instead of replying', () => {
+    // A message arriving unasked from a bot somebody signed into months ago
+    // reads as spam unless it names its sender, and a broadcast is the one
+    // message here nobody can usefully reply to.
+    const message = announcementMessage('Term starts on Monday.');
+
+    expect(message).toContain('Ministry');
+    expect(message).toContain('Term starts on Monday.');
+    expect(message).toContain('Contact Support');
+  });
+
+  it('reports nothing over the limit for a message that fits', () => {
+    expect(announcementOverBy('Term starts on Monday.')).toBe(0);
+  });
+
+  it('reports the overflow of one that does not, which the clamp would hide', () => {
+    /**
+     * The fault this function exists for, and it was found by running the
+     * command rather than by reading it. `announcementMessage` clamps — right
+     * for every other message in this file, and wrong for free text somebody
+     * typed, because the clamp turns "too long to send" into "delivered to
+     * 1,800 people ending in … cut short". A guard written against the clamped
+     * length can never fire.
+     */
+    const huge = 'x'.repeat(TELEGRAM_MESSAGE_MAX_CHARS + 100);
+
+    expect(announcementMessage(huge).length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_CHARS);
+    expect(announcementOverBy(huge)).toBeGreaterThan(100);
   });
 });
 

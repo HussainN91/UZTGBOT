@@ -16,11 +16,14 @@ import { CAPABILITY, capabilitiesFor } from '../../staff/roles.js';
 import {
   StaffAlreadyExistsError,
   addStaff,
+  clearUsername,
   countActiveSystem,
   deactivateStaff,
   findAnyStaff,
   listStaff,
+  normaliseHandle,
   setStaffRole,
+  setUsername,
   type StaffRecord,
 } from '../../staff/repository.js';
 import {
@@ -31,6 +34,7 @@ import {
   setRegionOverride,
   type RegionFlag,
 } from '../../teachers/region.js';
+import { forgetTeacher } from '../../teachers/forget.js';
 import {
   findTeacher,
   restoreTeacher,
@@ -113,7 +117,7 @@ export const whoami: StaffCommand = {
  *   the teachers whose region is least certain become the ones nobody may
  *   correct.
  * - The comparison is case-insensitive, as `visibleToStaff` makes it, so that
- *   `Tashkent` and `tashkent` are not two provinces.
+ *   `Tashkent` and `tashkent` are not two regions.
  */
 const covers = (member: StaffRecord, region: string | null): boolean =>
   member.regions.length === 0 ||
@@ -199,7 +203,7 @@ export const region: StaffCommand = {
 
     /**
      * The region must be one this system has actually heard of. A typo would
-     * otherwise be written happily and put the teacher in a province no staff
+     * otherwise be written happily and put the teacher in a region no staff
      * member covers — their cases visible only to all-region staff, routed
      * nowhere, and wrong in a way nothing would report. Refusing with the real
      * names is also how somebody finds out what the names are.
@@ -307,7 +311,7 @@ export const regions: StaffCommand = {
         ...shown.map(renderFlag),
         '',
         'They told us it is wrong; they were not asked where they are now — a wrong tap',
-        'would route somebody’s emergency to the wrong province. Ask them, then',
+        'would route somebody’s emergency to the wrong region. Ask them, then',
         '/region <chat id> <region>.',
       ].join('\n'),
     );
@@ -1038,6 +1042,253 @@ export const restore: StaffCommand = {
   },
 };
 
+/**
+ * What `/forget` does and does not remove, in the words whoever runs it will
+ * need on the telephone.
+ *
+ * Written into the confirmation rather than only into the runbook, because the
+ * person typing this is the person who then tells a teacher their data has been
+ * removed — and they must be able to say what that means. Nobody should hear
+ * "removed" and understand something stronger than this (D44).
+ */
+const FORGET_RESIDUAL = [
+  'What is gone: their name, their recruitment identifier, their region, and every',
+  'message they have ever sent the bot.',
+  '',
+  'What stays, and why:',
+  '• Their Telegram chat id. Every one of their cases points at it, and that link',
+  '  is what guarantees no case exists without a real person behind it.',
+  '• What they wrote in their cases. That history is kept on purpose — but the',
+  '  retention job removes each case on its own schedule once it is resolved, so',
+  '  this shrinks to nothing without anybody doing anything.',
+];
+
+/**
+ * `/forget <chat id> FORGET` — anonymise a teacher who has asked to be removed.
+ *
+ * **System only** (D44), and the gap between this and `/revoke` at Program is
+ * the point: revoking is reversible and `/restore` exists so the mistake is
+ * cheap, while this has no undo whatsoever. The cost is real and was accepted —
+ * a Support member who takes the request cannot action it themselves.
+ *
+ * The second word is typed rather than tapped, and it is the same shape a
+ * database `DELETE` without a `WHERE` should have. Without it the command
+ * explains what will and will not be removed and changes nothing, which is also
+ * the only way to read that explanation before committing to it.
+ *
+ * The work is in `forgetTeacher` and not here, because the resignation route
+ * (design decision 9) anonymises automatically three months after a teacher
+ * resigns and calls the same function.
+ */
+export const forget: StaffCommand = {
+  name: '/forget',
+  capability: CAPABILITY.TEACHER_FORGET,
+  handle: async (ctx) => {
+    const usage = '/forget 995101 FORGET — the chat id is on /case, next to the teacher’s name.';
+
+    const split = splitChatId(ctx.rest);
+    if (split === null) return reply(ctx.member.telegramId, `I need a teacher’s chat id.\n\n${usage}`);
+
+    const teacher = await findTeacher(ctx.db, split.chatId);
+    if (teacher === null) {
+      return reply(ctx.member.telegramId, `I have no teacher with chat id ${split.chatId}.\n\n${usage}`);
+    }
+
+    if (split.rest.trim() !== 'FORGET') {
+      const openCases = await openCaseNote(ctx, split.chatId);
+      return reply(
+        ctx.member.telegramId,
+        [
+          `⚠️ This permanently removes ${split.chatId} from the system. Nothing has changed.`,
+          '',
+          ...FORGET_RESIDUAL,
+          '',
+          ...openCases.lines,
+          ...(openCases.any
+            ? [
+                '',
+                'Their open cases stay open and stay visible, with no name on them. Somebody',
+                'should finish or close them.',
+              ]
+            : []),
+          '',
+          'There is no undo. To go ahead, type it again with the word FORGET on the end:',
+          `/forget ${split.chatId} FORGET`,
+        ].join('\n'),
+      );
+    }
+
+    const outcome = await forgetTeacher(ctx.db, split.chatId, ctx.member.telegramId);
+
+    if (outcome.kind === 'notFound') {
+      return reply(ctx.member.telegramId, `${split.chatId} has gone. Nothing was changed.`);
+    }
+
+    /**
+     * Told apart from "no such teacher" deliberately (departure 3 of this
+     * stage). Reporting the latter for somebody removed last month sends an
+     * operator looking for a row that is behaving exactly as it should.
+     */
+    if (outcome.kind === 'alreadyForgotten') {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${split.chatId} was already removed. Nothing was changed and nothing was recorded.`,
+          '',
+          'The row is still here and is meant to be — their cases point at it. There is',
+          'no name, no identifier and no region on it.',
+        ].join('\n'),
+      );
+    }
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        `✅ ${split.chatId} has been removed. Recorded against your name.`,
+        '',
+        ...FORGET_RESIDUAL,
+        '',
+        `${outcome.messagesDeleted} log ${outcome.messagesDeleted === 1 ? 'entry' : 'entries'} deleted.`,
+        ...(outcome.openCases > 0
+          ? [
+              `They still have ${outcome.openCases} open case${outcome.openCases === 1 ? '' : 's'}, now with no name on`,
+              'them. Somebody should finish or close them.',
+            ]
+          : []),
+        '',
+        'They have not been messaged, and they can no longer use the bot.',
+      ].join('\n'),
+    );
+  },
+};
+
+/**
+ * `/username @handle` and `/username clear` — D47, Q2.
+ *
+ * **Your own row, and nobody else's.** Not a permission question: a handle
+ * published under somebody's name, to 1,800 teachers, is theirs to publish. So
+ * there is no chat-id argument at all, which also means there is no way to
+ * mistype one.
+ *
+ * Available to any active staff member. The check that matters is not rank —
+ * it is `api.getChat`, which decides whether the handle is really theirs.
+ *
+ * The three failures are reported separately because they need different things
+ * done about them: a typo needs retyping, an unknown handle means Telegram has
+ * never seen it, and a handle belonging to somebody else is the one that would
+ * have pointed teachers at a stranger. A staff member who mistypes their own
+ * handle must find out from this command and not from a teacher.
+ */
+export const username: StaffCommand = {
+  name: '/username',
+  capability: null,
+  handle: async (ctx) => {
+    const usage = [
+      '/username @yourhandle — publish it to teachers in your region',
+      '/username clear       — stop publishing it',
+    ].join('\n');
+
+    const wanted = ctx.rest.trim();
+    const current = ctx.member.telegramUsername;
+    const showing =
+      current === null
+        ? 'Nothing is published for you at the moment.'
+        : `Teachers in your region are shown @${current}.`;
+
+    if (wanted === '') {
+      return reply(
+        ctx.member.telegramId,
+        [
+          showing,
+          '',
+          'This is shown to teachers who ask who covers their region, beside your',
+          'name. It is checked against Telegram when you set it and again every day.',
+          '',
+          usage,
+        ].join('\n'),
+      );
+    }
+
+    if (wanted.toLowerCase() === 'clear') {
+      const cleared = await clearUsername(ctx.db, ctx.member.telegramId);
+      return reply(
+        ctx.member.telegramId,
+        cleared === null
+          ? 'Nothing was published for you, so nothing changed.'
+          : [
+              `Stopped publishing @${cleared}.`,
+              '',
+              'Teachers asking who covers their region are now shown your name and the',
+              'support contact instead.',
+            ].join('\n'),
+      );
+    }
+
+    /**
+     * No lookup, no write. An unverified handle is the failure D47 exists to
+     * prevent, and writing one "for now" is how it would arrive silently.
+     */
+    if (ctx.deps.telegram === undefined) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          'I cannot check that handle with Telegram at the moment, so nothing was',
+          'written.',
+          '',
+          'A handle is never published unchecked: a Telegram username can be released',
+          'and claimed by somebody else, and publishing the wrong one would point',
+          'teachers at a stranger. Please try again shortly.',
+        ].join('\n'),
+      );
+    }
+
+    const outcome = await setUsername(ctx.db, ctx.deps.telegram, ctx.member.telegramId, wanted);
+
+    if (outcome.ok) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `✅ Publishing @${outcome.handle}. Telegram confirms it is yours.`,
+          '',
+          'Teachers in the regions you cover now see your name and this handle when',
+          'they ask who covers their region, and can tap through to message you.',
+          '',
+          'It is re-checked every day. If you change your Telegram username, this is',
+          'cleared automatically and you and the operations chat are both told.',
+          '',
+          '/username clear — stop publishing it.',
+        ].join('\n'),
+      );
+    }
+
+    const why: Readonly<Record<'malformed' | 'unknown' | 'belongsToSomebodyElse', readonly string[]>> = {
+      malformed: [
+        `“${wanted}” is not a Telegram username, so nothing was written.`,
+        '',
+        'A username is 5 to 32 letters, digits or underscores, starting with a letter.',
+        'It is the one in Telegram’s own Settings, not your display name.',
+      ],
+      unknown: [
+        `Telegram does not know @${normaliseHandle(wanted) ?? wanted}, so nothing was written.`,
+        '',
+        'Check the spelling against Telegram’s Settings screen. A username has to be',
+        'set there before it can be published here.',
+      ],
+      belongsToSomebodyElse: [
+        `⚠️ @${normaliseHandle(wanted) ?? wanted} belongs to somebody else, so nothing was written.`,
+        '',
+        'This is exactly the check that matters. Publishing it would have shown',
+        'teachers a stranger’s handle beside your name, with the Ministry’s bot',
+        'vouching for it.',
+        '',
+        'Check the spelling in Telegram’s Settings.',
+      ],
+    };
+
+    return reply(ctx.member.telegramId, [...why[outcome.reason], '', showing].join('\n'));
+  },
+};
+
 /** Every command in this file, so registering one is a single edit. */
 export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   whoami,
@@ -1049,4 +1300,6 @@ export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   staffRemove,
   revoke,
   restore,
+  forget,
+  username,
 ];

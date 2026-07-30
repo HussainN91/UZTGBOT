@@ -36,6 +36,7 @@ import {
   reply,
   scopeOf,
 } from './context.js';
+import { ANNOUNCE_COMMANDS } from './announce.js';
 import { CASE_COMMANDS } from './cases.js';
 import { OPS_COMMANDS } from './ops.js';
 import { parseCommand } from './parse.js';
@@ -64,6 +65,7 @@ export const STAFF_COMMANDS: readonly StaffCommand[] = [
   ...PEOPLE_COMMANDS,
   ...CASE_COMMANDS,
   ...OPS_COMMANDS,
+  ...ANNOUNCE_COMMANDS,
 ];
 
 /**
@@ -159,5 +161,14 @@ export async function staffHelpSection(db: Database, chatId: string): Promise<st
     `Staff commands — ${member.role}, ${member.queue} queue`,
     ...describeCapabilities(capabilitiesFor(member.role)),
     '/whoami — your rank, queue and regions',
+    /**
+     * Listed here rather than under a capability, because it has none: every
+     * active staff member may set their own handle and nobody may set anybody
+     * else's (D47). A command gated by `capability: null` has no row in the
+     * capability table to be described from, so this is the one place it can be
+     * advertised — and a command teachers are told about but staff are not is a
+     * command nobody uses.
+     */
+    '/username — publish your Telegram handle to teachers in your region',
   ].join('\n');
 }

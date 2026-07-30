@@ -26,6 +26,17 @@ export const CAPABILITY = {
   URGENT_ISSUE: 'urgent.issue',
   TEACHER_REGION: 'teacher.region',
   TEACHER_REVOKE: 'teacher.revoke',
+  /**
+   * Anonymising a teacher on request. Floored at System, above `teacher.revoke`.
+   *
+   * The gap between the two is the whole argument of D44: `/revoke` is
+   * reversible and `/restore` exists so the mistake is cheap, while this has no
+   * undo whatsoever. Two named System members exist by launch-checklist
+   * requirement, so a removal request reaching the support desk is escalated to
+   * one of two people — which for a request of this kind is correct handling
+   * rather than an obstacle.
+   */
+  TEACHER_FORGET: 'teacher.forget',
   STAFF_MANAGE: 'staff.manage',
   MAINTENANCE: 'maintenance',
   ANNOUNCE: 'announce',
@@ -55,6 +66,7 @@ const FLOOR: Readonly<Record<Capability, StaffRole>> = {
   'urgent.issue': 'Support',
   'teacher.region': 'Lead',
   'teacher.revoke': 'Program',
+  'teacher.forget': 'System',
   'staff.manage': 'System',
   maintenance: 'System',
   announce: 'Program',

@@ -200,13 +200,27 @@ export const CAPABILITY_INTERFACE: Readonly<Record<Capability, CapabilityInterfa
    * line, not by asking somebody.
    */
   'teacher.revoke': { summary: 'End and return a teacher’s access', commands: ['/revoke', '/restore'] },
+  /**
+   * Deliberately worded as "remove", not "revoke", and it is not listed beside
+   * `/revoke` the way `/restore` is. There is no line back from this one.
+   */
+  'teacher.forget': {
+    summary: 'Remove a teacher’s name and identifier permanently',
+    commands: ['/forget'],
+  },
   'staff.manage': {
     summary: 'Add, rank and remove staff',
     commands: ['/staff', '/staff_add', '/staff_role', '/staff_remove'],
   },
-  maintenance: { summary: 'Pause and resume new cases', commands: ['/maintenance'] },
-  announce: { summary: 'Message teachers in bulk', commands: [] },
-  export: { summary: 'Export case records', commands: [] },
+  maintenance: {
+    summary: 'Pause new cases, and set how long records are kept',
+    commands: ['/maintenance', '/retention'],
+  },
+  announce: {
+    summary: 'Message teachers in bulk',
+    commands: ['/announce', '/announce_send', '/announce_cancel', '/announcements'],
+  },
+  export: { summary: 'Export case records', commands: ['/export'] },
 };
 
 /**

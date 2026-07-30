@@ -27,6 +27,7 @@ const SUPPORT = '+998 71 000 0000';
 
 const PROGRAM = '997001';
 const LEAD = '997002';
+const SYSTEM = '997003';
 
 const TEACHER = '997101';
 const OTHER_TEACHER = '997102';
@@ -74,7 +75,8 @@ describe.skipIf(!TEST_DATABASE_URL)('/revoke and /restore', () => {
     await db.execute(sql`
       INSERT INTO staff (telegram_id, name, role, queue, regions, active) VALUES
         (${PROGRAM}, 'Programme Manager', 'Program', 'All', ARRAY[]::text[], true),
-        (${LEAD},    'Regional Lead',     'Lead',    'All', ARRAY[]::text[], true)
+        (${LEAD},    'Regional Lead',     'Lead',    'All', ARRAY[]::text[], true),
+        (${SYSTEM},  'System Admin',      'System',  'All', ARRAY[]::text[], true)
     `);
     await db.execute(sql`
       INSERT INTO roster_entries (identifier, name, region, active) VALUES
@@ -280,6 +282,120 @@ describe.skipIf(!TEST_DATABASE_URL)('/revoke and /restore', () => {
 
       expect(await run(`/restore ${TEACHER}`, LEAD)).toMatch(/rank/i);
       expect(await canUseBot(TEACHER)).toBe(false);
+    });
+  });
+
+  /**
+   * `/forget` — Task 64.
+   *
+   * Here rather than in its own file because it is the third command about a
+   * teacher's access, and the thing worth reading is how it differs from the two
+   * above it: `/revoke` is undone by `/restore`, and this is undone by nothing.
+   */
+  describe('/forget', () => {
+    const nameOf = async (chatId: string): Promise<string | null> => {
+      const rows = await db.execute<{ name: string | null }>(
+        sql`SELECT name FROM teachers WHERE chat_id = ${chatId}`,
+      );
+      return rows.rows[0]?.name ?? null;
+    };
+
+    it('explains and changes nothing without the confirmation word', async () => {
+      const body = await run(`/forget ${TEACHER}`, SYSTEM);
+
+      expect(body).toMatch(/nothing has changed/i);
+      expect(body).toMatch(/no undo/i);
+      expect(await nameOf(TEACHER)).toBe('Revoke Tester');
+    });
+
+    it('states what it cannot remove, before it is run and after', async () => {
+      // D44. Whoever types this is the person who then tells a teacher their
+      // data has been removed, and they must be able to say what that means.
+      for (const body of [
+        await run(`/forget ${TEACHER}`, SYSTEM),
+        await run(`/forget ${TEACHER} FORGET`, SYSTEM),
+      ]) {
+        expect(body).toMatch(/chat id/i);
+        expect(body).toMatch(/retention/i);
+      }
+    });
+
+    it('anonymises the person and keeps the case history', async () => {
+      // Design decision 8: the problem they reported is the record that stays;
+      // the person is what goes.
+      await createCase(db, { chatId: TEACHER, category: CASE_CATEGORY.VISA, detail: 'visa refused' });
+
+      const body = await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+
+      expect(body).toMatch(/has been removed/i);
+      expect(await nameOf(TEACHER)).toBeNull();
+      expect(await canUseBot(TEACHER)).toBe(false);
+
+      const cases = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM cases WHERE teacher_chat_id = ${TEACHER}`,
+      );
+      expect(Number(cases.rows[0]?.n)).toBe(1);
+    });
+
+    it('deletes their own messages, which are not case history', async () => {
+      await teacherTypes('a question I typed into the bot');
+      const body = await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+
+      expect(body).toMatch(/log entr/i);
+
+      const rows = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM messages WHERE chat_id = ${TEACHER}`,
+      );
+      expect(Number(rows.rows[0]?.n)).toBe(0);
+    });
+
+    it('reports the open cases, as /revoke does', async () => {
+      // R5 and R32. Those cases stay open and stay visible, with no name on
+      // them, and somebody has to finish them.
+      await createCase(db, { chatId: TEACHER, category: CASE_CATEGORY.VISA, detail: 'visa refused' });
+
+      expect(await run(`/forget ${TEACHER} FORGET`, SYSTEM)).toMatch(/1 open case/i);
+    });
+
+    it('records who did it, in the table that is never pruned', async () => {
+      await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+
+      expect(await auditRowsFor(TEACHER)).toContainEqual({
+        action: 'TEACHER_FORGOTTEN',
+        actor: SYSTEM,
+      });
+    });
+
+    it('tells "already removed" apart from "no such teacher"', async () => {
+      // Departure 3 of this stage. Reporting the latter for somebody removed
+      // last month sends an operator looking for a row behaving correctly.
+      await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+
+      const again = await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+      expect(again).toMatch(/already removed/i);
+      expect(again).not.toMatch(/no teacher with chat id/i);
+
+      expect(await run('/forget 404404 FORGET', SYSTEM)).toMatch(/no teacher with chat id/i);
+    });
+
+    it('records nothing the second time', async () => {
+      await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+      await run(`/forget ${TEACHER} FORGET`, SYSTEM);
+
+      const rows = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM audit_log WHERE action = 'TEACHER_FORGOTTEN'`,
+      );
+      expect(Number(rows.rows[0]?.n)).toBe(1);
+    });
+
+    it('is refused to a Program member, naming System', async () => {
+      // The cost D44 accepted, stated as a test: a Support member who takes the
+      // request cannot action it, and neither can the rank that can revoke.
+      const body = await run(`/forget ${TEACHER} FORGET`, PROGRAM);
+
+      expect(body).toMatch(/rank/i);
+      expect(body).toMatch(/System/);
+      expect(await nameOf(TEACHER)).toBe('Revoke Tester');
     });
   });
 });

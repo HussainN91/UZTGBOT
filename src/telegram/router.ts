@@ -36,6 +36,8 @@ import {
   URGENT_CASE_CATEGORY,
   caseTopicByKey,
 } from '../config/constants.js';
+import { PRIVACY_NOTICE_VERSION } from '../config/privacy.js';
+import { parsePeriodsField, renderPeriodsField, requiresReconsent } from '../config/retention.js';
 import { isMaintenanceMode, retentionPeriods } from '../config/settings.js';
 import { fileUrgentCase, checkUrgentCode } from '../cases/urgent.js';
 import { TeacherNotVerifiedError, createCase } from '../cases/service.js';
@@ -43,6 +45,7 @@ import { NO_NOTIFICATION, notifyNewCase, type NotificationOutcome } from '../cas
 import { clearState, loadState, saveState, type ConversationState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
 import { logInteraction } from '../log/interactions.js';
+import { privacyAcceptance, recordAcceptance } from '../teachers/privacy.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { verifyIdentifier } from '../teachers/verify.js';
 import type { Alert } from '../sync/alerts.js';
@@ -68,14 +71,18 @@ import {
   helpReply,
   mainMenuReply,
   privacyReply,
+  reconsentReply,
   regionCheckReply,
+  regionManagerReply,
   signInPromptReply,
 } from './handlers/menu.js';
+import { type TelegramLookup, regionManagerFor } from '../staff/repository.js';
 import {
   confirmRegion,
   flagRegionMismatch,
   markRegionAsked,
   regionCheckDue,
+  regionFor,
 } from '../teachers/region.js';
 import {
   urgentCaseEscalatedReply,
@@ -116,6 +123,21 @@ export interface OutgoingMessage {
    * always the reply to whoever wrote in, and `deliver` says so.
    */
   readonly purpose?: string;
+  /**
+   * A file to send instead of a plain message, with `text` as its caption.
+   *
+   * Returned rather than sent, exactly as every message here is, so that it
+   * leaves after the transaction commits — an export that went out and then
+   * rolled back would be a file in somebody's chat with no audit row behind it.
+   *
+   * Held in memory and never written to disk (`sendDocument` says why). `/export`
+   * is the only thing that sets this, and D24 keeps the opposite direction
+   * closed: the bot sends a file and never accepts one.
+   */
+  readonly document?: {
+    readonly filename: string;
+    readonly contents: string;
+  };
 }
 
 /**
@@ -134,6 +156,21 @@ export interface RouterOutcome {
 export interface RouterDeps {
   /** Checked at start-up; the bot refuses to run with a placeholder. */
   readonly supportContact: string;
+  /**
+   * The one Telegram read the router makes, for `/username` (D47).
+   *
+   * Optional, and the absence is safe rather than degraded: `/username` refuses
+   * to write an unverified handle and says so. A published handle that was never
+   * checked is the exact failure R33 is about — it degrades towards 1,800
+   * teachers being pointed at a stranger — so "cannot check, wrote nothing" is
+   * the only acceptable behaviour when the lookup is missing.
+   *
+   * It is a *read*, not a send, which is why it may happen inside the
+   * transaction. The lock it holds for the duration is the staff member's own
+   * chat lock, so the only person waiting on it is the person who typed the
+   * command.
+   */
+  readonly telegram?: TelegramLookup;
 }
 
 /**
@@ -829,6 +866,17 @@ async function routeCallback(
       return chooseCaseTopic(db, update.chatId, first, deps);
 
     /**
+     * The re-consent accept button — D32.
+     *
+     * Safe to receive from a chat that was never gated, or gated an hour ago and
+     * still has the button in its scrollback: the payload is compared against
+     * what is current, and anything that does not match shows the notice again
+     * instead of recording something.
+     */
+    case CALLBACK.PRIVACY_ACCEPTED:
+      return acceptPrivacyNotice(db, update.chatId, decoded.parts, state, deps);
+
+    /**
      * D21's two answers. Neither writes a region, and that is the decision.
      *
      * Both are safe to receive from a chat that was never asked, or asked a year
@@ -882,16 +930,51 @@ async function routeMenu(
     case MENU_ACTION.FAQ:
       return only(chatId, faqHubReply());
 
+    /**
+     * Deliberately behind neither gate — Q2, step 7.
+     *
+     * "Who do I call?" is a question from somebody who is not in the middle of
+     * anything, and often from somebody who cannot sign in and needs a person to
+     * say so to. Gating it would answer that teacher with the sign-in prompt,
+     * which is the one answer that does not help. An unverified chat has no
+     * region, so `regionManagerFor` returns null and they get the support
+     * contact — the same thing they had before this existed.
+     *
+     * The region is resolved through `regionFor`, never `teachers.region` (R12):
+     * that column is the snapshot taken at sign-in, and a teacher shown last
+     * year's manager is worse than a teacher shown nobody.
+     */
+    case MENU_ACTION.MY_MANAGER:
+      return only(
+        chatId,
+        regionManagerReply(
+          await regionManagerFor(db, await regionFor(db, chatId)),
+          deps.supportContact,
+        ),
+      );
+
+    /**
+     * The three gated actions, and the two gates in front of each — D32.
+     *
+     * `requireReconsent` sits immediately behind `requireSignIn` and returns the
+     * same `RouterOutcome | null`, so a fourth action added later inherits both
+     * by copying one line rather than by remembering a rule. The FAQ is
+     * deliberately absent from this list: browsing has always been open, and
+     * maintenance mode leaves it running for the same reason.
+     */
     case MENU_ACTION.CHECK_CASE:
       return (await requireSignIn(db, chatId, MENU_ACTION.CHECK_CASE, deps))
+        ?? (await requireReconsent(db, chatId, MENU_ACTION.CHECK_CASE, deps))
         ?? only(chatId, await checkMyCaseReply(db, chatId));
 
     case MENU_ACTION.CONTACT_SUPPORT:
       return (await requireSignIn(db, chatId, MENU_ACTION.CONTACT_SUPPORT, deps))
+        ?? (await requireReconsent(db, chatId, MENU_ACTION.CONTACT_SUPPORT, deps))
         ?? only(chatId, await startCase(db, chatId, deps));
 
     case MENU_ACTION.URGENT_CASE:
       return (await requireSignIn(db, chatId, MENU_ACTION.URGENT_CASE, deps))
+        ?? (await requireReconsent(db, chatId, MENU_ACTION.URGENT_CASE, deps))
         ?? only(chatId, await startUrgent(db, chatId, deps));
 
     default:
@@ -935,6 +1018,125 @@ async function requireSignIn(
 }
 
 /**
+ * Ask a signed-in teacher to read the notice again, when the promise has moved.
+ *
+ * Returns null when nothing is owed, so the caller carries on — the same shape
+ * as `requireSignIn`, and it is called from the same three places for the same
+ * reason.
+ *
+ * **It never gates an unverified chat.** They have accepted nothing and are
+ * about to be shown the notice by the sign-in prompt, which is the
+ * acknowledgement; two notices in a row is one notice nobody reads. In practice
+ * `requireSignIn` has already returned by then, and this is the second guard
+ * saying so where it can be read.
+ *
+ * The rule itself is in `requiresReconsent` and is deliberately not restated
+ * here: it is asymmetric — a lengthened period asks, a shortened one does not —
+ * and a second expression of it would eventually disagree with the first.
+ */
+async function requireReconsent(
+  db: Database,
+  chatId: string,
+  resumeAction: string,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const periods = await retentionPeriods(db);
+  const current = { version: PRIVACY_NOTICE_VERSION, periods };
+
+  const accepted = await privacyAcceptance(db, chatId);
+  if (!requiresReconsent(accepted, current)) return null;
+
+  await saveState(db, chatId, { kind: 'AwaitingPrivacyAcceptance', resumeAction });
+
+  return only(
+    chatId,
+    reconsentReply(
+      deps.supportContact,
+      periods,
+      PRIVACY_NOTICE_VERSION,
+      renderPeriodsField(periods),
+    ),
+  );
+}
+
+/**
+ * The accept button — the one write this gate makes.
+ *
+ * **A mismatch shows the notice again rather than recording anything** (R20). A
+ * period is a settings row a System member can change while a teacher is
+ * reading, so the version and the numbers travel in the payload and are compared
+ * against what is current at the moment of the tap. Recording an acceptance for
+ * text the teacher never saw is worse than one extra tap — the whole value of
+ * this record is that it says a named teacher confirmed a specific version on a
+ * specific date.
+ *
+ * Nothing is sent from in here: the acceptance and the resume are both computed
+ * inside the caller's transaction and delivered after it commits, the same rule
+ * as everything else in this file.
+ */
+async function acceptPrivacyNotice(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome> {
+  const periods = await retentionPeriods(db);
+  const resumeAction =
+    state?.kind === 'AwaitingPrivacyAcceptance' ? state.resumeAction : undefined;
+
+  const shownVersion = parts[0];
+  const shownPeriods = parts[1] === undefined ? null : parsePeriodsField(parts[1]);
+
+  /**
+   * Deep equality on three numbers, written out rather than compared as JSON.
+   * `null` is a real value here — "kept indefinitely" — and every shortcut that
+   * treats it as absent gets this wrong in the direction that records an
+   * acceptance nobody gave.
+   */
+  const unchanged =
+    shownVersion === PRIVACY_NOTICE_VERSION &&
+    shownPeriods !== null &&
+    shownPeriods.caseDays === periods.caseDays &&
+    shownPeriods.urgentCaseDays === periods.urgentCaseDays &&
+    shownPeriods.messageDays === periods.messageDays;
+
+  if (!unchanged) {
+    await saveState(db, chatId, {
+      kind: 'AwaitingPrivacyAcceptance',
+      ...(resumeAction !== undefined ? { resumeAction } : {}),
+    });
+    return only(
+      chatId,
+      reconsentReply(
+        deps.supportContact,
+        periods,
+        PRIVACY_NOTICE_VERSION,
+        renderPeriodsField(periods),
+      ),
+    );
+  }
+
+  /**
+   * A chat with no teacher row cannot accept anything, and must not be told it
+   * did. `recordAcceptance` reports whether it wrote, so this is answered by the
+   * database rather than by assuming the gate ran first.
+   */
+  if (!(await recordAcceptance(db, chatId, PRIVACY_NOTICE_VERSION, periods))) {
+    await clearState(db, chatId);
+    return only(chatId, mainMenuReply());
+  }
+
+  await clearState(db, chatId);
+
+  const resumed = await resumeAfterSignIn(db, chatId, resumeAction, deps);
+  return only(chatId, {
+    text: `✅ Thank you.\n\n${resumed.text}`,
+    ...(resumed.keyboard !== undefined ? { keyboard: resumed.keyboard } : {}),
+  });
+}
+
+/**
  * Maintenance mode stops new cases and nothing else.
  *
  * A teacher looking up an answer or checking a case they already have is not
@@ -972,7 +1174,18 @@ async function chooseCaseTopic(
   const choice = caseTopicByKey(key);
   if (choice === null) return only(chatId, caseTopicPromptReply());
 
-  const gate = await requireSignIn(db, chatId, MENU_ACTION.CONTACT_SUPPORT, deps);
+  /**
+   * Both gates again, and not merely for symmetry.
+   *
+   * A teacher's scrollback keeps every button they were ever sent, so a topic
+   * button from before the notice changed is a live route into filing a case
+   * that never passes through the menu action. Gating only `MENU:CONTACT_SUPPORT`
+   * would leave that route open — which is the same class of hole as a second
+   * door into sign-in, found once already in `startReply`.
+   */
+  const gate =
+    (await requireSignIn(db, chatId, MENU_ACTION.CONTACT_SUPPORT, deps))
+    ?? (await requireReconsent(db, chatId, MENU_ACTION.CONTACT_SUPPORT, deps));
   if (gate !== null) return gate;
 
   if (await isMaintenanceMode(db)) {

@@ -51,6 +51,8 @@ export const MENU_ACTION = {
   CHECK_CASE: 'CHECK_CASE',
   CONTACT_SUPPORT: 'CONTACT_SUPPORT',
   URGENT_CASE: 'URGENT_CASE',
+  /** "Who covers my region?" — Q2. Deliberately not behind the sign-in gate. */
+  MY_MANAGER: 'MY_MANAGER',
 } as const;
 
 const HOME_BUTTON: InlineButton = {
@@ -96,6 +98,20 @@ export function mainMenuKeyboard(): InlineKeyboard {
     {
       text: '🚨 Urgent Case',
       callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE),
+    },
+  ]);
+  /**
+   * Last, and below Urgent Case, on purpose (Q2, step 7).
+   *
+   * A teacher who does not know who to call is a teacher who is not in the
+   * middle of anything, so this does not need to compete with the two buttons
+   * that file work. Putting it above them would move traffic out of the system
+   * that records it, which is R34's cost paid for nothing.
+   */
+  rows.push([
+    {
+      text: '👤 Who covers my region?',
+      callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.MY_MANAGER),
     },
   ]);
   return rows;
@@ -153,7 +169,7 @@ export function backToMenuKeyboard(): InlineKeyboard {
  * There is deliberately no third button and no list of regions. Region decides
  * which staff receive a teacher's emergency, so a picker is a menu of whose
  * problem this becomes, and a wrong tap sends an urgent case to the wrong
- * province. The teacher is the best source of the signal and the worst source of
+ * region. The teacher is the best source of the signal and the worst source of
  * the record: they report, and a manager makes the change with `/region`.
  *
  * No Main Menu button either, and that is not an oversight. This keyboard hangs
@@ -165,6 +181,30 @@ export function regionCheckKeyboard(): InlineKeyboard {
   return [
     [{ text: '✅ Yes, still right', callback_data: encodeCallback(CALLBACK.REGION_CONFIRMED) }],
     [{ text: '📍 No, I have moved', callback_data: encodeCallback(CALLBACK.REGION_MOVED) }],
+  ];
+}
+
+/**
+ * One button under the re-consent notice — D32.
+ *
+ * **One button, and no "no thanks".** That is not a dark pattern: the teacher
+ * can simply not tap it, and everything they could do without accepting — the
+ * answer bank, `/privacy`, `/help`, `/start` — stays exactly where it was. A
+ * decline button would have to *do* something, and the only thing it could do is
+ * end their access, which is a decision for a person and not for a tap.
+ *
+ * The version and the periods travel in the payload so that a settings change
+ * between this being sent and this being tapped shows the notice again rather
+ * than recording an acceptance for text the teacher never saw (R20).
+ */
+export function privacyAcceptKeyboard(version: string, periodsField: string): InlineKeyboard {
+  return [
+    [
+      {
+        text: '✅ I have read this',
+        callback_data: encodeCallback(CALLBACK.PRIVACY_ACCEPTED, version, periodsField),
+      },
+    ],
   ];
 }
 

@@ -16,7 +16,9 @@ import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { URGENT_CODE_ALPHABET, URGENT_CODE_LENGTH } from '../../config/constants.js';
 import { generateUrgentCode } from '../../cases/urgent.js';
-import { clearSettingsCache, isMaintenanceMode } from '../../config/settings.js';
+import { PRIVACY_NOTICE_VERSION, retentionParagraph } from '../../config/privacy.js';
+import { recordAcceptance } from '../../teachers/privacy.js';
+import { clearSettingsCache, isMaintenanceMode, retentionPeriods } from '../../config/settings.js';
 import type { Database } from '../../db/index.js';
 import * as schema from '../../db/schema.js';
 import { withChatLock } from '../../conversation/lock.js';
@@ -76,6 +78,19 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
       INSERT INTO teachers (chat_id, identifier, name, region, verification_state)
       VALUES (${TEACHER}, ${IDENTIFIER}, 'Ops Test Teacher', 'Tashkent', 'Verified')
     `);
+
+    /**
+     * This teacher has accepted the current notice, because every `Verified`
+     * teacher has — `bindTeacher` writes the version and the periods as part of
+     * signing in, so a verified row with no acceptance is one this system cannot
+     * produce.
+     *
+     * Without it the re-consent gate (D32) stands in front of Urgent Case, and
+     * the tests below about `/maintenance` and urgent codes would be measuring
+     * the privacy notice instead. That is the gate working; this is the fixture
+     * catching up with it.
+     */
+    await recordAcceptance(db, TEACHER, PRIVACY_NOTICE_VERSION, await retentionPeriods(db));
   });
 
   afterAll(async () => {
@@ -250,6 +265,173 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
 
       const rows = await db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM urgent_codes`);
       expect(Number(rows.rows[0]?.n)).toBe(0);
+    });
+  });
+
+  describe('/retention', () => {
+    const periodOf = async (key: string): Promise<string | null> => {
+      const rows = await db.execute<{ value: string }>(
+        sql`SELECT value FROM settings WHERE key = ${key}`,
+      );
+      return rows.rows[0]?.value ?? null;
+    };
+
+    it('reports all three and changes nothing', async () => {
+      const body = await run('/retention');
+
+      expect(body).toMatch(/retention periods/i);
+      expect(body).toMatch(/resolved cases/i);
+      expect(body).toMatch(/urgent or critical/i);
+      expect(body).toMatch(/interaction log/i);
+
+      const rows = await db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM settings`);
+      expect(Number(rows.rows[0]?.n)).toBe(0);
+    });
+
+    it('says in so many words that an unset period deletes nothing', async () => {
+      // D30's consequence. At launch, before the runbook's insert has been run,
+      // the job runs nightly and deletes nothing — which is the safe direction
+      // and looks exactly like a job that does not work. If the command shows a
+      // blank there, the first System member to read it reports a fault.
+      const body = await run('/retention');
+
+      expect(body).toMatch(/not set/i);
+      expect(body).toMatch(/is being deleted/i);
+    });
+
+    it('quotes the paragraph the privacy notice will actually show', async () => {
+      // Not a second description of the periods written for staff. The point of
+      // generating the notice is that there is one copy of this text, and a
+      // command that paraphrased it would drift on the first wording change.
+      await run('/retention case 7');
+      const body = await run('/retention');
+
+      expect(body).toContain(retentionParagraph({ caseDays: 7, urgentCaseDays: null, messageDays: null })[1]!);
+    });
+
+    it('sets one period and leaves the other two alone', async () => {
+      const body = await run('/retention case 7');
+
+      expect(body).toContain('7 days');
+      expect(await periodOf('CASE_RETENTION_DAYS')).toBe('7');
+      expect(await periodOf('URGENT_CASE_RETENTION_DAYS')).toBeNull();
+      expect(await periodOf('MESSAGE_RETENTION_DAYS')).toBeNull();
+    });
+
+    it('refuses zero rather than reading it as “delete everything closed”', async () => {
+      // The dangerous value, and one keystroke from 7. parsePeriod decides, so
+      // the command and the job cannot disagree about what a bad value means.
+      const body = await run('/retention case 0');
+
+      expect(body).toMatch(/not a number of days/i);
+      expect(body).toMatch(/zero is refused/i);
+      expect(await periodOf('CASE_RETENTION_DAYS')).toBeNull();
+    });
+
+    it('refuses a word and restates the current value', async () => {
+      await run('/retention case 7');
+      const body = await run('/retention case abc');
+
+      expect(body).toMatch(/not a number of days/i);
+      expect(body).toContain('7 days');
+      expect(await periodOf('CASE_RETENTION_DAYS')).toBe('7');
+    });
+
+    it('refuses a class it does not recognise rather than guessing', async () => {
+      // `urgent` and `case` govern periods twenty-five times apart. A fuzzy match
+      // that resolved a typo to the wrong one would delete six months of
+      // emergency cases in a week.
+      const body = await run('/retention urgnet 180');
+
+      expect(body).toMatch(/do not understand/i);
+      expect(await periodOf('URGENT_CASE_RETENTION_DAYS')).toBeNull();
+    });
+
+    it('warns that lengthening asks 1,800 teachers to read the notice again', async () => {
+      // R20. The write still happens — it is a System member's decision — but
+      // they should not learn its cost from the outbound message count.
+      await run('/retention case 7');
+      const body = await run('/retention case 30');
+
+      expect(body).toMatch(/1,800/);
+      expect(body).toMatch(/privacy notice again/i);
+      expect(await periodOf('CASE_RETENTION_DAYS')).toBe('30');
+    });
+
+    it('does not warn when a period is shortened', async () => {
+      // D28: deleting sooner than promised breaks no commitment to anybody.
+      await run('/retention case 30');
+      const body = await run('/retention case 7');
+
+      expect(body).not.toMatch(/1,800/);
+    });
+
+    it('does not warn when a period is set for the first time', async () => {
+      // Unset means kept indefinitely, which is the longest period there is — so
+      // seeding all three at launch is a shortening and asks nobody anything.
+      // The stage's one re-consent comes from the wording bump instead.
+      expect(await run('/retention case 7')).not.toMatch(/1,800/);
+      expect(await run('/retention urgent 180')).not.toMatch(/1,800/);
+      expect(await run('/retention messages 3')).not.toMatch(/1,800/);
+    });
+
+    it('records who changed what, from what, to what', async () => {
+      // D18. "Who shortened this to one day, and when" is the question.
+      await run('/retention case 7');
+      await run('/retention case 30');
+
+      const rows = await db.execute<{
+        actor: string;
+        action: string;
+        subject: string;
+        detail: { from: number | null; to: number };
+        // `at`, never `id`. The primary key is a random uuid, so ordering by it
+        // is arbitrary — this assertion passed once by luck before it was
+        // noticed. Each command is its own transaction, so `at` really does
+        // separate them.
+      }>(sql`SELECT actor, action, subject, detail FROM audit_log ORDER BY at`);
+
+      expect(rows.rows).toEqual([
+        {
+          actor: SYSTEM,
+          action: 'RETENTION_SET',
+          subject: 'CASE_RETENTION_DAYS',
+          detail: { from: null, to: 7 },
+        },
+        {
+          actor: SYSTEM,
+          action: 'RETENTION_SET',
+          subject: 'CASE_RETENTION_DAYS',
+          detail: { from: 7, to: 30 },
+        },
+      ]);
+    });
+
+    it('records nothing when the value is already what was typed', async () => {
+      await run('/retention case 7');
+      expect(await run('/retention case 7')).toMatch(/already kept/i);
+
+      const rows = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM audit_log WHERE action = 'RETENTION_SET'`,
+      );
+      expect(Number(rows.rows[0]?.n)).toBe(1);
+    });
+
+    it('takes effect immediately, because setSetting drops the cached value', async () => {
+      // The same property /maintenance depends on. The confirmation a System
+      // member reads has to be the value that was written, not a minute-old one.
+      await run('/retention case 7');
+      expect(await retentionPeriods(db)).toEqual({
+        caseDays: 7,
+        urgentCaseDays: null,
+        messageDays: null,
+      });
+    });
+
+    it('is not available below System', async () => {
+      // A period governs a deletion with no undo.
+      expect(await run('/retention case 7', SUPPORT_MEMBER)).toMatch(/rank/i);
+      expect(await periodOf('CASE_RETENTION_DAYS')).toBeNull();
     });
   });
 

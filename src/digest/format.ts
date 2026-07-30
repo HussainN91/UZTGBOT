@@ -172,6 +172,51 @@ export function chaseExhaustedMessage(row: StaffCaseRow): string {
   );
 }
 
+/**
+ * An announcement, as the teacher receives it.
+ *
+ * The header is not decoration. A message arriving unasked from a bot a teacher
+ * signed into months ago needs to say who is speaking, or it reads as spam and
+ * the next one is not read either — and the last line matters more: a broadcast
+ * is the one message in this system nobody can reply to usefully, so it has to
+ * name the route that does work.
+ *
+ * The same function renders the preview `/announce` shows the sender, so what
+ * they approve is what is delivered, character for character. Two renderings of
+ * one message is how a preview stops being a preview.
+ */
+function announcementBody(content: string): string {
+  return [
+    '📣 *A message from the Ministry*',
+    '',
+    content.trim(),
+    '',
+    'This was sent to every teacher it applies to. Replying here will not reach',
+    'the sender — use Contact Support if you need something.',
+  ].join('\n');
+}
+
+export function announcementMessage(content: string): string {
+  return clamp(announcementBody(content));
+}
+
+/**
+ * How many characters too long this announcement is, or 0 if it fits.
+ *
+ * Separate from `announcementMessage` because **the clamp hides exactly the
+ * problem `/announce` needs to see.** Every other message in this file is built
+ * from rows the system controls and clamping is the right last resort; an
+ * announcement is free text somebody typed, so the same clamp would quietly
+ * truncate a ministry-wide message and deliver it to 1,800 people ending in
+ * "… cut short". A guard written against the clamped length can never fire —
+ * that was found by running it, not by reading it.
+ *
+ * It reads the same builder the message does, so a wording change moves both.
+ */
+export function announcementOverBy(content: string): number {
+  return Math.max(0, announcementBody(content).length - TELEGRAM_MESSAGE_MAX_CHARS);
+}
+
 export interface AnnouncementOutcome {
   readonly sent: number;
   readonly skipped: number;

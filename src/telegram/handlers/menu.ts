@@ -8,7 +8,19 @@
  */
 import { privacyNotice } from '../../config/privacy.js';
 import type { RetentionPeriods } from '../../config/retention.js';
-import { backToMenuKeyboard, mainMenuKeyboard, regionCheckKeyboard } from '../keyboards.js';
+/**
+ * A type-only import pointing at a layer above this one, which is permitted and
+ * is checked: type imports are erased at compile time, so this file stays free
+ * of the database exactly as its header says. Re-declaring the shape here would
+ * be a second copy of something that has to agree with the query producing it.
+ */
+import type { RegionManager } from '../../staff/repository.js';
+import {
+  backToMenuKeyboard,
+  mainMenuKeyboard,
+  privacyAcceptKeyboard,
+  regionCheckKeyboard,
+} from '../keyboards.js';
 import type { Reply } from '../reply.js';
 
 export function mainMenuReply(): Reply {
@@ -35,7 +47,7 @@ export function regionCheckReply(region: string): Reply {
       `📍 We have you in ${region}.`,
       '',
       'This is how we decide which of our staff sees your case, so it is worth ' +
-        'keeping right — if it is wrong, an urgent case could go to the wrong province.',
+        'keeping right — if it is wrong, an urgent case could go to the wrong region.',
       '',
       'Is it still correct? Nothing changes automatically: if you have moved, one ' +
         'of our staff will check and update it.',
@@ -87,6 +99,97 @@ export function accessEndedReply(supportContact: string): Reply {
     text:
       'Your access to this bot has ended, so it cannot be used from this chat.\n\n' +
       `If you think this is a mistake, contact ${supportContact}.`,
+    keyboard: backToMenuKeyboard(),
+  };
+}
+
+/**
+ * The notice shown again, to a teacher who has already signed in — D31, D32.
+ *
+ * **What changed goes first, in the first two lines.** "Our privacy policy has
+ * been updated" is the wording every teacher has learned to tap past; a teacher
+ * should be able to read how long their case is kept before they decide, and
+ * that is what the notice below is actually about.
+ *
+ * It is one tap and it is only asked when the promise moved — a lengthened
+ * period or a rewritten notice (`requiresReconsent`). Shortening asks nobody
+ * anything, which is why seeding the periods at launch reaches no one.
+ */
+export function reconsentReply(
+  supportContact: string,
+  periods: RetentionPeriods,
+  version: string,
+  periodsField: string,
+): Reply {
+  return {
+    text: [
+      '📋 *We have set how long your information is kept.*',
+      '',
+      'The notice you agreed to said we would tell you when this was decided, and',
+      'ask you to read it again. This is that. Nothing about your cases has changed.',
+      '',
+      '— — —',
+      '',
+      privacyNotice(supportContact, periods),
+    ].join('\n'),
+    keyboard: privacyAcceptKeyboard(version, periodsField),
+  };
+}
+
+/**
+ * Who covers this teacher's region — Q2, D47, and R34.
+ *
+ * **The last two lines are the only control there is** over the cost this
+ * feature was accepted with: a teacher who can message a manager directly will
+ * sometimes do that instead of opening a case, and that work then has no
+ * reference, no queue, no owner, no promised date and no retention rule. Nothing
+ * technical can route a direct message backwards, so the wording sends anything
+ * needing a record back to Contact Support. It has to be in the message rather
+ * than in a plan.
+ *
+ * **`null` says nothing about staffing.** "No manager is assigned to your
+ * region" is an operational fact a teacher can do nothing with, and it is not
+ * theirs to worry about — they get the support contact, which is the same thing
+ * they would have got before this feature existed.
+ *
+ * A manager with no published handle is still named. `null` there means "not
+ * published" rather than "unknown" (D47), and a name plus the support contact is
+ * more than a teacher had yesterday.
+ */
+export function regionManagerReply(
+  manager: RegionManager | null,
+  supportContact: string,
+): Reply {
+  if (manager === null) {
+    return {
+      text: [
+        '📞 *Getting help*',
+        '',
+        `For anything about your recruitment or your placement, contact ${supportContact}.`,
+        '',
+        'To open a case that our staff will track and answer, use Contact Support —',
+        'that is the route that gets you a reference number.',
+      ].join('\n'),
+      keyboard: backToMenuKeyboard(),
+    };
+  }
+
+  const named = manager.name ?? 'Our regional manager';
+
+  return {
+    text: [
+      `👤 *${manager.region}*`,
+      '',
+      manager.telegramUsername === null
+        ? `${named} covers your region.`
+        : `${named} covers your region — @${manager.telegramUsername}`,
+      '',
+      '**Please use Contact Support for anything that needs answering properly.**',
+      'A message sent directly has no case number, is not tracked, and nobody else',
+      'can pick it up if they are away.',
+      '',
+      `For anything else, contact ${supportContact}.`,
+    ].join('\n'),
     keyboard: backToMenuKeyboard(),
   };
 }

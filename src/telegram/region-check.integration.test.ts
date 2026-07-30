@@ -15,9 +15,12 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { CASE_TOPIC_CHOICES } from '../config/constants.js';
+import { PRIVACY_NOTICE_VERSION } from '../config/privacy.js';
+import { retentionPeriods } from '../config/settings.js';
 import { withChatLock } from '../conversation/lock.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
+import { recordAcceptance } from '../teachers/privacy.js';
 import { regionFor } from '../teachers/region.js';
 import { CALLBACK, encodeCallback } from './callback-data.js';
 import { MENU_ACTION } from './keyboards.js';
@@ -96,6 +99,20 @@ describe.skipIf(!TEST_DATABASE_URL)('asking a teacher about their region', () =>
         (${TEACHER},  ${TEACHER_ID},  'The Teacher',      'Tashkent', 'Verified'),
         (${UNPLACED}, ${UNPLACED_ID}, 'Unplaced Teacher', NULL,       'Verified')
     `);
+
+    /**
+     * These teachers have accepted the current notice, because every `Verified`
+     * teacher has — `bindTeacher` writes the version and the periods as part of
+     * signing in, so a verified row with no acceptance is a row this system
+     * cannot produce.
+     *
+     * Without it the re-consent gate (D32) correctly stands in front of Contact
+     * Support and Urgent Case, and every test below about the *region* question
+     * would be measuring the privacy notice instead.
+     */
+    for (const chatId of [TEACHER, UNPLACED]) {
+      await recordAcceptance(db, chatId, PRIVACY_NOTICE_VERSION, await retentionPeriods(db));
+    }
   });
 
   afterAll(async () => {

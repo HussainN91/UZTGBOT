@@ -456,6 +456,21 @@ export const DIGEST_LIST_CAP = 10;
 export const ANNOUNCEMENT_BATCH = 200;
 
 /**
+ * How long the per-recipient delivery rows of a finished announcement are kept.
+ *
+ * A constant rather than a settings key, deliberately (D33). It governs
+ * operational bookkeeping — 1,800 chat ids and a delivery state per broadcast —
+ * and not anything the privacy notice states, so it is not one of the three
+ * periods a teacher is told about. Nine settings is a control panel nobody can
+ * hold in their head; three periods are three sentences.
+ *
+ * After a month, "was this teacher's copy delivered" answers no question anybody
+ * asks. The `announcements` row itself is never pruned: it is the record of what
+ * the ministry told teachers, and it holds no teacher's words.
+ */
+export const ANNOUNCEMENT_RECIPIENT_RETENTION_DAYS = 30;
+
+/**
  * The most rows one export may contain.
  *
  * A cap rather than pagination, for `STAFF_CASE_LIST_CAP`'s reason and one more:

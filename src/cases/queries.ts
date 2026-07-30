@@ -11,10 +11,10 @@
  * Reads only. `updateCase` in `service.ts` remains the one write path.
  */
 import { type SQL, and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import { STAFF_CASE_LIST_CAP } from '../config/constants.js';
+import { EXPORT_ROW_CAP, STAFF_CASE_LIST_CAP } from '../config/constants.js';
 import { SETTING, getSetting } from '../config/settings.js';
 import type { Database } from '../db/index.js';
-import { OPEN_CASE_STATUSES, cases, rosterEntries, teachers } from '../db/schema.js';
+import { CASE_STATUS_ORDER, OPEN_CASE_STATUSES, cases, rosterEntries, teachers } from '../db/schema.js';
 import { type StaffScope, visibleToStaff } from '../staff/visibility.js';
 import type { CaseStatus } from './service.js';
 
@@ -356,6 +356,52 @@ export async function casesExhaustedChasing(
     .orderBy(cases.teacherChasedAt);
 
   return rows as StaffCaseRow[];
+}
+
+export type ExportSelection =
+  | { readonly ok: true; readonly list: StaffCaseList }
+  /** The filter was not a status. `statuses` is what to name back to them. */
+  | { readonly ok: false; readonly statuses: readonly string[] };
+
+/**
+ * Every case the asker can see, up to `EXPORT_ROW_CAP`, for `/export`.
+ *
+ * **Here rather than in the command**, and that is D43 and R28 together. This
+ * module's whole guarantee is that no question asked of it returns a case the
+ * asker may not see, and an export is the largest question anybody asks — a
+ * hand-rolled query in a command file is one `visibleToStaff` away from a Lead
+ * taking every region home in a file.
+ *
+ * `''` is every case including the closed ones, unlike `listCases`. An export is
+ * a report about what has happened, not a work queue, and a report of open cases
+ * only would silently answer a different question from the one asked.
+ *
+ * The total is of everything matching, so the command can say how much is not in
+ * the file. A truncated report that does not say it is truncated is one somebody
+ * plans from.
+ */
+export async function casesForExport(
+  db: Database,
+  scope: StaffScope,
+  filter: string,
+): Promise<ExportSelection> {
+  const wanted = filter.trim().toLowerCase();
+
+  let status: SQL | undefined;
+  if (wanted === '') {
+    status = undefined;
+  } else if (wanted === 'open') {
+    status = inArray(cases.status, [...OPEN_CASE_STATUSES]);
+  } else {
+    const match = CASE_STATUS_ORDER.find((s) => s.toLowerCase() === wanted);
+    if (match === undefined) return { ok: false, statuses: CASE_STATUS_ORDER };
+    status = eq(cases.status, match);
+  }
+
+  const where = and(visibleToStaff(scope), status)!;
+
+  const rows = await scoped(db).where(where).orderBy(desc(cases.createdAt)).limit(EXPORT_ROW_CAP);
+  return { ok: true, list: { cases: rows as StaffCaseRow[], total: await countMatching(db, where) } };
 }
 
 /**

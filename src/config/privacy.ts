@@ -49,6 +49,25 @@ function keptFor(what: string, days: number | null): string {
 }
 
 /**
+ * The retention paragraph, as the teacher reads it.
+ *
+ * Exported because `/retention` shows a System member what the notice will say
+ * before and after they change a period. That has to be *this* text and not a
+ * second rendering of the same idea — a command that describes the periods in
+ * its own words is the second copy this whole module exists to prevent, and it
+ * would drift on the first wording change.
+ */
+export function retentionParagraph(periods: RetentionPeriods): string[] {
+  return [
+    'A case stays while it is open, however long that takes. Once it is finished:',
+    keptFor('cases', periods.caseDays),
+    keptFor('cases treated as urgent', periods.urgentCaseDays),
+    keptFor('the messages you send', periods.messageDays),
+    'When a case is deleted, everything written about it goes with it.',
+  ];
+}
+
+/**
  * `supportContact` is validated at start-up and cannot be a placeholder, so the
  * access-and-removal route in the text below is always a real one. That check is
  * what makes it safe to state the route as plainly as this.
@@ -79,11 +98,7 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
     'Ministry, and it is held on a server located in Uzbekistan.',
     '',
     '*How long it is kept*',
-    'A case stays while it is open, however long that takes. Once it is finished:',
-    keptFor('cases', periods.caseDays),
-    keptFor('cases treated as urgent', periods.urgentCaseDays),
-    keptFor('the messages you send', periods.messageDays),
-    'When a case is deleted, everything written about it goes with it.',
+    ...retentionParagraph(periods),
     '',
     'A record of decisions our staff make about access — not your messages — is',
     'kept permanently, so we can always answer who did what.',
