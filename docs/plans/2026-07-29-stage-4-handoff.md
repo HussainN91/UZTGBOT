@@ -8,14 +8,13 @@ which is the plan for the next session. `docs/plans/2026-07-30-stage-5-scheduled
 finished stage and is a record rather than a briefing — its "Where this stands" table names every
 task and its commit.
 
-> ### The next session is a review phase, and it is not a building stage
+> ### ⚠️ The review phase has already been run, in a parallel session, and its work is UNCOMMITTED
 >
-> **It checks this codebase with tools rather than by reading it.** Nothing is built for teachers and
-> no behaviour changes. The plan names the tools, what each one catches that nothing here currently
-> catches, and the order.
+> **Read `docs/plans/2026-07-30-review-phase-findings.md` before touching anything.** All six tasks
+> of the review plan were run on 30 July by a different session. It is finished; it is not
+> committed; and §2a below is the state of the tree.
 >
-> **Nothing is installed without the head of project saying so, tool by tool.** Not a blanket
-> approval. Stated directly on 30 July.
+> **The next building work is Stage 6 — documents.** §8 has it.
 
 > **The filename still says stage 4.** That is historical and deliberate: there is one handoff, it
 > is this file, and it is rewritten in place whatever stage is current. Rename it if you like, but
@@ -44,10 +43,13 @@ turned out to be an environment fault rather than a slow suite.
 **Next: there is no next task in this stage.** The work is Stage 6, and §8 says what is known about
 it.
 
-> ✅ **Everything is committed and the working tree is clean.** Stage 5 landed in five commits, and
-> **each of the four code commits was checked out into a scratch worktree and typechecked on its
-> own** rather than only the tip being verified. That is what §10 asks for and it had not been done
-> that way before.
+> ✅ **Stage 5 is committed.** It landed in five commits, and **each of the four code commits was
+> checked out into a scratch worktree and typechecked on its own** rather than only the tip being
+> verified. That is what §10 asks for and it had not been done that way before.
+>
+> ⚠️ **The working tree is NOT clean.** A parallel session's review-phase work sits on top of
+> `d45b0ae`, uncommitted. §2a is exactly what it is. Do not `git checkout`, and **do not
+> `git add -A`** — you would commit somebody else's work under your own message.
 
 ## 2. Commits, oldest first
 
@@ -65,6 +67,35 @@ Stage 4 ran `d743d72..807284c` and is not re-listed; `git log --oneline d743d72.
 | `18aa4ae` | **Task 70** — the layer rule, enforced by `deps:check` |
 | `a1037a2` | The province→region rename, for the six files it alone touched |
 | `6ff0ac0` | **Task 71** — all three documents, and the regenerated dependency tree |
+
+## 2a. What is uncommitted right now, and whose it is
+
+**None of this is Stage 5 and none of it was written by the session that wrote this document.** It is
+the review phase, run to completion in a parallel session on 30 July.
+
+| Uncommitted | What it is |
+|---|---|
+| `package.json`, `package-lock.json` | Three dev dependencies: **`knip`, `oxlint`, `oxlint-tsgolint`** |
+| `.gitleaks.toml` | New. Secret-scanning configuration, and the findings call it the one thing worth keeping from that task |
+| `src/cases/service.ts`, `src/cases/status.ts` | **Two dead lines removed**, found by knip. Ten insertions, six deletions, and a corrected comment |
+| `docs/plans/2026-07-30-review-phase-findings.md` | The results document. **Read it; it is the briefing for anything tool-related** |
+
+**Verified by that session after its code change:** 1,071 tests across 62 files, 0 failed, 0 skipped;
+typecheck, build and `deps:check` clean. Same totals Stage 5 ended on, so the two-line deletion
+changed nothing.
+
+**Three things about it that need a decision, and they are the reason it is still uncommitted:**
+
+1. **The findings document disagrees with `package.json`.** It says the installed tools are
+   `dependency-cruiser`, `knip` and `squawk-cli`; the tree actually has `knip`, `oxlint` and
+   `oxlint-tsgolint`. The prose further down says dependency-cruiser and squawk were *removed* and
+   oxlint kept, so the summary table near the top is simply stale. **Trust `package.json`, and fix
+   that table.**
+2. **Knip's configuration is not in the repository.** It lived in that session's scratchpad. Knip is
+   the one tool that earned its place, and without its config committed it is worth nothing to the
+   next person. The findings insist the config must use the two-run technique or the result misleads.
+3. **`oxlint` is installed and wired to nothing.** No npm script points at it. The findings say that
+   is a decision rather than an oversight — `npm run lint` is still an alias for `typecheck`.
 
 **On the rename commit, because the next person will wonder why it is only six files.** The rename
 was done *after* the features were written, so in every other file it sits in the same lines as the
@@ -346,36 +377,66 @@ Then prove the **deploy** path against an empty database as well as the incremen
 **Stage 5 is finished, committed and verified. There is no remaining task in it**, and the artifact
 is current at v11. Nothing is owed from the last session.
 
-### The next session is the review phase — `docs/plans/2026-07-30-review-phase-tooling.md`
+### The review phase is DONE — do not run it again
 
-**Read that plan. It is the whole brief.** In summary, so this document is not ambiguous about it:
+`docs/plans/2026-07-30-review-phase-tooling.md` was the plan; **all six of its tasks were run on
+30 July in a parallel session**, and `docs/plans/2026-07-30-review-phase-findings.md` is what they
+found. §2a is what that left in the tree.
 
-**The codebase gets checked with tools, not by reading it.** Five stages have each found faults by
-running things, which worked and does not scale: the suite proves the code does what its tests say,
-and nothing examines the code as a body of work.
+**The short version, so nobody re-opens a closed question.** Six tools were tried and **one earned
+its place: `knip`**, which found two dead lines that five stages of reading had not. `oxlint` works
+on TypeScript 7 including type-aware rules and found little, *which is itself the answer*.
+`dependency-cruiser` was re-tested, answered its one question — **our home-made checker is
+correct** — and was removed. `squawk` was removed because its threat model is migrating a live
+database and this deployment stops the bot first. `repowise` was tried and **not adopted**: its value
+is git intelligence over a mature history, and this history is three days old with one author. It
+becomes useful after six months of real operation, not before.
 
-**Three things a new reader must not get wrong:**
+> **The lesson that came out of it, and it is now the standing rule of this project.** Three of the
+> four tools **initially reported a clean result while examining nothing** — dependency-cruiser
+> printed "no violations" over zero modules twice, for two different reasons, and gitleaks reported
+> "no leaks found" on a directory of planted secrets. **A green tick is a claim about what a tool
+> looked at, not about the code.** Make every tool fail on purpose before believing it.
 
-1. **`repowise` is now permitted, and this phase is where it belongs.** Earlier revisions of this
-   document said *"ignore repowise forever"*, and that was correct when written — it was proposed
-   during a build stage. **Reversed on 30 July 2026 by the head of project**, whose words were that
-   this is the revising and check phase and it is a good time for it. Do not re-raise the old
-   objection.
-2. **`scripts/dependency-tree.mjs` is a suspect, not a control.** It is home-made, it reads imports
-   with two regular expressions, it has no opinion about *exports* at all, and its layer map was
-   written by the same person who wrote the code it checks. **Checking it against an established
-   tool is Task 1**, and if a real tool disagrees with it, the real tool wins.
-3. **Nothing is installed without a yes, tool by tool.** Research, propose, wait.
+**What is left of it is three decisions, not more work** — the stale table, knip's missing config,
+and whether `oxlint` gets wired up. All three are in §2a.
 
-**What the research already found, so nobody redoes it:** there is **no linter** — `npm run lint` is
-an alias for `typecheck`; **nothing checks unused exports**, and there are 505 of them, which is this
-project's signature fault; there is **no CI**; the `coverage` block in `vitest.config.ts` has **no
-provider installed and has never run**; nothing lints the eight migrations; and nothing has ever
-scanned the git history for secrets.
+### Then Stage 6 — documents
 
-**Docker covers none of that.** It gives a real PostgreSQL to test against and a reproducible
-runtime, which is why the integration tests are worth anything. It says nothing whatsoever about
-what was written.
+**This is the next actual building work on the bot**, and more of it is already decided than a new
+reader expects.
+
+**D24 governs it, and D24 reversed a direction.** Documents stay in **Google Forms**. An earlier plan
+had the bot accepting Telegram uploads and that is cancelled — **the bot never accepts, holds or
+stores a file.** `BOT-SPEC.md` §10 and `RUNBOOK.md` Part 6 both still describe the old direction and
+are wrong; Part 6 calls Telegram upload *"the only genuinely new feature in the rebuild"*.
+**Correcting both is part of Stage 6's documentation task, not a fix in passing.**
+
+What is already in place, so the stage adds the missing half rather than a new model:
+
+- **`CASE_CATEGORY.SUBMIT_DOCS` exists** and `queueForCategory` is **total** over it, mapping to
+  `QUEUE.ALL`. Keep it total — the digest and the export must not enumerate categories anywhere.
+- **`sendDocument` exists** (Stage 5, for `/export`) and is deliberately **the only half of document
+  handling in the system**. It must not grow a receive path.
+- **The menu button and the maintenance gate already exist.** `MAINTENANCE_MODE` pauses Submit
+  Documents alongside Contact Support and Urgent Case.
+- **The sync's shape is the model to copy.** A third spreadsheet tab, `FORMS`, synced exactly as
+  `FAQ` and `ROSTER` are — reject a bad row, report it with its row number, apply the rest. That is
+  what makes a half-ready form unable to reach a teacher.
+
+**Two things Stage 6 must not do:**
+
+- **Do not reintroduce the `UNRESOLVED:` sentinel.** `cases.teacher_chat_id` is a non-null foreign
+  key with a digits check, so Apps Script's sentinel cannot be stored here at all. Under D24 nothing
+  produces one either, because **submissions are matched on the roster identifier** — the recruitment
+  email — rather than on a pre-filled chat id. Do not write a branch for a state that is both
+  forbidden and unreachable.
+- **Do not carry `FORM_URLS` or the prefill across.** The `FORMS` tab and roster-email matching
+  replace both entirely.
+
+**Before writing any of it, read `docs/plans/2026-07-29-staff-and-lifecycle-design.md`** for the
+decisions that were taken there and never built — the resignation route in particular, which is the
+other thing waiting on a stage.
 
 ### Then Stage 6, and what is already known about it
 
@@ -498,8 +559,10 @@ a single session before, and the result contradicted itself in three places.
 > briefing.
 
 **2. The current plan's status block and checkboxes**, with a commit hash against anything finished.
-**The current plan is `docs/plans/2026-07-30-review-phase-tooling.md`** — the Stage 5 plan is closed
-and should not be edited again except to correct something that is wrong.
+**Stage 5's plan and the review-phase plan are both closed** and should not be edited again except
+to correct something that is wrong — the stale table in the review findings being the known case.
+**Stage 6 needs a new plan document of its own**, which is the rule: a stage's plan goes in a new
+file, and this handoff is the only document rewritten in place.
 
 **3. The artifact — `https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53`.**
 
