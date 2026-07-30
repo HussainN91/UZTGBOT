@@ -1,6 +1,19 @@
 # MoPSE Teacher Support Bot — Runbook
 
-**Version:** 4.0 · **Date:** 2026-07-30 · Updated after the scheduled-work stage
+**Version:** 4.1 · **Date:** 2026-07-31 · Updated after the documents stage
+
+> **What changed in 4.1, and two of them are new sections you should know exist.**
+>
+> **§5.0 indexes every alarm the bot can send** — all eighteen, quoted exactly as
+> they arrive in the operations chat, with what each means and what to do. Before
+> this, only four could be found in this document by the words you would actually
+> be holding.
+>
+> **§4.18 is how a document form gets published**, step by step, and two of its
+> steps fail silently if you get them wrong.
+>
+> Also: §2.6 gains three things somebody has to set by hand, §1.5 says teachers
+> can now submit documents, and the launch checks gain numbers 13 and 14.
 
 This replaces the Apps Script runbook completely. Nothing in the previous version
 still applies: there is no spreadsheet to set up, no script project, no triggers

@@ -1,6 +1,11 @@
 # MoPSE Teacher Support Bot — System Specification
 
-**Version:** 1.4 · **Date:** 2026-07-30 · **Status:** Pre-launch — updated after the scheduled-work stage of the rebuild
+**Version:** 1.5 · **Date:** 2026-07-31 · **Status:** Pre-launch — updated after the documents stage of the rebuild
+
+> **What changed in 1.5.** §10 is rewritten: document submission is **built**, and
+> the "not built" heading it carried for five stages is gone. §11.0's sync line,
+> §16's deferred list and the non-goals at the top all follow from that. **The
+> rebuild now has no unbuilt planned feature.**
 
 This document describes what the bot is, how it is built, and how every layer
 behaves. It superseded `bot_spec.md`, which described an architecture that was
