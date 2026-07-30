@@ -12,17 +12,26 @@
 
 ---
 
-## ▶ Where this stands — 30 July 2026, first session
+## ▶ Where this stands — 30 July 2026, third session
 
-# 🟡 **Layers 0, 1 and 2 are built and committed. No command and no scheduled job exists yet, so nothing in this stage runs on its own.**
+# 🟢 **STAGE 5 IS COMPLETE. Every task is built, including the optional one, and the whole suite has been run. NOT COMMITTED.**
 
 ```
-922 tests across 56 files, none skipped · typecheck clean · build clean · deps:check clean
+1,071 tests across 62 files · 0 failed · 0 skipped · 277s
+typecheck clean · build clean · deps:check clean · 76 source files · 62 test files
 ```
 
-Verified by a full run against a live database at `cb791f2`, not inferred. The baseline was 778 across 47 files, so this is **+144 tests and +9 files**. The working tree is clean.
+**That number was run, in full, on 30 July.** The earlier figure in this block was never verified and has been replaced rather than carried forward.
 
-**What that means in plain terms:** every rule this stage needs is written and tested, and none of it is reachable by a person or a clock yet. Nothing deletes anything, nothing arrives at seven in the morning, and no teacher sees any change. That is the correct half-way state for a leaves-first build and it is not a half-built feature.
+> ⚠️ **The working tree is dirty.** Tasks 61–71 are uncommitted on top of `787333c`.
+
+**What that means in plain terms:** a System member can set the retention periods, remove a teacher on request and take an export; a Program member can draft an announcement, confirm it, and it reaches 1,800 teachers two hundred a minute with a report at the end; every teacher will be asked to read the privacy notice again, and can ask who covers their region; records are deleted at two in the morning, and the digest and the teacher chase go out at seven.
+
+### Three things this session did that were not tasks
+
+1. **A full suite run, first.** The previous two sessions never completed one. It emerged that **two `vitest` runs from an earlier session were still alive**, frozen while Docker was paused, and woke up when it was resumed — truncating tables under the run in progress. That is the hazard the handoff names, arriving from an unexpected direction: not two runs started deliberately, but one abandoned weeks-old process. Kill stray `node` processes before trusting a run, and **never pipe `vitest` through `head`** — it kills the shell and leaves the run going.
+2. **"Province" is wrong everywhere and is now "region".** Uzbekistan has regions and districts; this bot is concerned with regions only and has no concept of a district. About thirty user-visible strings said "province" while every command a person types says `region:`. Corrected across the code and the three documents.
+3. **Region details are added manually, later.** Confirmed as a decision. `RUNBOOK.md` §2.6 is a new section listing everything a person has to set by hand, and it states the consequence: **an empty region list means every region**, so until the regions are entered every staff member covers the whole country and "who covers my region?" is answered by rank alone.
 
 | Task | What | State |
 |---|---|---|
@@ -41,17 +50,32 @@ Verified by a full run against a live database at `cb791f2`, not inferred. The b
 | 58 | `forgetTeacher` | ✅ `src/teachers/forget.ts` |
 | 59 | The announcement store | ✅ `src/announcements/store.ts`; **needed an enum value** — see below |
 | 60 | Chase queries, and the counter reset | ✅ `queries.ts` + `service.ts`; the reset is inside `updateCase` |
-| 61 | `/retention` | ⬜ |
-| 62 | `/announce` `/announce_send` `/announce_cancel` `/announcements` | ⬜ |
-| 63 | `/export` | ⬜ |
-| 64 | `/forget` | ⬜ |
-| 65 | The teacher's re-consent gate | ⬜ |
-| 66 | Telling a teacher who their regional manager is | ⬜ **Q2 answered yes — name and Telegram username** |
-| 67 | The retention job | ⬜ |
-| 68 | The daily digest job | ⬜ |
-| 69 | The announcement sweeper | ⬜ |
-| 70 | The layer rule, mechanically enforced | ⬜ **droppable** |
-| 71 | Correct every document this stage makes wrong | ⬜ |
+| 61 | `/retention` | ✅ *uncommitted* — `commands/ops.ts`; quotes the notice's own paragraph |
+| 62 | `/announce` `/announce_send` `/announce_cancel` `/announcements` | ✅ *uncommitted* — `commands/announce.ts` |
+| 63 | `/export` | ✅ *uncommitted* — same file; `casesForExport` added to `queries.ts` |
+| 64 | `/forget` | ✅ *uncommitted* — `commands/staff.ts`; `teacher.forget` at System |
+| 65 | The teacher's re-consent gate | ✅ *uncommitted* — **also gates the topic-button route**, see departures |
+| 66 | Telling a teacher who their regional manager is | ✅ *uncommitted* — plus `/username`, verified on set and daily. **One tie-break left open, see below** |
+| 67 | The retention job | ✅ *uncommitted* — `0 21 * * *` via `tashkentCron(2)` |
+| 68 | The daily digest job | ✅ *uncommitted* — `0 2 * * *` via `tashkentCron(7)`, asserted in a test |
+| 69 | The announcement sweeper | ✅ *uncommitted* — `worker/tasks/announcements.ts`; 16 tests |
+| 70 | The layer rule, mechanically enforced | ✅ *uncommitted* — **built, not dropped**; `scripts/dependency-tree.mjs` |
+| 71 | Correct every document this stage makes wrong | ✅ *uncommitted* — all three, plus the tree and this table |
+
+### The one question this session opened — answered, and the answer stands
+
+**Who is named as a teacher's regional manager when nobody is scoped to their region.** Built to prefer **somebody who names the region explicitly, then the lowest rank, then the id**. Put to the head of project on 30 July and left as built.
+
+**What they added, and it changes how the answer reads rather than the code:** the regions are being entered **manually, later**. So on the day this ships, nobody names any region explicitly, every staff member covers everywhere, and the tie-break that actually decides is **rank** — a teacher is shown the most junior person who can act on cases, wherever they sit. That is a reasonable answer and not the right one, and it becomes the right one the moment the regions are entered. Written into `RUNBOOK.md` §2.6 so the first person to notice reads it as expected rather than as a fault.
+
+### Six faults found by building, this session — all by running, none by reading
+
+1. **The over-long announcement guard could never fire.** `announcementMessage` clamps to Telegram's limit, so a check against the clamped length always passed — an oversized announcement would have been silently truncated and delivered to 1,800 people ending in "… cut short". `announcementOverBy` measures the un-clamped length instead.
+2. **`clearUsername` always reported "nothing was published".** It read the old handle from `RETURNING` on the `UPDATE` that had just nulled it.
+3. **Importing anything from `worker/main.ts` started a second worker.** `main()` ran at module scope; `CRONTAB` had been exported since stage 1 and nothing had ever imported it.
+4. **`ORDER BY id` on `audit_log` is meaningless** — the key is a random uuid. A test passed once by luck.
+5. **Five existing tests built teachers the real system cannot produce** — `Verified` with no recorded privacy acceptance. The gate correctly stopped them; the fixtures were wrong.
+6. **Two of this plan's own test sketches were impossible** — one asserted "no `@`" in a message carrying `support@mopse.uz`, the other used a Lead to test `/export`, which floors at Program.
 
 ### Two faults found by building, both by running things rather than by reading
 
@@ -1218,6 +1242,12 @@ Not optional. One pass, at the end, exactly as Task 41 was — because a documen
   - **new — taking an export**, and the rule that it contains no teacher's words, with D43's reason so nobody adds a column
   - **§4.7 — stays deleted, and the runbook now says it was offered and declined** (Q1). Not "removed because the log is short" but *"a nightly roll-up would have kept these two signals as counts; it was considered on 30 July 2026 and not wanted."* A deletion that reads as an oversight is one somebody restores by accident, and a restored §4.7 returns nothing and looks like good news
   - **new — publishing a manager's Telegram handle.** `/username`, that it is the staff member's own to set, that the bot checks it daily, and what happens when the check fails — because the first person to meet that will be whoever is named in the alarm
+  - **new — one section listing everything that has to be set by hand**, gathered in one place rather than scattered through the procedures that need it. Asked for directly on 30 July, and the reason is that every one of these is invisible when it is missing: the software works, and answers nothing. It must name at least
+    - **the regions on each staff row** — added manually, later, and until they are every staff member covers every region, so the person a teacher is shown is decided by rank alone
+    - the three retention periods, or nothing is deleted and the notice says so
+    - the published Telegram handles (`/username`), which each staff member sets for themselves
+    - the operations chat id, the support contact, and the two System members
+  - **the word is *region*, not *province*.** Uzbekistan has regions and districts; this bot is concerned with regions only and never with districts. Corrected in the bot's own wording on 30 July, and the documents must not reintroduce it
   - **Part 3 — smoke-test additions**, below
   - **Part 1 §1.3 — the retention row closes.** It has been the oldest open item in the project
 - [ ] **Step 3: `CONCERNS-AND-IT-ACTIONS.md`**

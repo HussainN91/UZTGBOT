@@ -1,6 +1,6 @@
 # MoPSE Teacher Support Bot — Runbook
 
-**Version:** 3.0 · **Date:** 2026-07-29 · Updated after the staff stage
+**Version:** 4.0 · **Date:** 2026-07-30 · Updated after the scheduled-work stage
 
 This replaces the Apps Script runbook completely. Nothing in the previous version
 still applies: there is no spreadsheet to set up, no script project, no triggers
@@ -46,9 +46,19 @@ new case now reaches the people who can work it, which it never did before.
 So the sentence that used to be here — *"nobody can reply to that case through the
 bot"* — is no longer true, and the launch gate has moved off engineering.
 
+**The system now also acts without being asked.** Records past their retention
+period are deleted at two in the morning; each staff member gets their own list of
+what is late at seven; a teacher whose case is waiting on them is reminded, three
+times and then no more; MoPSE can reach every teacher at once with an
+announcement; a teacher who asks to be removed can be; and a teacher who does not
+know who to talk to can ask who covers their region. §4.12 lists what happens on
+its own and when.
+
 **What still stands between here and launch is on the checklist in 1.4, and none
 of it is code.** The two heaviest are the ones with the longest lead times: a
-proven backup restore, and the retention work below.
+proven backup restore, and a review of the privacy notice. **Read §2.6 as well** —
+it is the single list of everything a person has to type in, none of which
+announces its own absence.
 
 ## 1.3 The decisions — all four answered
 
@@ -79,15 +89,18 @@ to change one, and it is worth reading before you do.
 working — a teacher telephoning about `VISA-2026-00123` gets "no such case", and
 there is nothing to reopen. And a three-day message log kills the monthly content
 review that used to run thirty-day queries over it; §4.7 has been deleted rather
-than left to return empty results that look like good news. Getting that signal
-back means a nightly count taken before the delete, which is Stage 5 work and your
-call.
+than left to return empty results that look like good news. **The replacement — a
+nightly count taken before the delete — was offered on 30 July and declined**, and
+§4.7 now records that so the gap reads as a decision. It remains available.
 
-**Nothing built so far deletes anything.** The job, the settings and the rewritten
-privacy notice ship together in the next stage, because a notice promising
-deletion that nothing performs is false in the other direction. That release also
-has to ask all 1,800 teachers to read the notice again — the current one promises
-exactly that.
+**✅ Built, and all of it deploys together.** The nightly deletion job, the three
+settings, the notice generated from them, the new wording, and the gate that asks
+every teacher to read it again. §4.11 is how to change a period afterwards.
+
+**One thing must happen at launch or none of it does anything:** the three periods
+have to be entered. Until they are, the job runs every night and deletes nothing,
+and the notice truthfully tells teachers their records are kept until the Ministry
+sets a period. §2.6 lists this alongside everything else somebody has to type in.
 
 ### ✅ 2. How a removal request is honoured — answered, and the question was wrong
 
@@ -101,7 +114,12 @@ deletes cases outright, which is what "removed after seven days" means.
 
 Anonymisation — replacing the name and the address, keeping the case — is what a
 teacher's *own* removal request needs, and it is a smaller job than this question
-implied. It ships with the retention work.
+implied.
+
+**✅ Built.** `/forget` does it, restricted to a System member because it has no
+undo. §4.15 is the procedure, and it states plainly what cannot be removed — the
+chat id, and what the teacher wrote inside their cases, which retention clears on
+its own. Whoever replies to the teacher needs that sentence, not "removed".
 
 ### 🟠 3. Does the privacy notice say the right things?
 
@@ -114,10 +132,11 @@ earlier consent.
 *What we need:* someone who can speak for MoPSE to read `src/config/privacy.ts`
 and either approve it or say what to change.
 
-**This is now more urgent than it was**, because the notice has to be rewritten
-anyway for the retention periods, and every teacher has to be asked to read it
-again. Reviewing it before that rewrite means one round of re-consent instead of
-two.
+**This is now the most urgent thing on the list, and the window is closing.** The
+rewritten notice and the gate that shows it to every teacher are both built and
+waiting to deploy. **Reviewing it before that deploy means one round of re-consent.
+Reviewing it afterwards means two** — 1,800 people asked to read it, and then
+asked again.
 
 ### 🟠 4. Should we reconsider how a teacher proves who they are?
 
@@ -158,7 +177,9 @@ Everything here blocks launch. None of it is engineering work.
 | ☐ | **At least two named System members** | So one person leaving cannot lock everyone out. The first is one line of SQL (§2.5); the second is `/staff_add` from the first one's account |
 | ☐ | **An operations group chat** for alarms | Use a group, not one person's private chat — one person on leave should not mean nobody is watching. **Set `OPS_ALERT_CHAT_ID` before adding the bot to the group**, or it will leave, correctly |
 | ☐ | **A proven backup restore** | The scripts are written and have never been run against a real server. An untested backup is a belief, not a capability |
-| ☐ | **The privacy notice reviewed** by somebody who can speak for MoPSE | Decision 3 above, and it has to be rewritten for the retention periods anyway |
+| ☐ | **The privacy notice reviewed** by somebody who can speak for MoPSE | Decision 3 above. **Now urgent:** the rewritten notice and the gate that shows it are both built, so reviewing it before this deploy means one round of re-consent instead of two |
+| ☐ | **The three retention periods entered** | §2.4. Unentered, nothing is ever deleted and the notice tells teachers exactly that |
+| ☐ | **Everything else in §2.6** | The one list of what a person has to type in. None of it announces its own absence |
 | ☐ | **A named owner for FAQ content**, and a review interval | 112 answers about salary, visas and contracts will drift, and nothing in the system flags a stale one |
 | ☐ | **Staff who know the four case words** | §4.6a. "Action required" in particular means *the teacher* must act, and reading it the other way sends work to the wrong person |
 
@@ -171,6 +192,15 @@ Everything here blocks launch. None of it is engineering work.
 - Open a support case in one of five categories and get a reference number
 - Check the status of their own cases
 - Escalate an emergency with a one-time code from a Regional admin
+- **Ask who covers their region**, and be given that person's name — and a
+  tappable Telegram link if they have published one. Available without signing in,
+  because somebody who cannot sign in and needs a person is exactly who asks
+- **Be reminded** when a case is waiting on them, up to three times
+- **Receive an announcement** from the Ministry
+
+They will also, once, **be asked to read the privacy notice again** before Contact
+Support, Urgent Case or Check My Case. One tap, and it puts them back on what they
+were doing. The answer bank and `/privacy` are left open deliberately.
 
 **What they cannot do:** upload documents, or use the bot in Russian or Uzbek.
 Both are absent deliberately rather than half-built — offering either would send a
@@ -281,8 +311,12 @@ changeable without a deploy:
 | `URGENT_CASE_RETENTION_DAYS` | Days a resolved Urgent or Critical case is kept | **nothing is deleted** |
 | `MESSAGE_RETENTION_DAYS` | Days the message log is kept | **nothing is deleted** |
 
-The three retention keys **are read by nothing yet** — the job that reads them
-ships in the next stage with the rewritten privacy notice. Seed them at launch:
+**The three retention keys are now read every night, and this is the one insert
+that must happen before the first teacher is served.** Unseeded, the nightly job
+runs and deletes nothing, and the privacy notice correctly tells every teacher
+that their records are kept until the Ministry sets a period — which is true, and
+is not what anybody intends after this release. The job says so in the operations
+chat once a night until they are set. Seed them at launch:
 
 ```sql
 INSERT INTO settings (key, value) VALUES
@@ -342,6 +376,55 @@ version's hand edit needs server access, and that is the improvement.
 System member, so you cannot empty the rank by accident. But if that single
 account is lost — a phone, somebody leaving — the recovery is another trip to the
 database.
+
+## 2.6 Everything that has to be set by hand — the one list
+
+**Read this before launch and again after it.** Everything below is something a
+person has to enter; nothing here arrives by itself, and **not one of these
+announces its absence by breaking.** The bot runs perfectly with every one of them
+missing. It simply answers less, or answers nothing, and looks entirely healthy
+doing it — which is the exact failure this whole rebuild exists to remove.
+
+| What | How | If it is never done |
+|---|---|---|
+| **The three retention periods** | §2.4's insert, or `/retention` | Nothing is ever deleted. The notice tells teachers their records are kept until the Ministry sets a period, which is then true |
+| **The regions each staff member covers** | `/staff_add`, or `/staff_region` afterwards | **See below — this is the one with a wrong-looking answer rather than no answer** |
+| **The two System members** | §2.5 | Nobody can add staff, set a period, remove a teacher, or take an export |
+| **The operations chat** | `.env`, before the first deploy | Every alarm in this document goes nowhere |
+| **The support contact address** | `.env` | Teachers are given a blank where an address should be |
+| **Each staff member's Telegram handle** | `/username`, by that person, for themselves | Teachers asking who covers their region are shown a name and the support address, and cannot tap through. This is a degradation, not a fault |
+| **The FAQ answers and the teacher roster** | The spreadsheet, synced every ten minutes | The bot can answer nothing and nobody can sign in |
+
+### The regions, specifically — this one is being done later, on purpose
+
+**Region details are added manually, after launch.** That is a decision, not an
+omission, and it has one consequence worth understanding before somebody reports
+it as a bug.
+
+A staff member with **no regions set covers every region.** An empty list means
+everywhere, deliberately — it is what lets a small team work the whole country
+without anybody filling in a form. So until the regions are entered, every staff
+member covers all of Uzbekistan, and the question *"who covers my region?"* is
+answered by **rank alone**: a teacher is shown the most junior person who can act
+on cases, wherever that person actually sits.
+
+That is a reasonable answer and it is not the right one. Once the regions are
+entered, whoever explicitly names the teacher's region is preferred over anybody
+covering all of them, and rank only breaks the remaining tie.
+
+Two smaller things follow from the same rule, and both are worth knowing while
+the regions are still blank:
+
+- **`/announce region:Bukhara` still works**, because an announcement's audience
+  comes from the *teachers'* regions on the roster, not from staff regions.
+- **Case visibility is unrestricted** while every staff member covers everywhere.
+  Nobody is seeing anything they should not — the rule is doing exactly what it
+  was told — but the region half of it is not being exercised, so a mistake in it
+  would not show up until the day the regions are entered.
+
+**Uzbekistan has regions and districts. This bot is concerned with regions only**
+— it has no concept of a district and no plans for one, and any wording anywhere
+saying "region" is wrong and should be corrected to "region".
 
 ---
 
@@ -498,11 +581,76 @@ never opened a chat with the bot. Have them send it `/start` once. The group is
 the one that blocks the deployment; the personal copies are an addition to it, not
 a replacement.
 
-### 9. Clean up
+### 9. A teacher is asked to accept the privacy notice again
+
+**Only on the deploy that carries the retention release, and it reaches all 1,800
+teachers, so it is worth proving on one.**
+
+From the already-signed-in test account, tap **Contact Support**. The privacy
+notice must arrive with the actual retention periods written into it — "7 days",
+"180 days", "3 days" — and one tap must return the teacher to the topic picker
+rather than to the main menu.
+
+Tap Contact Support a second time. **The notice must not appear again.**
+
+The FAQ must be untouched by this: tap it before accepting and the answer bank
+must open normally. It is deliberately left open.
+
+### 10. An announcement reaches one person before it reaches 1,800
+
+**Do this before anybody addresses the whole country.** Address a region holding
+only the test teacher:
+
+```
+/announce region:<the test teacher's region> This is a test, please ignore.
+/announce_send <id>
+```
+
+Within about a minute the test account receives it. The sender receives a report
+naming one delivered. If the report does not arrive, the sweeper is not running —
+check the operations chat for a stopped-job alarm.
+
+### 11. An export contains no teacher's words
+
+```
+/export
+```
+
+Open the file. It must contain your visible cases and **must not contain a column
+holding what the teacher wrote.** If it does, stop and read §4.16 — that is not a
+column somebody adds.
+
+### 12. A teacher is shown the right person, by the right handle
+
+Set a handle on a staff account covering the test teacher's region with
+`/username @handle`, then ask **"Who covers my region?"** from the test teacher's
+main menu. The name must be right, and tapping the handle must open a chat with
+that same person.
+
+### The four that need a night or a morning to pass
+
+These cannot be run in ten minutes. Run them on the first deploy of the retention
+release and write down that you did.
+
+1. **A closed case disappears on schedule.** Close a test case, set
+   `/retention case 1`, wait for 02:00, and confirm the case and its notes have
+   gone and the reference no longer resolves.
+2. **A case marked Critical does not.** The same, with `/mark <ref> Critical`
+   first. It must survive — this is the check that proves the deletion reads
+   importance and not status, which is the difference between keeping an
+   emergency for six months and treating every case alike.
+3. **A promised date is chased.** `/due` a case to yesterday and confirm its owner
+   is told at 07:00.
+4. **A teacher at `Action required` is reminded.** `/await` a test case, wait
+   three days, and confirm the **teacher** receives the reminder carrying the text
+   that was typed — not the staff member.
+
+### 13. Clean up
 
 ```sql
 DELETE FROM cases WHERE teacher_chat_id = '<the test chat id>';
 DELETE FROM urgent_codes WHERE used_at IS NULL AND case_reference IS NULL;
+DELETE FROM announcement_recipients WHERE chat_id = '<the test chat id>';
 ```
 
 Leave the roster row and the teacher record. They are harmless, and the next smoke
@@ -730,6 +878,24 @@ cannot describe access you do not have.
 | `/due <ref> <date>` | When you said it would be done. `2026-08-15` or `15 Aug 2026` |
 | `/snooze <ref> <days>` | Stop chasing it for a while. It stays open and stays yours |
 
+**Reaching teachers, and taking data out**
+
+| | |
+|---|---|
+| `/announce <all\|region:Name> <text>` | Write a broadcast. **Sends nothing** — §4.14 |
+| `/announce_send <id>` | Actually send it. Only the person who wrote it |
+| `/announce_cancel <id>` | Stop it. Anybody who can announce |
+| `/announcements` | Recent ones, and how far each got |
+| `/export` | A spreadsheet of the cases you can see. **No teacher's words** — §4.16 |
+
+**Yourself, and the periods**
+
+| | |
+|---|---|
+| `/username @handle` \| `/username clear` | Publish your Telegram handle to teachers in your region — §4.17 |
+| `/retention` | Read the three retention periods. With a name and a number, change one — §4.11 |
+| `/forget <chat id> FORGET` | Honour a removal request. **System only, no undo** — §4.15 |
+
 **People**
 
 | | |
@@ -763,15 +929,25 @@ month, for ever — and an empty result from a review reads exactly like a syste
 with no problems. That is the failure this whole rebuild exists to remove, so the
 instructions are deleted rather than left to quietly stop working.
 
-**Nothing replaces it yet, and that is a real loss rather than a tidy-up.** Two
+**Nothing replaces it, and that is a real loss rather than a tidy-up.** Two
 questions are now unanswerable beyond three days: what teachers are asking that
 the answer bank cannot cover, and which confident answers they are rejecting.
 
-**Getting it back does not mean a longer retention period.** It means a nightly
-count taken *before* the delete — no teacher's words kept, just "this answer was
-rejected fourteen times in October". That is next-stage work and it is the head of
-project's to ask for. It is written down here so nobody discovers the gap by
-running a query in November and reading the empty result as good news.
+**A replacement was designed, offered on 30 July 2026, and not wanted.** It was a
+nightly count taken *before* the delete — no teacher's words kept, just "this
+answer was rejected fourteen times in October". It was considered properly and
+declined, and this paragraph exists so that the deletion above reads as a
+decision rather than as an oversight. **A section that looks like an oversight is
+one somebody restores by accident** — and a restored §4.7 would run its two
+queries, return nothing, and look like good news.
+
+**It remains available whenever it is wanted.** Nothing forecloses it: it is one
+small table and one extra step in a nightly job that now exists. Ask for it and
+it is a small piece of work, not a redesign.
+
+**What it does not mean is a longer retention period.** Lengthening one asks
+about 1,800 teachers to read the privacy notice again (§4.11), and it would be
+paying that price for a signal a count would give for nothing.
 
 Reviewing the *content* on a cadence still matters (`CONCERNS` A6). What is gone
 is the evidence this document used to tell you to gather.
@@ -825,7 +1001,7 @@ is also how you undo a typo.
 
 Three things it refuses, each for a reason:
 
-- **A region nobody has heard of.** A typo would put the teacher in a province no
+- **A region nobody has heard of.** A typo would put the teacher in a region no
   staff member covers — their cases visible only to all-region staff, routed
   nowhere, and wrong in a way nothing reports. It lists the real names instead.
 - **Moving a teacher across a boundary you do not hold** — including moving one
@@ -837,7 +1013,7 @@ Three things it refuses, each for a reason:
 whether the region it holds is still right and they say no, it raises a flag and
 writes nothing. They are deliberately **not** asked where they are now: a menu of
 regions is a menu of whose emergency this becomes, and a wrong tap sends it to the
-wrong province. Ask them, then use `/region`. The report leaves the list the
+wrong region. Ask them, then use `/region`. The report leaves the list the
 moment somebody acts.
 
 ## 4.11 Changing a retention period
@@ -853,6 +1029,34 @@ Read this before typing one.
 
 A case that is **not** resolved is kept for ever and none of these touch it. The
 audit trail is never pruned at all.
+
+**Use the command, not SQL.** A System member types:
+
+```
+/retention
+```
+
+With nothing after it, that reports all three periods, quotes the exact paragraph
+teachers read about them, and changes nothing. It is the safe thing to type and
+the one to start with. To change one:
+
+```
+/retention case 14
+```
+
+The three names are `case`, `urgent` and `message`. A value of `0`, a negative
+number or anything that is not a whole number is refused and the current value is
+restated — `0` in particular would mean *delete every resolved case immediately*
+and is one keystroke away from a typo.
+
+**Lengthening a period tells you what it will cost before it writes**, and then
+writes it: about 1,800 teachers will be asked to read the privacy notice again
+the next time they use the bot. Nobody should discover that from the outbound
+message count.
+
+The SQL below still works and is here for a database that cannot be reached from
+Telegram. Prefer the command: it validates the value, warns about the cost and
+leaves a record of who changed what.
 
 ```sql
 INSERT INTO settings (key, value) VALUES ('CASE_RETENTION_DAYS', '14')
@@ -882,6 +1086,239 @@ and when" is an audit question.
 **The consequence you will meet first**, in week two: a week after a case is
 closed its reference stops working. A teacher telephoning about `VISA-2026-00123`
 gets "no such case", and `/reopen` has nothing to reopen.
+
+## 4.12 What happens on its own, and when
+
+Four things now happen without anybody asking. All four times are Tashkent time.
+
+| When | What |
+|---|---|
+| **02:00, nightly** | Records past their retention period are deleted (§4.11) |
+| **07:00, daily** | Each staff member gets their own morning list; teachers who owe a reply are reminded; published Telegram handles are re-checked |
+| **Every minute** | Any confirmed announcement sends its next two hundred people (§4.14) |
+| **Every ten minutes** | The spreadsheet is copied in — answers and roster |
+
+**If one of these stops running, an alarm arrives in the operations chat** naming
+the job and when it last succeeded. That alarm exists because a job that stops
+being scheduled produces no error at all — it is silent, and silence is what it
+detects. §5.5 is what to do about it.
+
+## 4.13 The morning message, and chasing a teacher
+
+**At 07:00 each staff member who can act on cases gets one message containing
+their own three lists:** the cases they own that are past the date they promised,
+the cases in their queue and region that nobody has touched, and the ones in it
+that nobody owns.
+
+**Somebody with nothing due gets nothing.** That is deliberate. A daily message
+saying "nothing to do" is a daily message people filter, and then they filter the
+one that matters. **Observers never get one at all** — being paged about work you
+are not permitted to do teaches you to ignore the page.
+
+If somebody says they are not receiving it: check they are active, check their
+rank is above Observer, and check they have opened a chat with the bot at all. A
+staff member who has never sent the bot `/start` cannot be messaged by it, and
+that failure is counted in the logs rather than alarmed, because it is an
+onboarding problem rather than a fault.
+
+### The teacher chase
+
+**A case left at `Action required` is waiting on the teacher, not on staff.** So
+after three days the *teacher* is reminded — never the staff member holding it,
+who is correctly doing nothing.
+
+The reminder names the case and repeats, word for word, whatever was typed into
+`/await`. **That text is the only thing the teacher sees**, so it is worth
+writing it as a sentence a teacher can act on rather than a note to yourself.
+
+**Three reminders and no more.** After the third, the case's owner is told the
+teacher has stopped responding, and nothing chases again. That is the situation
+`/close <ref> unresolved <reason>` exists for: a teacher who has left, changed
+number or given up.
+
+Two details that will otherwise be reported as faults. **A reminder that could
+not be delivered does not count** — three reminders means three that arrived, and
+the case simply comes back tomorrow. And **the clock restarts whenever the status
+changes**, so a case that leaves `Action required` and returns to it starts again
+from zero.
+
+## 4.14 Sending an announcement
+
+Reaches every teacher who can use the bot, or every teacher in one region. It
+takes two commands on purpose: **1,800 messages is the least undoable thing in
+this system.**
+
+**1. Write it.**
+
+```
+/announce all Passport collection moves to Tuesday 5 August.
+/announce region:Bukhara The Bukhara office is closed on Friday.
+```
+
+Nothing is sent. The bot replies with the message **exactly as teachers will read
+it** and the exact number of people who will receive it, and gives you an id.
+
+**2. Read it back.** This is the step that is worth the minute. Read the text as
+a teacher will, not as you typed it.
+
+**3. Send it.**
+
+```
+/announce_send <id>
+```
+
+**Only the person who wrote a draft can confirm it.** Not a permission rule — a
+colleague confirming your words is sending words they did not write, to 1,800
+people, under their own name.
+
+**4. Wait for the report.** About two hundred people a minute, so roughly nine
+minutes for everybody. When the last person is resolved the sender gets one
+message: how many were delivered, how many were **skipped** because they no
+longer have access to the bot, and how many **could not be reached**. Those three
+are counted separately because they need different things done about them —
+skipped is correct behaviour, and could-not-be-reached is usually somebody who
+blocked the bot or never started a chat with it.
+
+### Stopping one
+
+```
+/announce_cancel <id>
+```
+
+**Anybody who can send announcements can cancel one**, not only the author — a
+bad message going out while the one person who could stop it is asleep is the
+worse failure.
+
+**A cancel after sending has begun stops the remainder and tells you how many had
+already gone.** It cannot recall what is already in somebody's chat, and it does
+not pretend to.
+
+### Three things worth knowing
+
+**The list of recipients is frozen when you write the draft**, not when you
+confirm. That is what makes the number in the confirmation the number that
+receives it.
+
+**Anybody who lost access between the draft and the send is skipped**, and is
+reported as skipped rather than as a failure.
+
+**A restart in the middle of a broadcast resumes where it stopped.** Nobody is
+messaged twice, and there is nothing to re-run by hand.
+
+**`/announcements`** lists the recent ones and how far each got.
+
+## 4.15 A removal request from a teacher
+
+A teacher asking for their data to be removed. **System rank only**, and there is
+no undo whatsoever.
+
+```
+/forget <their chat id> FORGET
+```
+
+Without the word `FORGET` the command explains what would happen and changes
+nothing. The word is typed rather than tapped for the same reason a database
+deletion should be awkward.
+
+**What goes:** their name, their recruitment identifier, both regions, their
+record of accepting the privacy notice, their message log, and any half-finished
+conversation. Their access ends.
+
+**What stays, and this is what you will have to say to the teacher:**
+
+- **Their Telegram chat id.** Every one of their cases points at it, and that link
+  is the guarantee that no case exists without a real person behind it.
+- **What they wrote inside their cases.** Their case history is kept on purpose.
+  Retention removes the words on its own — seven days after each case is closed,
+  or 180 days for one marked Urgent or Critical.
+
+**Say that plainly rather than "your data has been removed."** Somebody hearing
+the shorter sentence understands something stronger than what happened.
+
+**A Support member who takes the request cannot action it.** It goes to one of the
+two System members. For a request with no undo that is correct handling rather
+than an obstacle.
+
+The command reports how many open cases that teacher still has, and the removal
+does not close them. Somebody should look at them.
+
+## 4.16 Taking an export
+
+```
+/export
+```
+
+Program rank and above. Sends back a spreadsheet file of the cases **you can
+see** — a Lead gets their own region, and cannot export another.
+
+**It contains no teacher's words.** Reference, category, status, importance,
+region, owner, and the dates. Not what the teacher wrote, not the update they
+were sent, not their name.
+
+**That is a deliberate limit and it must not be relaxed by adding a column.** A
+file behaves differently from a screen: it lands in a Telegram chat, syncs to
+that person's devices, is forwardable to anybody, and **outlives the retention
+job built to delete the very text inside it.** A report taken today still holds
+cases the system deleted a week later. Reading one case through `/case` checks
+permission first and leaves a record of who read it; a file has none of those
+properties.
+
+The filename carries the date and the scope, so a stale one looks stale. Every
+export is recorded against whoever took it and how many rows it held.
+
+If a report of the teachers' own words is genuinely needed, that is a
+conversation about where the file is allowed to go — not a column somebody adds.
+
+## 4.17 Publishing a manager's Telegram handle
+
+Teachers can ask **"who covers my region?"** from the main menu, without signing
+in — somebody who cannot sign in and needs a person to talk to is exactly who
+asks it.
+
+They are shown the name of the most junior staff member who covers their region
+and can act on cases, and, **if that person has published a Telegram handle**, a
+tappable link to them. Otherwise they get the name and the support address.
+
+**Each staff member publishes their own, and nobody publishes anybody else's:**
+
+```
+/username @theirhandle
+/username clear
+```
+
+**The bot checks the handle against Telegram before it writes anything**, and
+tells you which of three things happened: it is yours and is now published, it
+belongs to somebody else and nothing was written, or Telegram does not know it.
+
+### When the daily check clears somebody's handle
+
+**This will happen, and the person who meets it first is whoever is named in the
+alarm.** The 07:00 job re-checks every published handle. If one no longer resolves
+to its owner it is cleared immediately, and both that staff member and the
+operations chat are told.
+
+**What to do:** ask that person to set their new handle with `/username`. Nothing
+else is wrong. Teachers in their region are meanwhile shown their name and the
+support address, which is what they had before the handle was published.
+
+**Why the bot is this strict about it.** A Telegram username is not an identifier,
+it is a label its owner can release — and once released, **anybody can claim it.**
+A handle left stale would not degrade to "nobody answers". It would degrade to
+1,800 teachers being pointed at a stranger, by the Ministry's own bot, silently,
+for months. Every other stale value in this system fails towards nothing
+happening; this one fails towards the wrong thing happening confidently.
+
+### The cost of this feature, recorded on purpose
+
+**A teacher who can message a manager directly will sometimes do that instead of
+opening a case.** That work then has no reference, no queue, no owner, no promised
+date, no retention rule, and nothing for the next person to read. The wording
+sends anything needing a record back to Contact Support, and wording is the only
+control there is.
+
+This was accepted knowingly, against the alternative of teachers not knowing who
+covers their region at all. **If case volume falls after this ships, read it as
+work moving rather than as work disappearing.**
 
 # PART 5 — When something is wrong
 
@@ -1001,12 +1438,12 @@ Listed so nobody goes looking for them.
 
 | | Arrives with |
 |---|---|
-| **Announcements to teachers in bulk** | The next stage. The permission already exists, so that stage adds a command rather than a permission model |
-| **Exporting case records** | The next stage, for the same reason. It also needs the bot to be able to send a file at all, which it cannot do today |
-| **The daily overdue digest, and chasing a missed date** | The next stage. Both queries exist and are tested; what is missing is the schedule. `/urgent`, `/due` and `/snooze` are the same information asked for by hand |
-| **The retention clean-up job** | The next stage, together with the rewritten privacy notice and asking every teacher to accept it again. All three ship in one release or the notice is false in one direction or the other |
-| **Anonymising a teacher who asks to be removed** | The next stage, with the retention work |
 | **Reading the audit trail from a command** | Deliberately never. It is read by somebody with database access during an investigation, and a command to read it would need its own permission model to avoid becoming the thing it audits |
+| **A teacher resigning through the bot** | Later. A Program member would unlock it per teacher, and the record would be anonymised three months afterwards. The anonymising half is built and is what `/forget` uses |
+| **Scheduling an announcement for later** | Not built and nobody has asked. `/announce_send` sends now |
+| **Telling a teacher before their case is deleted** | Deliberately not. 1,800 people receiving "your case record has been removed" is noise, and the notice states the period. The first person to meet it will be a staff member on the telephone, which is why §4.11 says it in the words they will need |
+| **Turning the morning digest off** | Deliberately not. No per-person opt-out and no frequency setting: a digest people can switch off is a digest that stops arriving for the people who most need it. If it is wrong for somebody, that is a conversation |
+| **Anything about districts** | Never. Uzbekistan has regions and districts and this bot is concerned with regions only |
 | **A list of "action required" types** | Later. Until then `/await` carries free text — §4.6a |
 | **Document submission** | Later, and **through the existing Google Forms rather than the bot.** An earlier version of this document called Telegram upload "the only genuinely new feature in the rebuild"; that direction was reversed. The bot will never accept or store a file. What arrives is a third spreadsheet tab holding the form links, with submissions matched to teachers by their recruitment email — the same identity check as signing in, and stronger than the old system's editable hidden field |
 | **Russian and Uzbek** | Not scheduled. The interface is built so that translating it is a display change, with no effect on how buttons route |

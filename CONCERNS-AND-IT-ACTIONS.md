@@ -1,6 +1,6 @@
 # Engineering Concerns and Actions Needed from IT
 
-**Version:** 3.0 · **Date:** 2026-07-29 — updated after Stage 4 of the rebuild
+**Version:** 4.0 · **Date:** 2026-07-30 — updated after Stage 5 of the rebuild
 
 > Items marked **✅ closed by the rebuild** were true of the Apps Script version
 > and are not true of what runs now. They are kept rather than deleted, because
@@ -225,9 +225,16 @@ the opposite recommendation, and it turned out to make one thing cleaner rather
 than harder: the privacy notice is generated *from* those settings, so a period
 and the sentence teachers read about it cannot disagree.
 
-**Nothing built in Stage 4 deletes anything.** The job, the settings and the new
-privacy notice ship together in Stage 5, because a notice promising deletion that
-nothing performs is false in the same way the revocation claim above was.
+**Built in Stage 5, and all five parts together** — the nightly deletion job, the
+three settings, the notice generated from them, the bumped wording, and the
+re-consent gate. They deploy as one release, because a notice promising deletion
+that nothing performs is false in the same way the revocation claim above was,
+and a job with no notice is false in the other direction.
+
+**Nothing is deleted until somebody sets the three periods.** That is deliberate
+— the job will not invent a number, and an unset period means *delete nothing of
+that class*. It also looks exactly like a job that does not work, so the job says
+so out loud in the operations chat once a night until they are set.
 
 Two consequences, both real, and neither obvious:
 
@@ -237,17 +244,23 @@ were asking that the answer bank could not cover, and which confident answers
 they were rejecting — described in that document as the strongest signal
 available. At three days both return nothing, and **an empty result from a review
 reads exactly like a system with no problems.** The section has been deleted
-rather than left to quietly stop working. If you want the signal back, it comes
-from a nightly count taken *before* the delete — no teacher's words kept, just
-"this answer was rejected fourteen times in October". That is a Stage 5 task and
-it is your call, not a reason to lengthen the period.
+rather than left to quietly stop working.
 
-**Publishing these periods requires asking 1,800 teachers to read the notice
-again.** The current notice tells every teacher who has signed in that no period
-is set and that *"when one is set, this notice will be updated and you will be
-asked to read it again"*. That is a commitment already made. Stage 5 ships the
-new wording, the version bump and the re-consent flow in the same release as the
-job.
+**The recovery was offered on 30 July 2026 and declined.** A nightly count taken
+*before* the delete — no teacher's words kept, just "this answer was rejected
+fourteen times in October" — was designed, costed and not wanted. Recorded here
+so the deletion reads as a decision rather than an oversight: past three days
+those two questions cannot be answered at all, and the answer-feedback rows added
+in Stage 3 go back to having no reader. It remains available whenever it is
+wanted; it is one table and one step in a job that now exists.
+
+**Publishing these periods asked 1,800 teachers to read the notice again**, and
+the mechanism for it is built. The old notice told every teacher who had signed
+in that no period was set and that *"when one is set, this notice will be updated
+and you will be asked to read it again"* — a commitment already made, and now
+kept. The teacher meets the notice once, before Contact Support, Urgent Case or
+Check My Case, taps once, and lands back on what they were doing. The answer bank
+and `/privacy` are deliberately left open.
 
 **One rule worth knowing before you ever change a period:** *lengthening* one —
 keeping data longer than teachers were told — asks everybody to re-consent.
@@ -268,8 +281,20 @@ here, and the blur is what made retention look like it needed anonymisation.
 So the retention job deletes cases outright, which is what "removed after seven
 days" means. **Anonymisation is what a teacher's own removal request needs** —
 their name and identifier replaced, the case history kept — and that is a
-different, smaller job than this item implied. It stays a Stage 5 item alongside
-the retention work.
+different, smaller job than this item implied.
+
+**Built in Stage 5, and the other half of this item now closes too.** `/forget`
+clears a teacher's name, recruitment identifier, both regions and their privacy
+record, ends their access, deletes their message log and any half-finished
+conversation, and leaves an audit row. It is restricted to a **System** member,
+because unlike `/revoke` it has no undo at all.
+
+**What it cannot remove, and this is the honest limit somebody will have to say
+out loud to a teacher:** their Telegram chat id survives, because every one of
+their cases points at it and that constraint is the guarantee that no case exists
+without a real person behind it. So does what they wrote inside their cases —
+though retention removes that on its own, seven days after each case is closed.
+Nobody should be told "removed" and understand something stronger than that.
 
 **The consequence you will meet in week two**, stated here so nobody reports it
 as a fault: a week after a case is closed, its reference stops working. A teacher
@@ -301,19 +326,30 @@ argument and half a privacy one, and the performance half was doing the
 persuading. With the performance half gone, what is left is purely a promise made
 to teachers in the privacy notice, with no technical excuse attached to it.
 
-## B3. `/announce` still runs inside the webhook — 🟡 Not yet rebuilt
+## ✅ B3. `/announce` still runs inside the webhook — **closed by Stage 5**
 
-Announcements are Stage 5 and do not exist yet. The architecture that fixes this
-does: the worker process runs slow work so it can never delay a teacher waiting
-for a reply, and the audience is frozen into a table the moment the sender
-confirms, so a paced send is resumable rather than restartable.
+Announcements are built, and nothing about them runs inside the webhook. A
+Program member drafts one and the bot replies with the message exactly as
+teachers will read it and the exact number of people who will receive it; a
+second command confirms it. Everything after that happens in the worker.
 
-Nothing here is a risk today, because the feature is absent rather than broken.
-Re-read this item when Stage 5 is planned — which is now the next stage, and it
-carries the retention job and the privacy re-consent with it.
+**Three properties this now has that the old one did not.**
 
-Stage 4 left the permission for announcements in place with no command behind it,
-so Stage 5 adds a command rather than a permission model.
+The number approved is the number messaged. The audience is frozen when the draft
+is written, not looked up again at send time — which was the original flaw, and
+the reason the count in the confirmation could not be trusted.
+
+**A restart in the middle of a broadcast resumes; it does not repeat.** Every
+recipient is a row with its own state, and the sender is a scheduled sweep that
+takes two hundred people a minute. The old version reported "900 not attempted,
+re-run for the remainder", and re-running risked messaging all 1,800 again.
+
+**The sender is told what happened**, once, when the last person is resolved:
+delivered, skipped because they no longer have access, and could not be reached,
+counted separately — because those three need different things done about them.
+
+A cancel after sending has begun stops the remainder and says how many had
+already gone. It does not pretend to recall what is already in somebody's chat.
 
 ## B4. The tests now run, and finding out cost four faults — 🟡 Low
 
@@ -457,13 +493,13 @@ Region decides which staff see a teacher's case. It was read once, when the
 teacher signed in, and copied into their record — and **a teacher who has signed
 in never signs in again**. So when recruitment corrected a region on the
 spreadsheet, that correction reached nobody who was already using the bot, for
-ever. There was also no command to correct one, so a teacher who moved province
+ever. There was also no command to correct one, so a teacher who moved region
 had no route at all: their emergencies kept routing to their old region's staff.
 
 Everything about it looked like a working feature. The column existed, it was
 populated, the spreadsheet was authoritative, and edits to it were applied
 nightly. Nothing failed. Nothing was logged. The only symptom was staff in one
-province occasionally seeing a case from another, which reads as somebody having
+region occasionally seeing a case from another, which reads as somebody having
 moved rather than as a fault.
 
 Closed three ways in Stage 4: the roster is now read live rather than from the
@@ -472,11 +508,36 @@ sign-in copy, so a spreadsheet correction reaches everybody on the next sync;
 the bot asks a teacher, rarely, whether the region it holds is still right —
 their "no" raises a flag a manager sees on `/regions`, and never changes the
 record itself, because a menu of regions is a menu of whose emergency this
-becomes and a wrong tap sends it to the wrong province.
+becomes and a wrong tap sends it to the wrong region.
 
 **The lesson, which is B4's:** a column with a writer and no reader looks exactly
 like a working feature, and so does a column read in one place that nothing ever
 updates.
+
+## ✅ B12. The sync log kept teacher email addresses for a year — **new, and closed by Stage 5**
+
+Found while tracing what the retention promise actually has to cover, and it is
+B4's lesson once more from a third direction.
+
+Every ten minutes the bot copies the roster out of the spreadsheet, and every run
+records what it had to reject. A rejection carries the value that caused it — so
+one duplicate row on the spreadsheet put that teacher's recruitment email address
+into a stored record **144 times a day, every day, until somebody noticed the
+spreadsheet**. Nothing had ever deleted a sync record.
+
+This was invisible from every direction. The tab looked fine, the sync reported
+success, the count of rejected rows was one, and nobody reads the stored detail
+unless they are investigating a specific run.
+
+**Closed by the retention job**, which empties that detail on the same three-day
+period as everything else a teacher writes, and **keeps the row and the count** —
+so the operational history of "how many rows failed, and when" survives intact
+while the addresses do not.
+
+**Why it mattered enough to fix rather than note:** the privacy notice now
+promises teachers that the messages they send are kept for three days. An address
+sitting in an operational log for a year is not that promise, and the promise is
+the thing that must not be false.
 
 ## B10. No per-chat rate limiting — 🟢 Low
 

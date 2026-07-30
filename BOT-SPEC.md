@@ -1,6 +1,6 @@
 # MoPSE Teacher Support Bot — System Specification
 
-**Version:** 1.3 · **Date:** 2026-07-29 · **Status:** Pre-launch — updated after the staff stage of the rebuild
+**Version:** 1.4 · **Date:** 2026-07-30 · **Status:** Pre-launch — updated after the scheduled-work stage of the rebuild
 
 This document describes what the bot is, how it is built, and how every layer
 behaves. It superseded `bot_spec.md`, which described an architecture that was
@@ -335,19 +335,46 @@ teacher-facing and handled ahead of the staff dispatcher (same pattern as
 `/help`). The notice names the data held, its use, its audience, and the contact
 route for access/removal requests.
 
-**The retention periods are decided (§7.1.3) and the notice does not yet state
-them.** That is deliberate and the ordering matters: the notice currently tells
-every teacher who has signed in that no period is set, and that *when one is set
-they will be asked to read the notice again*. Publishing the periods without that
-re-consent would break a commitment made in the one document teachers were
-required to read. So the wording, the version bump, the re-consent flow and the
-deletion job all ship in one release — any three without the fourth is a false
-statement in one direction or the other.
+**The notice is now generated from the retention settings, and no number is
+typed into its text.** A settings row and a hard-coded sentence can disagree; a
+sentence produced from the row cannot, and it cannot disagree *silently* the next
+time somebody edits a period. **A test reads the module's own source and fails if
+a number of days appears in it.** With no period set the notice says so — that the
+records are kept until the Ministry sets one — which is exactly what the system is
+then doing.
 
-**When it is rewritten, the notice must be generated from the settings rather
-than have the numbers typed into its text.** A settings row and a hard-coded
-sentence can disagree; a sentence generated from the row cannot, and it cannot
-disagree silently the next time somebody edits a period.
+**Every teacher who signed in under the old wording is asked to accept the new
+one**, once, in front of Contact Support, Urgent Case and Check My Case. The FAQ,
+`/privacy`, `/help` and `/start` are untouched: the answer bank has always been
+open, maintenance mode deliberately leaves it running, and a teacher looking up a
+public answer is not somebody anything is being collected from. One tap, and the
+teacher lands back on what they were trying to do.
+
+**When a teacher is asked again is computed, never remembered by a person**, and
+the rule is deliberately **asymmetric**:
+
+- The **wording version** changed, **or**
+- any current period is **longer** than the one that teacher accepted.
+
+**Shortening never asks anybody.** Deleting sooner than promised breaks no
+commitment, and putting 1,800 people through a re-consent to be told their data
+goes sooner is a cost with no beneficiary. `null` — kept indefinitely — is treated
+as the longest period there is, in both directions.
+
+> **Why not a hash of the notice text**, which is the obvious cheap answer: any
+> hash changes when a period is *shortened* too, and a hash cannot express an
+> asymmetric rule. It would cost 1,800 taps to tell people good news.
+>
+> **Why not the version string alone:** the notice is generated, so its text can
+> now change without a deploy. A rule in code cannot forget to notice that; a
+> person editing a settings row can. `PRIVACY_NOTICE_VERSION` keeps its name and
+> now versions **the wording only** — the periods each teacher accepted are
+> recorded on their own row beside it.
+
+The accept button carries the wording version **and the three periods it was shown
+with**. If either has moved between the notice being displayed and the button
+being tapped, the notice is shown again rather than an acceptance being recorded
+for text the teacher never saw.
 
 The identifier is an email address. It is written **once**, to the teacher's
 USERS row. Failed attempts log only a redacted hint (`j***@school.uz`);
@@ -382,6 +409,65 @@ is written, and leaves `/start`, `/privacy` and `/help` — which carry no argum
 there lasts three days.
 
 FAQ queries and everything else are logged verbatim — they carry no identity.
+
+### 5.3 The regional manager a teacher is shown
+
+A teacher can ask **"who covers my region?"** from the main menu. They are shown
+the **name**, and where one is published the **Telegram handle**, of the most
+junior active staff member holding `case.update` whose queue and region cover
+them.
+
+**It is deliberately behind neither gate** — not the sign-in gate and not the
+re-consent one. Somebody who cannot sign in and needs a person to say so to is
+exactly who asks this, and "please sign in first" is the one answer that does not
+help them.
+
+**The lowest rank that covers them, not a list.** Five names is a teacher deciding
+who to bother, and the senior people are the ones they will choose.
+
+**Nobody who cannot act is ever named**, so an Observer covering a region is not
+shown. When there is nobody, the teacher is given the support address and **is
+told nothing about staffing** — "no manager is assigned to your region" is an
+operational fact a teacher can do nothing with, and it is not theirs to worry
+about.
+
+**The region is resolved the way everything else resolves it** — the staff-set
+override first, then the roster — and never from the snapshot taken at sign-in. A
+teacher shown last year's manager is worse than a teacher shown nobody.
+
+**When nobody names the teacher's region explicitly**, somebody covering every
+region answers instead: an empty region list means *everywhere*, which is what
+lets a small team cover the country. Whoever names the region explicitly is
+preferred over whoever covers them all, and rank breaks the remaining tie. **Until
+the regions are entered by hand, every staff member covers everywhere and the
+answer is therefore decided by rank alone** — see `RUNBOOK.md` §2.6.
+
+> #### The published handle is verified, never trusted
+>
+> **A Telegram username is not an identifier. It is a label its owner can
+> release** — and once released, anybody can claim it. So the bot checks that the
+> handle still resolves to that staff member's own Telegram id: once when it is
+> set, and again every morning. A handle that stops matching is cleared, and both
+> the staff member and the operations chat are told.
+>
+> **Every other stale value in this system degrades towards nothing happening.
+> This one degrades towards the wrong thing happening** — 1,800 teachers pointed
+> at a stranger by the Ministry's own bot, confidently, silently, for months. The
+> check is one API call against a value that changes about never, and it turns a
+> silent wrong answer into an alarm.
+>
+> The bot deliberately does **not** read handles from Telegram and keep them
+> current by itself: a lookup by numeric id does not reliably return a username,
+> and a mechanism that silently sometimes works is worse than one a person
+> maintains.
+
+**One cost has no technical answer and is recorded rather than solved.** A teacher
+who can message a manager directly will sometimes do that instead of opening a
+case, and that work then has no reference, no queue, no owner, no promised date,
+no retention rule and nothing for the next person to read. The wording sends
+anything needing a record back to Contact Support, and wording is the only control
+there is. **A fall in case volume after this shipped should be read as work moving
+rather than as work disappearing.**
 
 ---
 
@@ -421,15 +507,29 @@ version drifted precisely because those were two lists.
 | `teacher.region` — `/region` `/regions` | | | ✅ | ✅ | ✅ |
 | `teacher.revoke` — `/revoke` `/restore` | | | | ✅ | ✅ |
 | `staff.manage` — `/staff` `/staff_add` `/staff_role` `/staff_remove` | | | | | ✅ |
-| `maintenance` — `/maintenance` | | | | | ✅ |
-| `announce`, `export` | | | | ✅ | ✅ |
+| `maintenance` — `/maintenance` `/retention` | | | | | ✅ |
+| `teacher.forget` — `/forget` | | | | | ✅ |
+| `announce` — `/announce` `/announce_send` `/announce_cancel` `/announcements` | | | | ✅ | ✅ |
+| `export` — `/export` | | | | ✅ | ✅ |
 
 A `System` member bypasses every capability, queue and region check.
 
-`announce` and `export` are in the table with no command behind them, so the
-stage that builds them adds a command rather than a permission model, and
-`/whoami` does not have to change twice. `/whoami` lists such a capability as
-"no command for this yet" rather than hiding it — hiding it would make the bot
+**`/username` has no capability at all**, deliberately. Every active staff member
+may publish their own Telegram handle and nobody may publish anybody else's, which
+is a rule about *whose row* rather than about rank. It is therefore listed in
+`/help` directly, because a command with no capability has no row in the table
+above to be described from.
+
+**`teacher.forget` floors at System, one rank above `teacher.revoke`.** Revoking
+is reversible — that is the whole argument for `/restore` — and this has no undo
+whatsoever. The cost is real and is accepted: a Support member who takes a removal
+request cannot action it themselves, and escalates to one of the two System
+members the launch checklist requires.
+
+`announce` and `export` sat in this table for a whole stage with no command behind
+them, which is why building them added commands rather than a permission model,
+and why `/whoami` did not have to change twice. `/whoami` lists such a capability
+as "no command for this yet" rather than hiding it — hiding it would make the bot
 describe a smaller permission model than the one in force.
 
 **Two ranks are worth explaining.**
@@ -583,9 +683,13 @@ topic picker.
 dispatcher, so a teacher typing them gets an answer. Staff get the teacher help
 with their own command list appended, generated from the capability table.
 
-**Seventeen commands.** `BOT-SPEC.md` previously listed nineteen; `/announce` and
-`/export` are deferred (§16), and the rest are the same work under the names in
-§6.4 plus the six added in this stage.
+**Thirty-three staff commands**, counted as command words in the registry — the
+table below groups the four `/staff*` ones onto one row. Twenty-five after the
+staff stage, plus the eight that close the last of the deferred list:
+`/announce`, `/announce_send`, `/announce_cancel`, `/announcements`, `/export`,
+`/retention`, `/forget` and `/username`. `/announce` and `/export` had been
+deferred since the rebuild began, with the permissions for both sitting in place
+and no command behind them.
 
 | Command | Syntax | Requires |
 |---|---|---|
@@ -611,6 +715,14 @@ with their own command list appended, generated from the capability table.
 | `/generate_urgent_code` | `/generate_urgent_code` | `urgent.issue` |
 | `/staff` `/staff_add` `/staff_role` `/staff_remove` | §6.4 | `staff.manage` |
 | `/maintenance` | `/maintenance on\|off` · `/maintenance` to ask | `maintenance` |
+| `/retention` | `/retention` to read all three · `/retention case\|urgent\|message <days>` | `maintenance`, which floors at **System** — a period governs deletion with no undo. With no argument it prints the periods **and the notice's own retention paragraph**, rather than describing them in its own words |
+| `/forget` | `/forget <chat id> FORGET` | `teacher.forget`, floored at **System**. The confirmation word is typed, not tapped |
+| `/username` | `/username @handle` · `/username clear` | **No capability** — any active staff row, on their own row only. A handle published under somebody's name is theirs to publish |
+| `/announce` | `/announce all\|region:<name> <message>` | `announce` (Program and above). **Sends nothing**; drafts and freezes the audience |
+| `/announce_send` | `/announce_send <id>` | `announce`, **and only the person who drafted it** — confirming somebody else's draft is confirming words you did not write |
+| `/announce_cancel` | `/announce_cancel <id>` | `announce`, **anybody who holds it**. Stopping is the recoverable direction; a bad broadcast going out while the only person who can halt it is asleep is the worse failure |
+| `/announcements` | `/announcements` | `announce` |
+| `/export` | `/export` | `export` (Program and above), scoped by the same visibility rule. **No teacher's words in the file** |
 
 **The four words staff type, and what each writes.** Eight statuses exist; staff
 type four verbs and the system writes the rest. Which four is in the table above.
@@ -867,8 +979,30 @@ no undo. `RUNBOOK.md` §4.11 is the operator's version, including the rule that
 *lengthening* a period requires teachers to re-accept the privacy notice while
 shortening one does not.
 
-**Nothing is built yet.** The job, the settings and the rewritten notice ship
-together (§5.2).
+**Built, and it ships as one release** — the nightly job, the three settings, the
+notice generated from them, the bumped wording version and the re-consent gate. No
+part of it goes out alone: a job with no notice deletes data against a promise to
+keep it, and a notice with no job promises deletion that nothing performs.
+
+**The rule covers twelve tables, and no further setting was invented for any of
+them.** Each is tied to a period already chosen or to a stated reason for keeping
+it, because three periods are three sentences in a notice and twelve would be a
+document.
+
+| Table | Rule | Why |
+|---|---|---|
+| `cases` | 7 days after `closed_at`, or 180 if `importance` is not `Normal` | Above |
+| `case_notes` | Cascades from the case | Staff writing about teachers must not outlive it |
+| `messages` | `MESSAGE_RETENTION_DAYS` | The interaction log |
+| `conversation_states` | The same period, measured after `expires_at` | Holds **a teacher's typed question** on the abandoned path. An expired state is already treated as absent, so deleting one changes no behaviour |
+| `urgent_code_attempts` | The same period | A chat id per wrong guess, meaningful only inside a 60-minute window. Nothing had ever deleted one |
+| `processed_updates` | 24 hours | Far longer than Telegram retries for |
+| `sync_runs.rejections` | The jsonb is emptied after the same period; **the row stays** | Held **teacher email addresses**, every ten minutes, for ever. `rows_rejected` is a separate count, so the operational history survives the scrub |
+| `announcement_recipients` | 30 days after the announcement finished | After a month, per-person delivery state answers no question anybody asks |
+| `announcements` | **Never pruned** | The record of what the Ministry told teachers. Staff-written, no teacher's words |
+| `urgent_codes` | **Never pruned** | Audit-class: who authorised an emergency, and for whom. The schema has no foreign key precisely because it outlives the case |
+| `audit_log` | **Never pruned** | Who granted what |
+| `job_runs`, `case_sequences` | **Never pruned** | Bounded. `case_sequences` in particular *must* survive a deletion, or a reference could be reissued and two cases would share one number |
 
 **Three consequences, stated so they are inherited rather than rediscovered.** A
 week after a case is closed its reference stops resolving, so a teacher
@@ -1006,7 +1140,10 @@ the original leak came back.
 
 **Main menu:** 4 topic shortcuts (Visa, Travel and Arrival, Contract Signing,
 Accommodation) + All FAQ topics · Submit Documents · Check My Case · Contact
-Support · Change Language · Urgent Case.
+Support · Change Language · Urgent Case · **Who covers my region?**
+
+The last of those is the newest and is deliberately **not** behind the sign-in
+gate or the re-consent gate — §5.3.
 
 **FAQ hub:** all 11 topics + Main Menu.
 
@@ -1167,6 +1304,53 @@ in.
 ---
 
 ## 11. Triggers and scheduled jobs
+
+### 11.0 The rebuild's schedule — and the crontab is UTC
+
+Four scheduled jobs, run by `graphile-worker` in the worker process. Nothing
+scheduled runs inside the webhook.
+
+| Entry | Job | What |
+|---|---|---|
+| `*/10 * * * *` | sync | Copy the answer bank and the roster out of the spreadsheet |
+| `*/5 * * * *` | heartbeat | Alarm on any job that has stopped |
+| `0 21 * * *` | retention | The nightly deletion pass — **02:00 Tashkent** |
+| `0 2 * * *` | digest | The morning lists, the teacher chase, the handle re-check — **07:00 Tashkent** |
+| `* * * * *` | announcements | Send the next batch of any confirmed announcement |
+
+> ⚠️ **Absolute times are written in UTC, whatever the container says, and this is
+> the one thing here that fails silently.** `graphile-worker` matches its crontab
+> with `getUTCHours()`. `docker-compose.yml` sets `TZ: Asia/Tashkent` on both
+> services, which changes `Date#getHours()`, the log timestamps and every
+> `AT TIME ZONE` reader — **and does not change cron matching at all**, so the
+> timezone setting makes this look handled when it is not. A digest written the
+> obvious way as `0 7 * * *` arrives at noon, five hours into the working day,
+> looking like nothing at all. Use `tashkentCron()`; the arithmetic is asserted in
+> a test rather than described in a comment.
+>
+> Uzbekistan is UTC+5 all year with no daylight saving, so a fixed offset is safe
+> here in a way it would not be in most places. **Do not copy this pattern
+> somewhere it breaks twice a year.**
+
+**Only scheduled work records a run.** Nothing triggered by a person does, and the
+reason is the heartbeat: it alarms on any job whose last success is older than 1.5
+times its expected interval, so an on-demand job would raise a critical alarm
+**every hour in which nobody used it** — which is most hours. The alarm that
+exists to make silence audible would have become the noisiest thing in the
+channel, and the fix people reach for is to stop reading it.
+
+**That is why an announcement is swept rather than enqueued.** Confirming one
+marks a row, and a scheduled sweeper picks it up. One path, watched by the
+heartbeat, and resumable after a restart by construction rather than through a
+second recovery mechanism.
+
+**Each sweep takes one batch of 200 and returns.** The worker is `concurrency: 1`,
+so a run that paced itself through 1,800 sends would hold the only slot for
+minutes — during which the ten-minute sync and the five-minute heartbeat do not
+run, and the first symptom would be a *false* alarm that the sheet sync had
+stopped, raised late by the heartbeat that was itself starved.
+
+### 11.1 The Apps Script triggers — historical
 
 Installed by `installTriggers()`. All handlers are **public-named** (no trailing
 underscore) — Apps Script treats trailing-underscore functions as private and
@@ -1337,25 +1521,11 @@ rather than vanishing into the `doPost` catch.
 
 ## 16. Deferred / not built
 
-**Next stage, and each already has its permission or its query in place, so the
-stage adds the missing half rather than a new model:**
-
-- **`/announce`** — messaging teachers in bulk. The `announce` capability exists
-  with no command behind it (§6.1), and the tables that make a paced send
-  resumable rather than restartable already exist. Deferred because it and
-  `/export` are the same feature wearing two hats — bulk egress with a
-  confirmation step, a paced fan-out and a report back to the sender — and
-  building half of that machinery in a command file is how it ends up in the
-  wrong place.
-- **`/export`** — exporting case records. Same reason, plus one of its own: it
-  needs the bot to be able to send a **file**, and today it can send only text.
-- **The daily overdue digest, and chasing a missed promised date** (§7.1.2). Both
-  queries are written and tested; the schedule is what is missing.
-- **The retention job**, its three settings and the rewritten privacy notice
-  (§5.2, §7.1.3) — one release, or the notice is false in one direction or the
-  other. **Asking every teacher to accept the notice again ships with it.**
-- **Anonymising a teacher who asks to be removed**, which is a different and
-  smaller job from retention (§13).
+**✅ Everything this list held under "next stage" is now built** — `/announce` and
+`/export`, the daily digest and the teacher chase, the retention job with its
+three settings and the generated notice, the gate that asks every teacher to
+accept it again, and `/forget`. §6.5 has the commands, §7.1.3 the retention rules
+and §11.0 the schedule.
 
 **Later:**
 

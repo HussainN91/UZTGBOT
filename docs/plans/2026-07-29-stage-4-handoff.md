@@ -14,20 +14,29 @@ which opens with a "Where this stands" table naming every task and its state.
 
 ## 1. State, in one paragraph
 
-**Stage 4 is complete. Stage 5 is planned, and Layers 0, 1 and 2 of it are built and committed.**
-Every rule the stage needs — retention, re-consent, the generated privacy notice, anonymisation,
-announcements, the teacher chase — is written and tested. **None of it is reachable by a person or a
-clock.** No command, no scheduled job, and no teacher-visible change has shipped. That is the
-correct half-way state for a leaves-first build; nothing is half-built.
+**Stage 5 is complete. Every task from 47 to 71 is built, including the optional one, and none of it
+is committed.** The system now acts without being asked: records are deleted at two in the morning,
+each staff member gets their own list at seven, a teacher whose case is waiting on them is chased
+three times and then their owner is told, MoPSE can reach 1,800 teachers with a report at the end, a
+teacher who asks to be removed can be, and a teacher who does not know who to talk to can ask who
+covers their region.
 
 ```
-922 tests, 56 files, none skipped · typecheck clean · build clean · deps:check clean
+1,071 tests across 62 files · 0 failed · 0 skipped · 277 seconds
+typecheck clean · build clean · deps:check clean · 76 source files · 62 test files
 ```
 
-Verify it yourself before trusting it — see §7. Do not take the numbers above on trust; this
-document has been wrong before and the only reason it is not wrong now is that somebody ran things.
+**That figure was run in full on 30 July and is not inherited.** The previous two revisions of this
+document declined to state a number because no full run had finished; §7 explains why, and the reason
+turned out to be an environment fault rather than a slow suite.
 
-**Next: Task 61.** The build order and every task's state are in the Stage 5 plan's table.
+**Next: there is no next task in this stage.** The work is Stage 6, and §8 says what is known about
+it. What this session did *not* do is commit — see the warning below.
+
+> ⚠️ **The working tree is dirty and nothing since `787333c` is committed.** That is the standing
+> pattern — work through, offer at a boundary — but it now covers **eleven tasks**, three documents
+> and a rename across the whole of `src/`. A `git checkout` loses all of it. The head of project says
+> "commit" and that is when it happens. **Offer early.**
 
 ## 2. Commits, oldest first
 
@@ -39,6 +48,13 @@ Stage 4 ran `d743d72..807284c` and is not re-listed; `git log --oneline d743d72.
 | `b3112b0` `d38c639` | Documentation only: the Stage 4 handoff and its pointer at Stage 5 |
 | `1f9f5ca` | **The Stage 5 plan.** Three questions answered, five faults found before any code |
 | `cb791f2` | **Stage 5 Layers 0, 1 and 2** — tasks 47–55 and 57–60 |
+| `787333c` | Documentation: this handoff, rewritten for Stage 5 |
+| *(uncommitted)* | **Tasks 61–71.** Every command, both teacher-visible changes, all three jobs, the layer checker, and the whole documentation pass |
+
+**When this is split into commits, the natural boundaries are:** the commands (61–64), the two
+teacher-visible changes (65–66), the three jobs (67–69), the layer checker (70), the
+province→region rename, and the documentation (71). The rename touches sixteen source files and is
+text only — keeping it apart from the features is what makes both diffs readable.
 
 ## 3. The answers that decide what got built
 
@@ -50,144 +66,183 @@ exists with a hand-written reason; `/restore` exists; and retention is 7 days / 
 critical / 3 for the interaction log / never for the audit log, **as three settings rather than
 constants**.
 
-**Three more were answered on 30 July**, while the Stage 5 plan was being written. All three are
-recorded at the top of that plan with their costs.
+**Three more were answered on 30 July** while the Stage 5 plan was being written, and all three are
+recorded at the top of that plan with their costs: the nightly content roll-up was **declined**; the
+bot **does** name a teacher's regional manager, by name and Telegram username, with the handle
+**verified rather than trusted**; and the re-consent gate **stands in front of cases and leaves the
+answer bank open**.
 
-- **The nightly content roll-up: no.** Nothing is built for it. The cost stands and is written down
-  twice so nobody rediscovers it in November: past three days, *what are teachers asking that the
-  answer bank cannot cover* and *which confident answers are they rejecting* cannot be answered at
-  all. **Task 71 must record in the runbook that §4.7 was offered and declined**, not merely
-  deleted — a section that reads as an oversight is one somebody restores by accident, and a
-  restored §4.7 returns nothing and looks like good news.
-- **The bot names a teacher's regional manager: yes, by name and Telegram username.** Not a
-  telephone number. It needed `staff.telegram_username`, which is why it had to be settled before
-  the migration. **The handle is verified rather than trusted** — see D47 and R33.
-- **The re-consent gate stands in front of cases and leaves the answer bank open.** The
-  recommended option, and the only one that produces a record saying a named teacher confirmed a
-  specific version on a specific date.
+**Two more were answered on 30 July, in the last session, and they are the ones a new reader will
+not know.**
+
+- **The word is *region*, not *province*.** Uzbekistan has regions and districts. **This bot is
+  concerned with regions only and has no concept of a district.** About thirty user-visible strings
+  said "province" while every command a person types says `region:`; that is now corrected across
+  `src/` and the three documents. Do not reintroduce it.
+- **The regions each staff member covers are entered by hand, later.** That is a decision, and it
+  has a consequence worth understanding before somebody reports it as a fault: **an empty `regions`
+  array means *every* region**, deliberately. So until they are entered, every staff member covers
+  the whole country, and "who covers my region?" is answered by **rank alone** — the most junior
+  person who can act on cases, wherever they sit. `RUNBOOK.md` §2.6 says so in the operator's words.
 
 **One correction worth carrying, from Stage 4.** I proposed exempting the answer-feedback rows from
 the 3-day rule and was told **"plan supersedes my choices!"** Three days means three days for every
 row.
 
-## 4. What is built in Stage 5, and the eight things that will bite
+## 4. What is built, and the things that will bite
 
-| Task | What | File |
+Tasks 47–60 are committed at `cb791f2`. Tasks 61–71 are in the working tree.
+
+| Task | What a person can now do | Where |
 |---|---|---|
-| 47 | The migration | `drizzle/0008_retention_and_chasing.sql` |
-| 48 | Retention periods, and the re-consent rule | `src/config/retention.ts` |
-| 49 | The notice, generated | `src/config/privacy.ts` |
-| 50 | The CSV writer | `src/export/csv.ts` |
-| 51 | `sendDocument` | `src/telegram/send.ts` |
-| 52 | Every message the jobs will send | `src/digest/format.ts` |
-| 53 | Announcement audiences | `src/announcements/audience.ts` |
-| 54 | Reading the three periods | `src/config/settings.ts` |
-| 55 | Every delete and the one scrub | `src/retention/purge.ts` |
-| 57 | What a teacher accepted | `src/teachers/privacy.ts` |
-| 58 | Anonymising a teacher | `src/teachers/forget.ts` |
-| 59 | The announcement store | `src/announcements/store.ts` |
-| 60 | The chase queries and the counter reset | `cases/queries.ts`, `cases/service.ts` |
+| 61 | `/retention` — read the three periods, change one, be warned before lengthening | `commands/ops.ts` |
+| 62 | `/announce` `/announce_send` `/announce_cancel` `/announcements` | `commands/announce.ts` |
+| 63 | `/export` — a scoped CSV with no teacher's words | same file |
+| 64 | `/forget <id> FORGET` — anonymise on request, System only | `commands/staff.ts` |
+| 65 | **The re-consent gate.** Reaches all 1,800 teachers | `router.ts`, `handlers/menu.ts` |
+| 66 | "Who covers my region?", and `/username` for staff | `staff/repository.ts`, `router.ts` |
+| 67 | The nightly deletion job, 02:00 Tashkent | `worker/tasks/retention.ts` |
+| 68 | The 07:00 digest, the teacher chase, the daily handle re-check | `worker/tasks/digest.ts` |
+| 69 | **The announcement sweeper.** Every minute, 200 a batch | `worker/tasks/announcements.ts` |
+| 70 | The layer rule, enforced by `npm run deps:check` | `scripts/dependency-tree.mjs` |
+| 71 | All three documents corrected, and the tree regenerated | `BOT-SPEC` `RUNBOOK` `CONCERNS` |
 
 **`privacyNotice` takes the periods and renders them. Never type a number of days into
-`privacy.ts`.** A test reads that module's own source and fails if you do. The whole design rests on
-the notice being unable to disagree with the settings, and a literal that happens to match today
-passes every other test and fails the day somebody changes a period.
+`privacy.ts`.** A test reads that module's own source and fails if you do. `/retention` prints
+`retentionParagraph()` — the notice's own text — rather than describing the periods in its own
+words, for the same reason.
 
 **`requiresReconsent` is asymmetric on purpose. Do not replace it with a hash.** Lengthening a
 period asks 1,800 teachers to read the notice again; shortening one must not. Any digest of the
-notice text changes in both directions. `null` means indefinite and is the longest period there is,
-in every direction and at every layer.
+notice text changes in both directions. `null` means indefinite and is the longest period there is.
 
-**Every purge function returns 0 and touches nothing when its period is `null`.** That is not
-defensive coding, it is the rule (D30): a job that invents a retention period deletes real records
-against a number nobody chose, and there is no undo. A `0`, a typo and an empty string all become
-`null` in `parsePeriod`. **The first test in `purge.integration.test.ts` is the one asserting
-nothing is deleted, and it is first deliberately.**
+**Every purge function returns 0 and touches nothing when its period is `null`.** That is the rule
+(D30), not defensive coding. The retention job's own first test asserts nothing is deleted, and the
+job **says so out loud once a night** — because at launch a working job that deletes nothing looks
+exactly like a broken one.
 
 **The purge reads `importance` and never `status`.** A `Critical` case that was resolved is
 `Completed`, and nothing about `Completed` remembers it was an emergency. There is a test.
 
-**`deleteResolvedCases` takes no reference and must never take one** (D35). A delete that took one
-would be reachable from a command, and a command that can delete a case by reference is a command
-that deletes the wrong case, with `case_notes` cascading out from under it.
-
 **The chase counters reset inside `updateCase`, beside `closed_at`.** Not in `/await`. Leaving
-`Action required` and re-entering it both restart the clock, and `updateCase` is the one write path
-that sees every status change — putting it in the command is the exact hole that let a reopened case
-keep a stale `closed_at` for three stages.
+`Action required` and re-entering it both restart the clock.
 
-**`casesAwaitingTeacher` and `casesExhaustedChasing` are the only unscoped functions in
-`queries.ts`.** That file's guarantee is about a *person* asking; these feed a job and there is
-nobody whose visibility applies. Both say so at their definition. Anything that later hands their
-rows to a staff member must apply the scope itself.
+**The digest and the chase are one job and the chase runs second.** The chase writes to `cases`, and
+doing the reads first is what stops the digest reporting a case as chased before it was.
 
-**`bindTeacher` writes the accepted periods.** Without it every teacher who signs in is asked to
-re-accept on their very next tap, having accepted moments earlier. `/restore` must **not** touch
-those columns — restoring is undoing one act, not re-running a sign-in (D27). Both have tests.
+**A failed chase does not advance the counter.** Three reminders means three delivered reminders, not
+three attempts. There is a test.
 
-**The audience freeze must not alias its tables.** `audienceWhere` is built from drizzle column
-references that render fully qualified, and an alias makes them unresolvable. See §6.
+**`/announce` refuses an over-long message rather than shortening it.** The guard was wrong the first
+time and the failure was invisible — see §6.
 
-## 5. Deliberate departures from the Stage 5 plan — four so far
+### The sweeper, which is the newest thing and the least forgiving
 
-Each is explained at the site. **Do not revert them.** Stage 4's own twenty-six are listed in
-`docs/plans/2026-07-28-stage-4-staff.md`'s history and in the Stage 4 sections of this file's
-predecessor; they remain in force and are not repeated here.
+**It takes one batch of 200 and returns.** No pacing loop and no sleeping. The worker is
+`concurrency: 1`, and a long run starves the ten-minute sync and the five-minute heartbeat — the
+first symptom being a *false* alarm that the sheet sync has stopped, raised late by the heartbeat
+that was itself starved.
 
-1. **Task 54 was pulled forward** out of the stated build order. Task 49 changes `privacyNotice`'s
-   signature and its callers cannot compile without the settings reader — the two are one change,
-   and splitting them leaves typecheck broken across a task boundary.
-2. **`SETTING` spreads `RETENTION_SETTING` from `retention.ts`** rather than declaring the three
-   keys a second time. Two lists that must agree with nothing enforcing it is the fault `status.ts`
-   was created to fix.
+**There is no job to enqueue, and there must never be one.** A scheduled sweeper is the only sender.
+That is what makes a restart mid-broadcast resume rather than repeat, and what keeps announcements
+out of `job_runs` where an on-demand row would raise a critical alarm every hour nobody sent one.
+
+**`isRetryable` is the only thing that decides retry versus write-off**, and **a teacher who lost
+access between the draft and the send is `Skipped`, never `Failed`.** The two mean different things
+to whoever reads the report.
+
+**`resetStalledRecipients` is called only when the sweep claimed nothing**, with a **60-minute**
+window. Read the comment before shortening it: the function measures staleness from the
+*announcement's* start rather than from the claim — there is no per-recipient claim timestamp — so a
+shorter window would eventually return recipients a slow-but-living run is still working through,
+and message those teachers twice. **A duplicate to 1,800 people is the one failure a broadcast must
+not have; a late resume is merely late.**
+
+**A queued announcement with nobody in its audience still finishes.** `claimBatch` moves it to
+`Sending` whether or not it claimed anybody and `finishIfDone` then closes it. There is a test,
+because a broadcast stuck at `Queued` for ever is invisible rather than loud.
+
+## 5. Deliberate departures from the Stage 5 plan
+
+Each is explained at the site. **Do not revert them.** The first four are from the first session,
+5–18 from the second, and 19–25 from the third.
+
+1. **Task 54 was pulled forward** — Task 49 changes `privacyNotice`'s signature and its callers
+   cannot compile without the settings reader.
+2. **`SETTING` spreads `RETENTION_SETTING`** rather than declaring the three keys twice.
 3. **`forgetTeacher` reports three outcomes, not two.** `alreadyForgotten` is kept apart from
-   `notFound`, because reporting the latter for somebody removed last month sends an operator
-   looking for a row that is behaving correctly.
-4. **The chase tests are a new file**, `src/cases/chase.integration.test.ts`. The reset lives in
-   `service.ts` and the queries in `queries.ts`, so either existing home would have split one
-   behaviour across two files.
+   `notFound`.
+4. **The chase tests are a new file**, `src/cases/chase.integration.test.ts`.
+5. **`retentionParagraph` is exported from `privacy.ts`** so `/retention` quotes the notice's own
+   text rather than describing the periods in its own words.
+6. **`announcementMessage` and `announcementOverBy` were added to `digest/format.ts`.**
+   `announcementOverBy` exists because of the fault in §6.
+7. **`OutgoingMessage` gained an optional `document`**, sent by `deliver` after the commit, so an
+   export that rolled back cannot already be in somebody's chat.
+8. **`casesForExport` was added to `queries.ts`** rather than `/export` querying for itself.
+9. **`RouterDeps.telegram` is a new optional field**, narrowed to `getChat` only. When it is absent
+   `/username` writes nothing and says so.
+10. **A new conversation state, `AwaitingPrivacyAcceptance`**, reusing `resumeAfterSignIn` rather
+    than building a second resume mechanism.
+11. **`tashkentCron(hour)` in `worker/main.ts`** instead of literal crontab strings, with the
+    arithmetic asserted in a test.
+12. **The re-consent gate also runs at `chooseCaseTopic`**, because a topic button in scrollback is a
+    live route into filing a case that never passes through the menu.
+13. **`/announce_cancel` may be run by anybody holding `announce`**, unlike `/announce_send`.
+14. **"Who covers my region?" is behind neither gate.**
+15. **`regionManagerFor` takes a region, not a chat id.**
+16. **`ANNOUNCEMENT_RECIPIENT_RETENTION_DAYS` is a constant**, not a settings key.
+17. **`main.ts` only starts a worker when it is the entry point.** See §6.
+18. **`/username` is listed in `staffHelpSection` directly.** It has `capability: null`.
 
-Also: the three `RETENTION_DAYS` tests in `settings.integration.test.ts` are **re-pointed at
-`OVERDUE_DAYS` rather than deleted** — what they pin is the reader, and all three behaviours are
-still worth having. And `RETENTION_DAYS` itself is **deleted, not renamed** (D34).
+From this session:
+
+19. **`AnnouncementSender` returns a `SendResult`, not a boolean** — unlike `DigestSender` one row
+    along. The sweeper has to branch on `isRetryable`, and a boolean would force it to re-derive the
+    failure kind or, worse, to guess.
+20. **The sweeper stops the batch on a rate limit and hands the remainder back unspent.** Not in the
+    plan. Telegram has just said we are going too fast; sending the other 199 earns a longer limit
+    and delivers none of them. The next sweep is a minute away.
+21. **`resetStalledRecipients` runs only when nothing was claimable**, at 60 minutes. §4 has the
+    reasoning; it is the difference between a late broadcast and a duplicated one.
+22. **Task 70 was built rather than dropped.** It was the one droppable task and there was room. It
+    is proven both ways: it passes on the tree as it stands, and an upward import added on purpose
+    made it fail. A checker nobody has watched fail is the `dependency-cruiser` failure again.
+23. **"Province" became "region" across sixteen source files and all three documents.** Answered
+    directly by the head of project; §3 has the rule.
+24. **`RUNBOOK.md` gained §2.6, "Everything that has to be set by hand"**, which the plan did not
+    list. Asked for directly. **Every item on it is invisible when it is missing** — the software
+    runs perfectly and answers less — which is why they are gathered in one place rather than left in
+    the procedures that need them.
+25. **`BOT-SPEC.md` gained §5.3 and §11.0**, and its §11 was split into 11.0 (the rebuild's schedule)
+    and 11.1 (the historical Apps Script triggers). The plan said "§11 or wherever scheduled work is
+    described"; §11 described only the old system, so describing the new one inside it would have
+    read as a correction of the old rather than as a separate thing.
 
 ## 6. Faults found by building
 
-**Two in Stage 5, both by running things.**
+**Two in Stage 5's first session**, both by running things: the audience freeze did not run at all
+(aliased tables against fully-qualified drizzle column references), and `delivery_state` had no
+`Sending` value.
 
-**The audience freeze did not run at all.** `audienceWhere` renders drizzle column references as
-fully-qualified `"teachers"."verification_state"`, and the `INSERT … SELECT` around it had aliased
-its tables as `t` and `r` — so PostgreSQL could not resolve the names and rejected the statement
-outright. Every test in the file failed at once. The same class of trap `visibility.ts` documents
-one row along: it fails at the database, where neither the typechecker nor a reading can see it.
+**Six in the second session**, and each one is worth a sentence because the class recurs. **The
+over-long announcement guard could never fire** — `announcementMessage` clamps to Telegram's limit,
+so the check compared against a number already capped, and an oversized announcement would have been
+silently truncated and delivered to 1,800 teachers ending in "… cut short". **`clearUsername` always
+reported that nothing was published**, reading the handle back from `RETURNING` on the `UPDATE` that
+had just nulled it. **Importing anything from `worker/main.ts` started a second worker**, because
+`main()` ran at module scope. **`ORDER BY id` on `audit_log` is meaningless** — the key is a random
+uuid; order by `at`. **Five existing tests were building teachers the real system cannot produce**,
+`Verified` with no recorded privacy acceptance, and the gate correctly stopped all five. **Two of the
+plan's own test sketches were impossible as written.**
 
-**`delivery_state` had no `Sending` value, and the plan assumed one.** Without it a recipient cannot
-be *claimed*, so two overlapping sweeps would both read the same `Pending` rows and message that
-teacher twice — the one failure a broadcast to 1,800 people must not have. Added to `0008` as
-`ALTER TYPE … ADD VALUE`, which is additive and safe inside the migration transaction on PG 17. The
-migration was regenerated and both paths reproven. **This was a schema change the plan did not
-anticipate**, and it is recorded in the plan's own table rather than folded quietly into D45.
+**One in the third session, and it was in the environment rather than the code.** It is in §7,
+because that is where somebody will look for it.
 
-**Five more were found before any code was written**, by reading the system closely enough to plan
-against it. All five are handled in the plan and are traced as R22–R26. The two that matter most for
-what is still to build:
-
-- **`graphile-worker` matches its crontab in UTC** (`getUTCHours` in `dist/cron.js`), whatever
-  `TZ: Asia/Tashkent` in `docker-compose.yml` says. Both existing entries are intervals, so nothing
-  has hit it. **The digest is the first absolute-time job in this system.** 07:00 Tashkent is
-  `0 2 * * *`. `constants.ts` warns about this exact failure in these exact words.
-- **`recordJobRun` must never wrap on-demand work.** `checkHeartbeats` alarms on any `job_runs` row
-  whose last success is older than 1.5× its interval, so an announcement job would raise a critical
-  alarm every hour in which nobody sent an announcement. Announcements are driven by a **scheduled
-  sweeper** instead, which is also what makes a restart mid-broadcast resume rather than repeat.
-
-**Stage 4's three faults in already-committed code** — a revoked teacher restoring their own access,
-a reopened case keeping its `closed_at`, and the status vocabulary existing three times — are fixed
-and are described in `docs/plans/2026-07-28-stage-4-staff.md`. The `closed_at` one is why Stage 5's
-retention can measure from that column at all.
-
-All of them are the same lesson: **these are found by running things and by needing to use them,
-never by reading.**
+**Worth stating plainly: the sweeper had no faults.** It was green on its second run, and the first
+run's failures were entirely the environment fault below. That is unusual for this project and is
+recorded honestly rather than as a claim about the code — the property that has held every session is
+that faults are found by *running*, not by reading, and running is what happened here too.
 
 ## 7. Running anything
 
@@ -210,8 +265,32 @@ Then, in PowerShell:
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run
 ```
 
-**A run reporting hundreds of skips proved nothing** — that is the exact shape of a no-database run,
-and this project has been misled by it before. A real run reports **0 skipped**.
+**A run reporting hundreds of skips proved nothing** — that is the exact shape of a no-database run.
+A real run reports **0 skipped**. The full suite takes **about four and a half minutes**, so run it
+in the background and read the summary.
+
+### ⚠️ Kill stray `vitest` processes before you trust anything
+
+**This cost the first hour of the third session and had silently cost the previous two their full
+suite runs.**
+
+Two `vitest run` processes from an **earlier session** were still alive. They had been frozen while
+Docker Desktop was paused, and the moment it was resumed they woke up and began truncating tables
+underneath the run in progress. The symptoms were bizarre and pointed everywhere except the cause: a
+duplicate primary key immediately after a `TRUNCATE`, a foreign key violation against a row inserted
+two statements earlier, and a fixture count of five where one row had been written.
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -like '*vitest*' }
+```
+
+**Check that before running anything, and check it again if a run fails in a way that makes no
+sense.** The handoff has always said "run one at a time"; what it did not say is that a run you did
+not start can still be running.
+
+**Never pipe `vitest` through `head`.** `head` closes the pipe and the shell command returns, but
+**the run keeps going** — which is how one of these was created. Redirect to a file and `tail` it.
 
 **Docker Desktop can be *paused*.** A run then hangs with no output at all. Check with
 `docker desktop status` — if it says `paused`, **`docker desktop start` does NOT unpause it**. Only
@@ -226,112 +305,118 @@ Never install another.
 ### One intermittent failure, observed once and not reproduced
 
 **`src/staff/repository.integration.test.ts` → `reports a duplicate as a duplicate when two callers
-race` failed once**, on 30 July, and has passed in every full run since — including three today. The
-assertion text was not captured, which is the reason this note is vague and is itself the lesson.
-The likeliest cause is the loser getting an error code other than `23505`, which `addStaff` rethrows
-rather than converting. **If it recurs, widen the `catch` to name whatever code actually arrived**
-rather than loosening the assertion.
+race` failed once**, on 30 July, and has passed in every full run since — including the two complete
+runs in the third session. The likeliest cause is the loser getting an error code other than `23505`,
+which `addStaff` rethrows rather than converting. **If it recurs, widen the `catch` to name whatever
+code actually arrived** rather than loosening the assertion.
+
+**One test carries an explicit 30-second timeout**, in `announcements.integration.test.ts`: two
+hundred recipients is two hundred access re-checks and two hundred marks, sequentially, which is a
+few seconds of round trips. That is not slowness to fix — it is the measurement that says why the
+batch is 200 and not 2,000.
 
 ### If you touch the schema
 
 `npx drizzle-kit generate` and then **read the SQL it emitted before accepting it.** It has emitted a
 destructive `DROP TYPE`/recreate in this repository once already. Rename the file from its generated
 nonsense to match the convention, and change the `tag` in `drizzle/meta/_journal.json` to match.
+Then prove the **deploy** path against an empty database as well as the incremental one.
 
-Then prove the **deploy** path, not only the incremental one, because the server applies every
-migration to a database that has none:
+**Stage 5 needed no migration beyond `0008`**, which carries everything including
+`staff.telegram_username` and the `Sending` delivery state.
 
-```bash
-docker exec mopse-test-postgres-1 psql -U mopse -d mopse_test -c "CREATE DATABASE mopse_migrate_check"
-TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_migrate_check' node --experimental-strip-types \
-  -e "import('./src/test/global-setup.ts').then(m => m.setup()).then(() => console.log('OK'))"
-docker exec mopse-test-postgres-1 psql -U mopse -d mopse_migrate_check -c "\d cases"
-docker exec mopse-test-postgres-1 psql -U mopse -d mopse_test -c "DROP DATABASE mopse_migrate_check"
-```
+## 8. What to do next
 
-**If you regenerate a migration that has already been applied locally, drop and rebuild
-`mopse_test`.** Drizzle tracks migrations by hash, so a regenerated file is a new migration and its
-`ADD COLUMN`s fail against a database that already has them. The test database has no volume, so
-rebuilding it costs nothing:
+**Stage 5 is finished. There is no remaining task in it.** Two things come before any new code.
 
-```bash
-docker exec mopse-test-postgres-1 psql -U mopse -d postgres -c "DROP DATABASE mopse_test"
-docker exec mopse-test-postgres-1 psql -U mopse -d postgres -c "CREATE DATABASE mopse_test"
-```
+**1. Commit.** Eleven tasks, three documents and a rename are sitting uncommitted. §2 has the
+suggested boundaries. **Offer this first, before anything else.**
 
-## 8. What to do next — Task 61 onward
+**2. The artifact.** §11. It is the head of project's document and it is the furthest behind
+anything in the project.
 
-**The plan is written and its build order is stated. Follow it top to bottom.** What remains is
-Layer 3 (six commands), Layer 4 (three scheduled jobs), the optional layer checker, and the
-documentation pass.
+### Then Stage 6, and what is already known about it
 
-`61 · 62 · 63 · 64 · 65 · 66 · 67 · 68 · 69 · 70? · 71`
+**Documents.** D24 keeps Google Forms; the `FORMS` tab and the response sync are Stage 6.
+`sendDocument` landed in Stage 5 for `/export` and is deliberately **the only half of document
+handling that exists** — the bot still never accepts or stores a file, and `CASE_CATEGORY.SUBMIT_DOCS`
+is waiting with the queue map already total over it.
 
-**Task 56 is not built** (the roll-up, declined) and its number is kept in place so that a reference
-to a task number still means what it said.
+**The resignation route** (decision 9 of `2026-07-29-staff-and-lifecycle-design.md`) is later, and
+Stage 5 left it exactly one thing: `forgetTeacher` is a callable function with its own tests rather
+than logic buried inside `/forget`. The three-month timer is unwritten.
 
-### The four things not to get wrong, restated because they are what is left
+**The `/await` taxonomy** (D26) is unbuilt. The teacher's chase message renders `public_update`
+verbatim and **must not parse it**, so a taxonomy changes the chase's *input* rather than the chase.
 
-**Retention is one release or it is a lie.** The job, the three settings, the rewritten notice, the
-bumped version and the re-consent flow ship together. The first four are built; the gate (Task 65)
-and the job (Task 67) are not. **Nothing may deploy until both are.**
+**The content roll-up** was offered and declined (Q1). It stays available and is one table and one
+step in a job that now exists. `RUNBOOK.md` §4.7 records the decision so nobody restores the section
+by accident.
 
-**The crontab is UTC.** 07:00 Tashkent is `0 2 * * *`. Assert the arithmetic in a test rather than
-in a comment.
+### The four things not to get wrong, restated
+
+**Retention is one release or it is a lie.** All five parts are built — the job, the three settings,
+the generated notice, the bumped wording version and the re-consent gate. **They must deploy
+together.**
+
+**The crontab is UTC.** Use `tashkentCron()`; there is a test for the arithmetic.
 
 **Only scheduled work calls `recordJobRun`.** Announcements are swept, never enqueued.
 
-**Chasing chases the teacher.** The queries already do; the job must not re-derive who to message.
+**Chasing chases the teacher.** The queries decide who; the job does not re-derive it.
 
 ### Where the documentation stands
 
-**`BOT-SPEC.md`, `RUNBOOK.md` and `CONCERNS-AND-IT-ACTIONS.md` are still correct as of Stage 4 and
-must not be edited before Task 71.** They are corrected once, at the end, in one pass, as task 41
-was — a document edited a little at a time as code lands describes a system half-way between two
-states. **Anything Stage 5 makes wrong is a documentation item in the Stage 5 plan**, and Task 71's
-checklist there is already written from the work done so far. `src/config/privacy.ts` is the one
-exception, because it is code; it has already been rewritten and ships with the job.
+**All three specification documents are now correct as of Stage 5** — `BOT-SPEC.md` at 1.4,
+`RUNBOOK.md` at 4.0, `CONCERNS-AND-IT-ACTIONS.md` at 4.0. **The rule for Stage 6 is the rule that has
+held for two stages: do not edit them mid-stage.** Collect what a stage makes wrong and correct them
+once, at the end, in one pass. A document edited a little at a time as code lands describes a system
+half-way between two states.
 
-### The dependency graph
+`docs/dependency-tree.md` is regenerated and current at **76 source files, 62 test files**.
+
+### The dependency graph, and the layer rule
 
 ```
 npm run deps          → writes docs/dependency-tree.md
 npm run deps:check    → silent, exits non-zero on a cycle, an unresolvable
-                        import, or a file nothing uses
+                        import, a file nothing uses, or an import that points
+                        UP the layers
 ```
 
-**Current state: 72 source files, 56 test files, no cycles, no unresolved imports, nothing unused.**
-Run `npm run deps` after adding files and commit the regenerated document — **Task 71 step 4 does
-this and it has not been done yet**, so `docs/dependency-tree.md` is currently stale at 64 source
-files. `deps:check` passes regardless; it computes the graph rather than reading the document.
-
-**Task 70 would give the layer rule a checker.** It is droppable and nothing depends on it.
+**The layer rule is now mechanical** (Task 70). The layers are written down in
+`scripts/dependency-tree.mjs`, directory by directory, with two deliberate overrides:
+`config/settings.ts` is a **store** despite living among the pure modules, and `telegram/send.ts` is
+a **leaf** despite living in the command layer. **A type-only import may point upward and is not a
+violation** — it is erased at compile time, and this codebase relies on it.
 
 ### Two tools, both settled — do not spend time on either
 
 **`dependency-cruiser` cannot work here yet.** It needs `typescript@7.1.0` and `latest` is `7.0.2`.
-Installed on 29 July, it cruised **0 modules while printing a green tick** and was removed. Do not
-install a nightly TypeScript to make a linter run, and do not downgrade it either.
+Installed on 29 July, it cruised **0 modules while printing a green tick** and was removed. That
+failure is why Task 70's checker was proven against a deliberate violation before being trusted.
 
-```bash
-npm view typescript version   # 7.1.0 or above → dependency-cruiser can work here
-```
-
-**`repowise` is rejected. The head of project's words were "ignore repowise forever".** This is a
-closed decision: do not propose it, do not re-test it, do not mention it.
+**`repowise` is rejected. The head of project's words were "ignore repowise forever".** Do not
+propose it, do not re-test it, do not mention it.
 
 ## 9. Open questions
 
-**None.** Nine have been answered across the project — four original, two during Stage 4, three
-during Stage 5 planning. If a new one arises, **ask; do not assume, and do not decide it yourself.**
+**None about how the software behaves.** Eleven have been answered across the project, and the last
+two were answered in this session (§3).
 
-Two things are still waiting on MoPSE, and neither is a decision about how the software behaves:
-whether the privacy notice says the right things — **now urgent, because the rewritten notice is
-already in the code and re-consent has not yet shipped, so reviewing it now still means one round
-of re-consent instead of two** — and whether sign-in should be reconsidered before launch, which
-expires at launch by itself. Both are in the artifact (§11) under "what we need from you".
+Two things are still waiting on MoPSE, and neither is an engineering decision:
 
-**The launch gate is off engineering.** `RUNBOOK.md` §1.4 is the checklist and none of it is code.
+**Whether the privacy notice says the right things — and this is now the sharpest item on the
+project.** The rewritten notice and the gate that shows it are both in the tree. **Reviewing it
+before that deploy means one round of re-consent. Reviewing it afterwards means two** — 1,800 people
+asked to read it, and then asked again.
+
+**Whether sign-in should be reconsidered before launch.** That decision expires at launch: today it
+is a change to a flow nobody has used.
+
+**The launch gate is off engineering.** `RUNBOOK.md` §1.4 is the checklist and none of it is code —
+and §2.6 is the new list of everything a person has to type in, none of which announces its own
+absence.
 
 ## 10. How this project is run
 
@@ -372,7 +457,6 @@ with its commit hash.
 > speed and do not copy anything out of it. It flows one way — from what was actually built, to them.
 
 Update it **in place** by passing that URL as `url`. Never mint a new one; favicon 🤖, keep it.
-**Currently v10, covering Stage 4 in full and Stage 5 through Layer 2.**
 
 The mechanism, because getting it wrong costs a whole rewrite:
 
