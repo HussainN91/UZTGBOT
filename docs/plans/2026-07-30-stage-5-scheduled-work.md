@@ -14,7 +14,7 @@
 
 ## ▶ Where this stands — 30 July 2026, third session
 
-# 🟢 **STAGE 5 IS COMPLETE. Every task is built, including the optional one, and the whole suite has been run. NOT COMMITTED.**
+# 🟢 **STAGE 5 IS COMPLETE, COMMITTED AND VERIFIED. Every task is built, including the optional one.**
 
 ```
 1,071 tests across 62 files · 0 failed · 0 skipped · 277s
@@ -23,7 +23,7 @@ typecheck clean · build clean · deps:check clean · 76 source files · 62 test
 
 **That number was run, in full, on 30 July.** The earlier figure in this block was never verified and has been replaced rather than carried forward.
 
-> ⚠️ **The working tree is dirty.** Tasks 61–71 are uncommitted on top of `787333c`.
+> ✅ **Committed in five commits** on top of `787333c` — `3e9e6cc` `63e7b80` `18aa4ae` `a1037a2` `6ff0ac0`. Each of the four code commits was typechecked on its own in a scratch worktree, not only the tip.
 
 **What that means in plain terms:** a System member can set the retention periods, remove a teacher on request and take an export; a Program member can draft an announcement, confirm it, and it reaches 1,800 teachers two hundred a minute with a report at the end; every teacher will be asked to read the privacy notice again, and can ask who covers their region; records are deleted at two in the morning, and the digest and the teacher chase go out at seven.
 
@@ -50,17 +50,17 @@ typecheck clean · build clean · deps:check clean · 76 source files · 62 test
 | 58 | `forgetTeacher` | ✅ `src/teachers/forget.ts` |
 | 59 | The announcement store | ✅ `src/announcements/store.ts`; **needed an enum value** — see below |
 | 60 | Chase queries, and the counter reset | ✅ `queries.ts` + `service.ts`; the reset is inside `updateCase` |
-| 61 | `/retention` | ✅ *uncommitted* — `commands/ops.ts`; quotes the notice's own paragraph |
-| 62 | `/announce` `/announce_send` `/announce_cancel` `/announcements` | ✅ *uncommitted* — `commands/announce.ts` |
-| 63 | `/export` | ✅ *uncommitted* — same file; `casesForExport` added to `queries.ts` |
-| 64 | `/forget` | ✅ *uncommitted* — `commands/staff.ts`; `teacher.forget` at System |
-| 65 | The teacher's re-consent gate | ✅ *uncommitted* — **also gates the topic-button route**, see departures |
-| 66 | Telling a teacher who their regional manager is | ✅ *uncommitted* — plus `/username`, verified on set and daily. **One tie-break left open, see below** |
-| 67 | The retention job | ✅ *uncommitted* — `0 21 * * *` via `tashkentCron(2)` |
-| 68 | The daily digest job | ✅ *uncommitted* — `0 2 * * *` via `tashkentCron(7)`, asserted in a test |
-| 69 | The announcement sweeper | ✅ *uncommitted* — `worker/tasks/announcements.ts`; 16 tests |
-| 70 | The layer rule, mechanically enforced | ✅ *uncommitted* — **built, not dropped**; `scripts/dependency-tree.mjs` |
-| 71 | Correct every document this stage makes wrong | ✅ *uncommitted* — all three, plus the tree and this table |
+| 61 | `/retention` | ✅ `3e9e6cc` — `commands/ops.ts`; quotes the notice's own paragraph |
+| 62 | `/announce` `/announce_send` `/announce_cancel` `/announcements` | ✅ `3e9e6cc` — `commands/announce.ts` |
+| 63 | `/export` | ✅ `3e9e6cc` — same file; `casesForExport` added to `queries.ts` |
+| 64 | `/forget` | ✅ `3e9e6cc` — `commands/staff.ts`; `teacher.forget` at System |
+| 65 | The teacher's re-consent gate | ✅ `3e9e6cc` — **also gates the topic-button route**, see departures |
+| 66 | Telling a teacher who their regional manager is | ✅ `3e9e6cc` — plus `/username`, verified on set and daily. **One tie-break left open, see below** |
+| 67 | The retention job | ✅ `3e9e6cc` — `0 21 * * *` via `tashkentCron(2)` |
+| 68 | The daily digest job | ✅ `3e9e6cc` — `0 2 * * *` via `tashkentCron(7)`, asserted in a test |
+| 69 | The announcement sweeper | ✅ `63e7b80` — `worker/tasks/announcements.ts`; 16 tests |
+| 70 | The layer rule, mechanically enforced | ✅ `18aa4ae` — **built, not dropped**; `scripts/dependency-tree.mjs` |
+| 71 | Correct every document this stage makes wrong | ✅ `6ff0ac0` — all three, plus the tree and this table |
 
 ### The one question this session opened — answered, and the answer stands
 

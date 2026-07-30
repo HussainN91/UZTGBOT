@@ -31,12 +31,12 @@ document declined to state a number because no full run had finished; §7 explai
 turned out to be an environment fault rather than a slow suite.
 
 **Next: there is no next task in this stage.** The work is Stage 6, and §8 says what is known about
-it. What this session did *not* do is commit — see the warning below.
+it.
 
-> ⚠️ **The working tree is dirty and nothing since `787333c` is committed.** That is the standing
-> pattern — work through, offer at a boundary — but it now covers **eleven tasks**, three documents
-> and a rename across the whole of `src/`. A `git checkout` loses all of it. The head of project says
-> "commit" and that is when it happens. **Offer early.**
+> ✅ **Everything is committed and the working tree is clean.** Stage 5 landed in five commits, and
+> **each of the four code commits was checked out into a scratch worktree and typechecked on its
+> own** rather than only the tip being verified. That is what §10 asks for and it had not been done
+> that way before.
 
 ## 2. Commits, oldest first
 
@@ -49,12 +49,17 @@ Stage 4 ran `d743d72..807284c` and is not re-listed; `git log --oneline d743d72.
 | `1f9f5ca` | **The Stage 5 plan.** Three questions answered, five faults found before any code |
 | `cb791f2` | **Stage 5 Layers 0, 1 and 2** — tasks 47–55 and 57–60 |
 | `787333c` | Documentation: this handoff, rewritten for Stage 5 |
-| *(uncommitted)* | **Tasks 61–71.** Every command, both teacher-visible changes, all three jobs, the layer checker, and the whole documentation pass |
+| `3e9e6cc` | **Tasks 61–66** — every command, and both teacher-visible changes |
+| `63e7b80` | **Tasks 67–69** — the retention job, the morning digest and chase, the announcement sweeper |
+| `18aa4ae` | **Task 70** — the layer rule, enforced by `deps:check` |
+| `a1037a2` | The province→region rename, for the six files it alone touched |
+| `6ff0ac0` | **Task 71** — all three documents, and the regenerated dependency tree |
 
-**When this is split into commits, the natural boundaries are:** the commands (61–64), the two
-teacher-visible changes (65–66), the three jobs (67–69), the layer checker (70), the
-province→region rename, and the documentation (71). The rename touches sixteen source files and is
-text only — keeping it apart from the features is what makes both diffs readable.
+**On the rename commit, because the next person will wonder why it is only six files.** The rename
+was done *after* the features were written, so in every other file it sits in the same lines as the
+feature work and cannot be separated without reconstructing it. Six files are changed by nothing
+else and were split out; the rest are named in their own commit messages. **If a rename is wanted
+separately next time, do it first.**
 
 ## 3. The answers that decide what got built
 
@@ -327,13 +332,8 @@ Then prove the **deploy** path against an empty database as well as the incremen
 
 ## 8. What to do next
 
-**Stage 5 is finished. There is no remaining task in it.** Two things come before any new code.
-
-**1. Commit.** Eleven tasks, three documents and a rename are sitting uncommitted. §2 has the
-suggested boundaries. **Offer this first, before anything else.**
-
-**2. The artifact.** §11. It is the head of project's document and it is the furthest behind
-anything in the project.
+**Stage 5 is finished, committed and verified. There is no remaining task in it**, and the artifact
+is current at v11. Nothing is owed from the last session.
 
 ### Then Stage 6, and what is already known about it
 
