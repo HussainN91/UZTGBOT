@@ -3,8 +3,19 @@
 **This document is rewritten in place at the end of every session. There is one of it, and it is
 current. If you are reading a copy of this content anywhere else, that copy is stale.**
 
-Read this in full before touching anything, then read `docs/plans/2026-07-30-stage-5-scheduled-work.md`,
-which opens with a "Where this stands" table naming every task and its state.
+Read this in full before touching anything, then read **`docs/plans/2026-07-30-review-phase-tooling.md`**,
+which is the plan for the next session. `docs/plans/2026-07-30-stage-5-scheduled-work.md` is the
+finished stage and is a record rather than a briefing — its "Where this stands" table names every
+task and its commit.
+
+> ### The next session is a review phase, and it is not a building stage
+>
+> **It checks this codebase with tools rather than by reading it.** Nothing is built for teachers and
+> no behaviour changes. The plan names the tools, what each one catches that nothing here currently
+> catches, and the order.
+>
+> **Nothing is installed without the head of project saying so, tool by tool.** Not a blanket
+> approval. Stated directly on 30 July.
 
 > **The filename still says stage 4.** That is historical and deliberate: there is one handoff, it
 > is this file, and it is rewritten in place whatever stage is current. Rename it if you like, but
@@ -335,6 +346,37 @@ Then prove the **deploy** path against an empty database as well as the incremen
 **Stage 5 is finished, committed and verified. There is no remaining task in it**, and the artifact
 is current at v11. Nothing is owed from the last session.
 
+### The next session is the review phase — `docs/plans/2026-07-30-review-phase-tooling.md`
+
+**Read that plan. It is the whole brief.** In summary, so this document is not ambiguous about it:
+
+**The codebase gets checked with tools, not by reading it.** Five stages have each found faults by
+running things, which worked and does not scale: the suite proves the code does what its tests say,
+and nothing examines the code as a body of work.
+
+**Three things a new reader must not get wrong:**
+
+1. **`repowise` is now permitted, and this phase is where it belongs.** Earlier revisions of this
+   document said *"ignore repowise forever"*, and that was correct when written — it was proposed
+   during a build stage. **Reversed on 30 July 2026 by the head of project**, whose words were that
+   this is the revising and check phase and it is a good time for it. Do not re-raise the old
+   objection.
+2. **`scripts/dependency-tree.mjs` is a suspect, not a control.** It is home-made, it reads imports
+   with two regular expressions, it has no opinion about *exports* at all, and its layer map was
+   written by the same person who wrote the code it checks. **Checking it against an established
+   tool is Task 1**, and if a real tool disagrees with it, the real tool wins.
+3. **Nothing is installed without a yes, tool by tool.** Research, propose, wait.
+
+**What the research already found, so nobody redoes it:** there is **no linter** — `npm run lint` is
+an alias for `typecheck`; **nothing checks unused exports**, and there are 505 of them, which is this
+project's signature fault; there is **no CI**; the `coverage` block in `vitest.config.ts` has **no
+provider installed and has never run**; nothing lints the eight migrations; and nothing has ever
+scanned the git history for secrets.
+
+**Docker covers none of that.** It gives a real PostgreSQL to test against and a reproducible
+runtime, which is why the integration tests are worth anything. It says nothing whatsoever about
+what was written.
+
 ### Then Stage 6, and what is already known about it
 
 **Documents.** D24 keeps Google Forms; the `FORMS` tab and the response sync are Stage 6.
@@ -390,14 +432,22 @@ npm run deps:check    → silent, exits non-zero on a cycle, an unresolvable
 a **leaf** despite living in the command layer. **A type-only import may point upward and is not a
 violation** — it is erased at compile time, and this codebase relies on it.
 
-### Two tools, both settled — do not spend time on either
+### Two tools whose status changed on 30 July — read this before acting on an older revision
 
-**`dependency-cruiser` cannot work here yet.** It needs `typescript@7.1.0` and `latest` is `7.0.2`.
-Installed on 29 July, it cruised **0 modules while printing a green tick** and was removed. That
-failure is why Task 70's checker was proven against a deliberate violation before being trusted.
+**`dependency-cruiser` was removed, and is worth one command's worth of re-testing.** It needed
+`typescript@7.1.0` when `latest` was `7.0.2`; installed on 29 July it cruised **0 modules while
+printing a green tick**, and was removed. It is now at **18.1.0**, published within the last month.
+**Re-test before assuming either way** — if it reads a non-zero number of modules it becomes the
+control our home-made checker is measured against, and that checker can probably be deleted.
 
-**`repowise` is rejected. The head of project's words were "ignore repowise forever".** Do not
-propose it, do not re-test it, do not mention it.
+**That failure is the standing rule for this whole project: prove a tool actually examined the code
+before believing a word it says.** It is why Task 70's checker was made to fail on purpose before it
+was trusted, and it applies to every tool the review phase brings in.
+
+**`repowise` is no longer rejected.** Earlier revisions said *"ignore repowise forever"* and that was
+the head of project's instruction, correctly recorded — it had been proposed during a *build* stage.
+**Reversed on 30 July 2026 by the head of project**, who asked for it specifically for the review
+phase. Both positions were right when taken. It is Task 6 of the review plan.
 
 ## 9. Open questions
 
@@ -447,9 +497,9 @@ a single session before, and the result contradicted itself in three places.
 > **once, at the end of a stage, in one pass**. This file plus the current stage's plan is the whole
 > briefing.
 
-**2. The plan's "Where this stands" table**, at the top of
-`docs/plans/2026-07-30-stage-5-scheduled-work.md`, plus the checkboxes on any task that was finished,
-with its commit hash.
+**2. The current plan's status block and checkboxes**, with a commit hash against anything finished.
+**The current plan is `docs/plans/2026-07-30-review-phase-tooling.md`** — the Stage 5 plan is closed
+and should not be edited again except to correct something that is wrong.
 
 **3. The artifact — `https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53`.**
 
