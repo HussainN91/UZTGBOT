@@ -295,26 +295,58 @@ believing it.
 
 ## Where this stands
 
-| Task | What | State |
+**Stage 6 is complete and committed.** Tasks 72–82 all landed in `ed16807`.
+
+| Task | What | Commit |
 |---|---|---|
-| 72 | Migration `0009` — `form_links`, `form_submissions` | ✅ built, **SQL read before accepting**, not yet run against a database |
-| 73 | `SHEET_TABS.FORMS`, `parseFormsTab` | ✅ built · **22 new unit tests, 57 passing in the file** |
-| 74 | `syncForms` | ✅ built · integration tests owed |
-| 75 | The forms repository | ✅ built · integration tests owed |
-| 76 | Menu button and the forms list | ✅ built · integration tests owed |
-| 77 | The maintenance gate | ✅ built, on **both** the list and the tap |
-| 78 | `parseResponsesTab` | ✅ built · **13 unit tests**, 72 passing in the file |
-| 79 | The response sync, three outcomes | ✅ built · **21 integration tests**, and the idempotency test was proved by breaking it |
-| 80 | All three syncs scheduled | ✅ built · responses run **after** the links, sequentially |
-| 81 | Retention for the markers | ✅ built · anonymises, never deletes |
-| 82 | Every document, in one pass | ✅ BOT-SPEC §10 rewritten, RUNBOOK **§4.18 is new**, §2.6 extended, tree regenerated |
+| 72 | Migration `0009` — `form_links`, `form_submissions`. **SQL read before accepting** | `ed16807` |
+| 73 | `SHEET_TABS.FORMS`, `parseFormsTab` — 22 unit tests | `ed16807` |
+| 74 | `syncForms` | `ed16807` |
+| 75 | The forms repository | `ed16807` |
+| 76 | Menu button and the forms list | `ed16807` |
+| 77 | The maintenance gate, on **both** the list and the tap | `ed16807` |
+| 78 | `parseResponsesTab` — 13 unit tests | `ed16807` |
+| 79 | The response sync, three outcomes — 21 integration tests | `ed16807` |
+| 80 | All three syncs scheduled, responses **after** the links | `ed16807` |
+| 81 | Retention for the markers — anonymises, never deletes | `ed16807` |
+| 82 | Every document, in one pass | `ed16807` |
 
-**The downward half is built. Clean on `typecheck`, `deps:check` and `lint`** — the four lint
-warnings are the four that pre-date this stage, in the same files at the same lines.
+**Two `fix:` commits came out of this stage and are deliberately separate from it**, because they
+correct code that was already committed:
 
-⚠️ **Nothing DB-backed has been run.** Docker Desktop has been down since partway through the
-session, so the migration has never been applied, no integration test has run, and the full suite
-has not been re-run since `286c778`. **None of tasks 74–77 should be believed until it has.**
+| Commit | What |
+|---|---|
+| `fd15e14` | **A duplicate check that could never fire**, in `addStaff` and the urgent-code retry |
+| `5315f08` | The three cosmetic lint findings |
+
+**Verified on the tree as committed, 31 July 2026:**
+
+```
+1,134 tests across 64 files · 0 failed · 0 skipped · 220 seconds
+typecheck clean · build clean · deps:check clean · lint 0 warnings
+79 source files · 64 test files
+```
+
+**Both `fix:` commits were checked out into a scratch worktree and typechecked and `deps:check`ed on
+their own**, rather than only the tip being verified.
+
+### Task 82, completed properly — the third document
+
+`CONCERNS-AND-IT-ACTIONS.md` was checked last and **Stage 6 had made two things in it wrong.** It is
+now at 4.1.
+
+- *"The bot reads **two tabs**"* — it is three, plus one responses tab per form.
+- **A8 is materially wider.** The spreadsheet now holds every teacher's submitted documents beside
+  the confidential answer bank. **Before this stage that document was confidential; it is now
+  confidential AND personal**, and those need different handling. The bot's database was deliberately
+  made the only place holding teachers' words, with one set of controls and a retention rule — **the
+  responses tabs sit outside all of it.** Nothing deletes them, retention does not reach them, and a
+  teacher who asks to be removed is removed from the database while their submission stays in Google.
+
+**That is a consequence of D24, not a fault in it** — keeping documents in Google is exactly what
+avoids the bot storing files. But it is the one thing this stage changed about the risk picture, and
+whoever sets the spreadsheet's access list needs to know that the people who may read the answer bank
+are not automatically the people who may read 1,800 passport numbers.
 
 ### Deviations from the plan so far
 

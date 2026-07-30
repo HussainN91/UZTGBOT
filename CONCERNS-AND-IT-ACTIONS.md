@@ -1,6 +1,12 @@
 # Engineering Concerns and Actions Needed from IT
 
-**Version:** 4.0 · **Date:** 2026-07-30 — updated after Stage 5 of the rebuild
+**Version:** 4.1 · **Date:** 2026-07-31 — updated after Stage 6 of the rebuild
+
+> **What changed in 4.1, and it is one thing.** Stage 6 built document submission
+> through Google Forms, which means the spreadsheet now holds every teacher's
+> submitted documents alongside the confidential answer bank. **A8 is wider than
+> it was** — read it before setting the access list. Nothing else on either list
+> changed; no concern was closed and none was added.
 
 > Items marked **✅ closed by the rebuild** were true of the Apps Script version
 > and are not true of what runs now. They are kept rather than deleted, because
@@ -191,11 +197,41 @@ spreadsheet** and nothing else.
 112 approved answers on salary, tax, visas and contracts. That is confidential
 ministry content, and read access to the spreadsheet is read access to all of it.
 
+> ### ⚠️ Stage 6 made this concern larger, and it is the one thing that stage
+> ### changed about the risk picture
+>
+> **The same spreadsheet now also holds every document submission.** Each form's
+> responses land in a tab of it — that is how the bot reads them back (D24, and
+> `RUNBOOK.md` §4.18). Whatever those forms ask for is now in there: passport
+> numbers, contract details, addresses, and every teacher's email beside them.
+>
+> **Before Stage 6 this document was confidential. It is now confidential AND
+> personal**, and those need different handling. The bot's own database was
+> deliberately made the only place holding teachers' words, with one set of
+> controls and a retention rule; **the responses tabs sit outside all of that.**
+> Nothing deletes them, the retention periods do not reach them, and a teacher
+> who asks to be removed is removed from the database while their submission
+> stays in Google.
+>
+> **This is a consequence of D24, not a fault in it.** Keeping documents in
+> Google Forms is what avoids the bot storing files at all, and that was the
+> right trade. But the access list on this spreadsheet is now doing more work
+> than it was designed for, and whoever reviews it should know that.
+>
+> **Worth deciding, and it is not an engineering question:** how long response
+> tabs are kept, and who prunes them. The bot cannot — it holds Viewer access and
+> will never write to Sheets. **And a row must never be deleted from a responses
+> tab while the bot is running**, because it matches submissions by row number
+> and would refile everything below the gap. §4.18 says so in a box. Any pruning
+> is a deliberate operation with the worker stopped.
+
 **Action:** share with named staff only — never "anyone with the link" — and
 review the access list quarterly. Edit access should be narrower still: an
 accidental clear of the roster tab is caught by the sync's damage limit, but a
-plausible-looking bad edit is not.
-**Owner:** IT · **When:** before launch — **still open**
+plausible-looking bad edit is not. **Re-read the paragraph above before setting
+that list** — the people who may see the answer bank are not automatically the
+people who may see 1,800 teachers' passport details.
+**Owner:** IT · **When:** before launch — **still open, and wider than it was**
 
 ## ✅ A9. The webhook secret in the URL — **closed by the rebuild**
 
@@ -582,12 +618,13 @@ cannot lock everyone out (**A1**, **A4**). The commands to manage staff exist as
 of Stage 4; the very first System member is still one line of SQL, on purpose,
 and `RUNBOOK.md` §2.5 has it.
 
-**One thing for whoever owns the spreadsheet.** The bot reads **two tabs** — the
-roster and the FAQ — and nothing else. If the original document is being reused,
-the other tabs are inert. **Delete `ADMINS` in particular:** it used to grant
-administrator rights to whoever was typed into it, and it now does nothing at
-all. A tab that looks like it works and does not is worse than no tab, and this
-one looks like the place you would go to give somebody access.
+**One thing for whoever owns the spreadsheet.** The bot reads **three tabs** —
+the roster, the FAQ and `FORMS` — plus one responses tab per document form, each
+named by its own `FORMS` row. Nothing else. If the original document is being
+reused, the other tabs are inert. **Delete `ADMINS` in particular:** it used to
+grant administrator rights to whoever was typed into it, and it now does nothing
+at all. A tab that looks like it works and does not is worse than no tab, and
+this one looks like the place you would go to give somebody access.
 
 **And one that is only a launch blocker because it has never been done:** prove
 the backup restores (**A5**). The scripts are written and have never been run
