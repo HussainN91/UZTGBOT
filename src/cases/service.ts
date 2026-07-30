@@ -32,13 +32,19 @@ import { allocateReference } from './reference.js';
 import { isClosedStatus } from './status.js';
 
 /**
- * Both re-exported from the schema rather than restated here.
+ * Re-exported from the schema rather than restated here.
  *
- * They *were* restated: this file held its own eight-value `CaseStatus` union
- * and its own `OPEN_CASE_STATUSES` array, while `queries.ts` imported the
- * schema's copy of the latter. Two definitions of one list, reached by different
+ * It *was* restated: this file held its own eight-value `CaseStatus` union and
+ * its own `OPEN_CASE_STATUSES` array, while `queries.ts` imported the schema's
+ * copy of the latter. Two definitions of one list, reached by different
  * importers, agreeing only by luck — and the schema is the honest home, because
  * that is where the database enum they must match is declared.
+ *
+ * `OPEN_CASE_STATUSES` was re-exported here too, and nothing ever imported it:
+ * every caller goes to the schema directly, which is what "the honest home"
+ * means. Knip found the dead line on 30 July 2026 and it was removed rather than
+ * adopted, because routing callers through this file would rebuild the second
+ * source of truth the paragraph above describes closing.
  *
  * What "still open" means has not changed (`CaseManager.gs:22`): Completed,
  * Closed and Duplicate are excluded deliberately, because a teacher whose case
@@ -46,7 +52,6 @@ import { isClosedStatus } from './status.js';
  * case, not repeating one.
  */
 export type { CaseStatus };
-export { OPEN_CASE_STATUSES };
 
 export class TeacherNotVerifiedError extends Error {
   constructor(readonly chatId: string) {

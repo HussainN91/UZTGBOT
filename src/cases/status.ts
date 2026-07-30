@@ -8,7 +8,6 @@
 import { CASE_STATUS_ORDER, OPEN_CASE_STATUSES, type CaseStatus } from '../db/schema.js';
 
 export type { CaseStatus };
-export { CASE_STATUS_ORDER };
 
 /**
  * Read a status from what a staff member typed.

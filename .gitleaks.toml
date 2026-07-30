@@ -1,0 +1,36 @@
+# Secret scanning for this repository.
+#
+#   docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:latest \
+#     git /repo --config /repo/.gitleaks.toml
+#
+# This file exists because the default ruleset has a hole that matters here.
+# Gitleaks 8.30.1 detects GitHub tokens, private keys and generic high-entropy
+# API keys, and it does scan `.env` files — but it does **not** detect a Telegram
+# bot token. That was established by planting three correctly shaped tokens,
+# including the example from Telegram's own documentation, and watching all three
+# pass a clean scan. For a Telegram bot, that is the one credential that matters
+# most, so the rule is written here rather than assumed.
+
+[extend]
+useDefault = true
+
+# A Telegram bot token is `<8-10 digits>:<34 chars>`, and the second part always
+# begins with a capital A. The token is the whole of the bot's authority: anyone
+# holding it can read every message the bot receives and write as the bot to all
+# 1,800 teachers. It cannot be rotated without re-pointing the webhook.
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram Bot API token"
+regex = '''\b[0-9]{8,10}:A[A-Za-z0-9_-]{33}\b'''
+entropy = 3.0
+tags = ["telegram", "credential"]
+
+# Known false positive, checked by hand on 30 July 2026.
+#
+# `QAEngine.gs:39` in the Apps Script baseline commit is
+# `FAQ_CACHE_COUNT_KEY_ = 'faq_rows_v2_count'` — a cache key name. It trips the
+# generic high-entropy rule and is not a secret. It is allowlisted by its value
+# rather than by its path, so anything else appearing in that file is still read.
+[allowlist]
+description = "Verified non-secrets"
+regexes = ['''faq_rows_v2(_count)?''']

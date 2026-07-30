@@ -1,0 +1,70 @@
+{
+  // Knip answers one question nothing else here asks: is anything exported,
+  // reached only by its own tests, and therefore dead in production while
+  // looking perfectly alive?
+  //
+  // That is this project's signature fault. `pruneProcessedUpdates` carried a
+  // test and no caller for three stages, and every reading of the code missed
+  // it. A single knip run would have missed it too — the test counts as a user.
+  //
+  // So there are two runs, and the answer is the DIFFERENCE between them:
+  //
+  //   npm run knip         tests count as users
+  //   npm run knip:prod    production entry points only, tests excluded
+  //
+  // Anything in the second list that is not in the first is reached by a test
+  // and by nothing else. On 30 July 2026 the two lists were identical, 63 items
+  // each — which is the result that says the fault is currently absent. Run
+  // both or the answer misleads.
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+
+  // The four things that actually start. `web/main.ts` and `worker/main.ts` are
+  // the two processes; `db/migrate.ts` is `npm run db:migrate`; the two scripts
+  // are `npm run sync` and `npm run set-webhook`. Nothing else is an entry
+  // point, and that is the whole basis of the production run.
+  // The trailing `!` is load-bearing, and it is the whole reason the second run
+  // works. It marks a pattern as a PRODUCTION entry point.
+  //
+  // Without it, `--production` starts from an empty graph: it reports zero
+  // unused exports and calls `grammy`, `pino` and `zod` unused dependencies. A
+  // green tick over nothing scanned — the exact failure this project's standing
+  // rule about tools warns about.
+  //
+  // Proven on 31 July 2026 by planting an unused export: with the `!` both runs
+  // name it, without the `!` only the first does.
+  "entry": [
+    "src/web/main.ts!",
+    "src/worker/main.ts!",
+    "src/db/migrate.ts!",
+    "src/scripts/*.ts!"
+  ],
+
+  "project": ["src/**/*.ts!"],
+
+  // Named in a string at `src/log.ts` as `target: 'pino-pretty'`, which no
+  // static tool can follow. Knip reports it unused; it is not. DO NOT REMOVE
+  // THE PACKAGE — pretty logs in development are what it buys.
+  "ignoreDependencies": ["pino-pretty"]
+
+  // ── One known false positive in the production run, left visible on purpose ──
+  //
+  // `npm run knip:prod` reports `src/test/global-setup.ts` as an unused file. It
+  // is not: `vitest.config.ts` loads it, and `vitest.config.ts` is not a
+  // production entry point, so the production run cannot see the link. It is
+  // left unsilenced because an ignore entry here would also hide a genuinely
+  // dead file that appeared beside it later.
+  //
+  // ── How to read the two runs ──
+  //
+  // Anything `knip:prod` reports that `knip` does not is reached by a test and
+  // by nothing else in production. That is a finding, NOT automatically a fault:
+  // most of them are functions called from inside their own file, where the
+  // `export` keyword exists only so a test can reach in. Removing the export
+  // would break the test and change nothing else.
+  //
+  // The ones worth a second look are those with NO production caller anywhere —
+  // the `pruneProcessedUpdates` shape, a tested function nothing runs. On
+  // 31 July 2026 there were six, all verified harmless. Check before deleting
+  // anything: a wrapper whose tests exercise a rule the production path reaches
+  // by another route is earning its keep.
+}
