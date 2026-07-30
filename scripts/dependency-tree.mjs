@@ -14,12 +14,14 @@
  * be broken by a compiler upgrade.
  *
  *   node scripts/dependency-tree.mjs           → the report
- *   node scripts/dependency-tree.mjs --check   → exit 1 if there is a cycle
+ *   node scripts/dependency-tree.mjs --check   → exit 1 on a cycle, an
+ *                                                unresolved import, a file
+ *                                                nothing uses, or an import
+ *                                                that points up the layers
  *
- * What it deliberately does NOT do: decide whether a dependency is *allowed*.
- * The layer rule — nothing may import from a layer above it — needs the layers
- * written down, and that is a decision to be made deliberately rather than
- * guessed at here. This prints the facts that decision needs.
+ * The layer rule was left out of the first version of this file, deliberately,
+ * because it needs the layers written down and that is a decision rather than
+ * something to guess at here. They are written down now — see LAYERS below.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -46,6 +48,80 @@ const ENTRY_POINTS = [
 ];
 
 const isTest = (file) => file.endsWith('.test.ts');
+
+/**
+ * The layer rule — D46. Nothing may import from a layer above it.
+ *
+ * The architecture rests on this one rule, and everything else load-bearing in
+ * this project is a compile error when it breaks. This is not, so until now it
+ * held because each case was answered by hand. Stage 5 added three directories
+ * and the first modules whose natural shape is to reach upward — a retention
+ * module wanting `telegram/dedup.ts`, a digest module wanting a reply builder —
+ * and D36 answers both by composing in the job rather than importing upward.
+ * This is what stops the next answer being a different one.
+ *
+ * Highest first. A file that matches nothing is a leaf: no database, no network.
+ */
+const LAYERS = [
+  /** Scheduled work and the processes: the only things that know both the database and Telegram. */
+  { layer: 4, prefixes: ['src/worker/', 'src/web/', 'src/scripts/'] },
+  /** Commands, the router, and the teacher-facing handlers. */
+  { layer: 3, prefixes: ['src/telegram/'] },
+  /** Stores: the database, and no Telegram. */
+  {
+    layer: 2,
+    prefixes: [
+      'src/announcements/',
+      'src/cases/',
+      'src/conversation/',
+      'src/db/',
+      'src/faq/',
+      'src/retention/',
+      'src/sheets/',
+      'src/staff/',
+      'src/sync/',
+      'src/teachers/',
+    ],
+  },
+];
+
+/**
+ * The handful of files whose directory is not their layer.
+ *
+ * Both directions exist and both are deliberate, which is why the rule cannot be
+ * purely directory-shaped:
+ *
+ *   `config/settings.ts` sits among the pure modules and reads the database. It
+ *   is a store and is treated as one — otherwise every module that reads a
+ *   setting looks like a leaf touching PostgreSQL.
+ *
+ *   `telegram/send.ts` sits in the command layer and imports nothing at all
+ *   inside `src/`. It is a leaf, which is exactly why `/export` can depend on it
+ *   from layer 3 without a cycle, and why a store may depend on it later without
+ *   that being a violation.
+ */
+const LAYER_OVERRIDES = {
+  'src/config/settings.ts': 2,
+  'src/telegram/send.ts': 1,
+};
+
+/**
+ * Entry points and test files sit above everything.
+ *
+ * A process composes whatever it needs — that is what a process is for — and a
+ * test must be able to reach the thing it tests wherever it lives. Neither is
+ * imported by anything, which the orphan check above already guarantees.
+ */
+const TOP = 5;
+
+function layerOf(file) {
+  if (isTest(file) || ENTRY_POINTS.includes(file)) return TOP;
+  if (LAYER_OVERRIDES[file] !== undefined) return LAYER_OVERRIDES[file];
+  for (const { layer, prefixes } of LAYERS) {
+    if (prefixes.some((p) => file.startsWith(p))) return layer;
+  }
+  return 1;
+}
 
 /** Every .ts file under src/, as a repo-relative posix path. */
 function allFiles(dir = SRC, found = []) {
@@ -169,6 +245,37 @@ const orphans = files.filter(
 );
 
 const cycles = findCycles();
+
+/**
+ * Imports that point up the layers, and imports of a test file.
+ *
+ * **A type-only edge may point upward and is not a violation.** It is erased
+ * when the code compiles, so it creates no dependency at run time — and this
+ * codebase relies on it: `cases/notify.ts` and the command files type-import
+ * from `telegram/router.ts` to borrow a shape without depending on it, which is
+ * what keeps the dispatcher and the router out of a cycle that would be real.
+ *
+ * Importing a `*.test.ts` from anything is separately wrong however the layers
+ * fall: it drags fixtures into the build and makes the shipped code depend on
+ * the thing that is supposed to be checking it.
+ */
+const layerViolations = [];
+for (const [file, edges] of graph) {
+  const from = layerOf(file);
+  for (const { target, typeOnly } of edges) {
+    if (!graph.has(target)) continue;
+    if (isTest(target) && !isTest(file)) {
+      layerViolations.push(`${file} imports a test file: ${target}`);
+      continue;
+    }
+    if (typeOnly) continue;
+    const to = layerOf(target);
+    if (to > from) {
+      layerViolations.push(`${file} (layer ${from}) imports ${target} (layer ${to})`);
+    }
+  }
+}
+
 const typeOnlyEdges = [];
 for (const [file, edges] of graph) {
   for (const { target, typeOnly } of edges) {
@@ -197,6 +304,13 @@ const lines = [
   'Entry points and test files are excluded — nothing importing those is correct.',
   '',
   orphans.length === 0 ? 'None.' : orphans.map((o) => `- ${o}`).join('\n'),
+  '',
+  '## Imports that point up the layers',
+  '',
+  'Nothing may import from a layer above it (D46). Type-only imports are exempt — ' +
+    'they are erased at compile time and create no dependency at run time.',
+  '',
+  layerViolations.length === 0 ? 'None.' : layerViolations.map((v) => `- ${v}`).join('\n'),
   '',
   '## Imports that could not be resolved',
   '',
@@ -235,12 +349,14 @@ for (const file of productionFiles) {
  * beside the typecheck. The report is for a person; this is for a build.
  */
 if (process.argv.includes('--check')) {
-  const problems = [...cycles, ...unresolved, ...orphans];
+  const problems = [...cycles, ...unresolved, ...orphans, ...layerViolations];
   if (problems.length > 0) {
     process.stderr.write(`Dependency problems:\n${problems.map((p) => `  ${p}`).join('\n')}\n`);
     process.exit(1);
   }
-  process.stdout.write('No cycles, no unresolved imports, nothing unused.\n');
+  process.stdout.write(
+    'No cycles, no unresolved imports, nothing unused, nothing importing upward.\n',
+  );
 } else {
   process.stdout.write(lines.join('\n'));
 }
