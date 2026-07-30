@@ -61,9 +61,8 @@ describe('categoriesVisibleTo', () => {
   });
 
   it('shows an All queue every category', () => {
-    expect([...categoriesVisibleTo(QUEUE.ALL)].sort()).toEqual(
-      [...Object.values(CASE_CATEGORY)].sort(),
-    );
+    // `Object.values` already returns a fresh array, so sorting it in place is safe.
+    expect([...categoriesVisibleTo(QUEUE.ALL)].sort()).toEqual(Object.values(CASE_CATEGORY).sort());
   });
 
   it('shows a None queue nothing', () => {

@@ -440,7 +440,9 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
       for (let i = 0; i < 200; i += 1) {
         const code = generateUrgentCode();
         expect(code).toHaveLength(URGENT_CODE_LENGTH);
-        expect([...code].every((ch) => URGENT_CODE_ALPHABET.includes(ch))).toBe(true);
+        // `for…of` rather than spreading the string: same characters, and it does
+        // not invite the question of what this would do to a surrogate pair.
+        for (const ch of code) expect(URGENT_CODE_ALPHABET).toContain(ch);
       }
     });
 

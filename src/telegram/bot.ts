@@ -79,9 +79,7 @@ async function deliver(
       }
 
       const replyMarkup = toReplyMarkup(message.keyboard);
-      await send(api, message.chatId, message.text, {
-        ...(replyMarkup !== undefined ? { replyMarkup } : {}),
-      });
+      await send(api, message.chatId, message.text, replyMarkup === undefined ? {} : { replyMarkup });
     } catch (err) {
       log.error({ err, chatId: message.chatId }, 'could not deliver a reply after committing');
       /**
