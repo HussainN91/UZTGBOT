@@ -12,27 +12,35 @@
 
 ---
 
-## ▶ Where this stands — 30 July 2026
+## ▶ Where this stands — 30 July 2026, first session
 
-# ⬜ **NOT STARTED. This document is a plan, and no code has been written against it.**
+# 🟡 **Layers 0, 1 and 2 are built and committed. No command and no scheduled job exists yet, so nothing in this stage runs on its own.**
+
+```
+922 tests across 56 files, none skipped · typecheck clean · build clean · deps:check clean
+```
+
+Verified by a full run against a live database at `cb791f2`, not inferred. The baseline was 778 across 47 files, so this is **+144 tests and +9 files**. The working tree is clean.
+
+**What that means in plain terms:** every rule this stage needs is written and tested, and none of it is reachable by a person or a clock yet. Nothing deletes anything, nothing arrives at seven in the morning, and no teacher sees any change. That is the correct half-way state for a leaves-first build and it is not a half-built feature.
 
 | Task | What | State |
 |---|---|---|
 | — | **Q1, Q2, Q3** | ✅ **answered 30 July — see below. Nothing is open** |
-| 47 | One migration for the whole stage | ⬜ |
-| 48 | Retention vocabulary, and the re-consent rule | ⬜ |
-| 49 | The privacy notice, generated from the periods | ⬜ |
-| 50 | The CSV writer | ⬜ |
-| 51 | `sendDocument` | ⬜ |
-| 52 | Digest and chase wording | ⬜ |
-| 53 | Announcement audience vocabulary | ⬜ |
-| 54 | Reading the three periods | ⬜ |
-| 55 | The purge functions | ⬜ |
+| 47 | One migration for the whole stage | ✅ `cb791f2` — `drizzle/0008_retention_and_chasing.sql`, both paths proven |
+| 48 | Retention vocabulary, and the re-consent rule | ✅ `src/config/retention.ts` |
+| 49 | The privacy notice, generated from the periods | ✅ `src/config/privacy.ts`; the stage 3 test inverted, as R17 said |
+| 50 | The CSV writer | ✅ `src/export/csv.ts` |
+| 51 | `sendDocument` | ✅ `src/telegram/send.ts` |
+| 52 | Digest and chase wording | ✅ `src/digest/format.ts` |
+| 53 | Announcement audience vocabulary | ✅ `src/announcements/audience.ts` |
+| 54 | Reading the three periods | ✅ `src/config/settings.ts` — **pulled forward**, see the departures |
+| 55 | The purge functions | ✅ `src/retention/purge.ts` |
 | 56 | The nightly content roll-up | ❌ **not built — Q1 answered no** |
-| 57 | Recording a privacy acceptance | ⬜ |
-| 58 | `forgetTeacher` | ⬜ |
-| 59 | The announcement store | ⬜ |
-| 60 | Chase queries, and the counter reset | ⬜ |
+| 57 | Recording a privacy acceptance | ✅ `src/teachers/privacy.ts`, and `bindTeacher` writes the periods |
+| 58 | `forgetTeacher` | ✅ `src/teachers/forget.ts` |
+| 59 | The announcement store | ✅ `src/announcements/store.ts`; **needed an enum value** — see below |
+| 60 | Chase queries, and the counter reset | ✅ `queries.ts` + `service.ts`; the reset is inside `updateCase` |
 | 61 | `/retention` | ⬜ |
 | 62 | `/announce` `/announce_send` `/announce_cancel` `/announcements` | ⬜ |
 | 63 | `/export` | ⬜ |
@@ -44,6 +52,23 @@
 | 69 | The announcement sweeper | ⬜ |
 | 70 | The layer rule, mechanically enforced | ⬜ **droppable** |
 | 71 | Correct every document this stage makes wrong | ⬜ |
+
+### Two faults found by building, both by running things rather than by reading
+
+1. **The audience freeze did not run at all.** `audienceWhere` is built from drizzle column references, which render as fully-qualified `"teachers"."verification_state"`, and the `INSERT … SELECT` around it had aliased its tables — so PostgreSQL could not resolve the names and rejected the statement outright. The same class of trap `visibility.ts` documents one row along, and it fails at the database where neither the typechecker nor a reading can see it.
+
+2. **`delivery_state` had no `Sending` value, and this plan assumed one.** Without it there is no way to *claim* a recipient, so two overlapping sweeps would both read the same `Pending` rows and message that teacher twice — the one failure a broadcast to 1,800 people must not have. Added to `0008` as `ALTER TYPE … ADD VALUE`, which is additive; the migration was regenerated and both paths reproven. **This is a change to the schema that this document did not anticipate**, and it is recorded here rather than quietly folded into D45.
+
+### Four deliberate departures so far
+
+Each has its reason at the site, and none should be reverted.
+
+1. **Task 54 was pulled forward**, out of the stated build order. Task 49 changes `privacyNotice`'s signature and its callers cannot compile without the settings reader, so the two are one change — splitting them would leave typecheck broken across a task boundary, which this project does not accept.
+2. **`SETTING` spreads `RETENTION_SETTING` from `retention.ts`** rather than declaring the three keys a second time. Two lists that have to agree with nothing enforcing it is precisely the fault `status.ts` was created to fix.
+3. **`forgetTeacher` reports three outcomes, not two.** `alreadyForgotten` is kept apart from `notFound`, because reporting "no such teacher" for somebody removed last month sends an operator looking for a row that is behaving exactly as it should.
+4. **The chase tests are a new file** (`src/cases/chase.integration.test.ts`) rather than additions to the two existing ones. The reset lives in `service.ts` and the queries in `queries.ts`, so either home would have split one behaviour across two files.
+
+Also: the three `RETENTION_DAYS` tests in `settings.integration.test.ts` are **re-pointed at `OVERDUE_DAYS` rather than deleted**. What they pin is the *reader* — fallback, read-back, and cache-drop-on-write — and all three are still worth having.
 
 **Read `docs/plans/2026-07-29-stage-4-handoff.md` first.** It records what is built, the twenty-six deliberate departures from the Stage 4 plan, and the environment traps.
 

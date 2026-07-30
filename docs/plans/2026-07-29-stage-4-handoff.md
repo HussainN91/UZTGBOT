@@ -1,261 +1,193 @@
-# Stage 4 handoff — 29 July 2026
+# Handoff — 30 July 2026
 
 **This document is rewritten in place at the end of every session. There is one of it, and it is
 current. If you are reading a copy of this content anywhere else, that copy is stale.**
 
-Read this in full before touching anything, then read `docs/plans/2026-07-28-stage-4-staff.md`,
+Read this in full before touching anything, then read `docs/plans/2026-07-30-stage-5-scheduled-work.md`,
 which opens with a "Where this stands" table naming every task and its state.
+
+> **The filename still says stage 4.** That is historical and deliberate: there is one handoff, it
+> is this file, and it is rewritten in place whatever stage is current. Rename it if you like, but
+> do it as its own change and update the references in `docs/plans/2026-07-28-stage-4-staff.md`.
 
 ---
 
 ## 1. State, in one paragraph
 
-**Stage 4 is complete.** Every task in the plan — 23 through 46, all five layers — is built, tested
-and committed. All four of the audit faults the stage set out to close are closed, the stage's own
-build found three more in already-committed code and closed those too, and **every question that was
-open is answered**. The working tree is clean and nothing is waiting on the head of project. Stage 3
-shipped as `d743d72`; Stage 4 ends at `807284c`.
+**Stage 4 is complete. Stage 5 is planned, and Layers 0, 1 and 2 of it are built and committed.**
+Every rule the stage needs — retention, re-consent, the generated privacy notice, anonymisation,
+announcements, the teacher chase — is written and tested. **None of it is reachable by a person or a
+clock.** No command, no scheduled job, and no teacher-visible change has shipped. That is the
+correct half-way state for a leaves-first build; nothing is half-built.
 
 ```
-778 tests, 47 files, none skipped · typecheck clean · build clean · deps:check clean
+922 tests, 56 files, none skipped · typecheck clean · build clean · deps:check clean
 ```
 
 Verify it yourself before trusting it — see §7. Do not take the numbers above on trust; this
 document has been wrong before and the only reason it is not wrong now is that somebody ran things.
 
-**Next is Stage 5, and it has no plan yet. Write the plan before writing any code** — in a new
-document, `docs/plans/2026-07-30-stage-5-scheduled-work.md`. §8 says what it inherits and what the
-plan has to answer.
-
-> **The filename of this document still says stage 4.** That is historical and it is deliberate that
-> it was not renamed: there is one handoff, it is this file, and it is rewritten in place whatever
-> stage is current. Rename it if you like, but do it as its own change and update the reference in
-> `docs/plans/2026-07-28-stage-4-staff.md`.
+**Next: Task 61.** The build order and every task's state are in the Stage 5 plan's table.
 
 ## 2. Commits, oldest first
 
-Everything since Stage 3. `git log --oneline d743d72..HEAD` regenerates it.
+Stage 4 ran `d743d72..807284c` and is not re-listed; `git log --oneline d743d72..807284c` has it.
 
 | Commit | What |
 |---|---|
-| `5551c10` `c894f6e` `aab86a5` `231e61e` | Layers 1 and 2 — the ladder, the schema, every store and query |
-| `31567bb` | Tasks 31 and 32: the dispatcher, the deny path, `/whoami`, and new-case notification |
-| `6764e98` | The last three answers, recorded as D26, D27, D28 |
-| `5df3f92` | Task 33: the five reading commands, and the status vocabulary collapsed into one list |
-| `8f2b84c` | **A fix, not a feature.** A reopened case kept its `closed_at`, and retention would have deleted it |
-| `d0f08ba` | Task 34: `/reply` `/await` `/close` `/reopen` `/note` |
-| `260f7c1` | Task 35: `/assign` |
-| `340966f` | The dependency graph, built rather than installed — see §8 |
-| `48f5636` | Task 45: `/region` `/regions` `/mark` `/due` `/snooze` |
-| `c9ce8dc` | Task 46: the teacher's region prompt, and **migration `0007`** |
-| `a37fef8` | **A fix, not a feature.** A revoked teacher could give themselves their access back |
-| `ecbf624` | Task 36: `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke` `/restore` |
-| `064911c` | Tasks 37, 38 and 39: `/maintenance`, `/generate_urgent_code`, the group gate, the alert fan-out |
-| `807284c` | Task 41: every document this stage made wrong |
+| `807284c` | End of Stage 4 — task 41, every document the stage made wrong |
+| `b3112b0` `d38c639` | Documentation only: the Stage 4 handoff and its pointer at Stage 5 |
+| `1f9f5ca` | **The Stage 5 plan.** Three questions answered, five faults found before any code |
+| `cb791f2` | **Stage 5 Layers 0, 1 and 2** — tasks 47–55 and 57–60 |
 
 ## 3. The answers that decide what got built
 
-All six are recorded in the plan as **D7**, **D25**, **D26**, **D27**, **D28**, with **R16–R18**
-tracing the last three. They are settled. **Do not reopen them and do not improve them.**
+**Six from Stage 4** are recorded in that plan as D7, D25, D26, D27, D28, with R16–R18 tracing the
+last three. They are settled. **Do not reopen them and do not improve them.** In short: `Observer`
+is the look-but-do-not-touch rank and `Regional` is now `Lead`; the eight case statuses stay and
+staff type four of them; `Action required` means the **teacher** must act; `/close … unresolved`
+exists with a hand-written reason; `/restore` exists; and retention is 7 days / 180 for urgent and
+critical / 3 for the interaction log / never for the audit log, **as three settings rather than
+constants**.
 
-- **`Observer` is the look-but-do-not-touch rank**, and the rank once called `Regional` is now
-  **`Lead`** — region was always a separate column, and one word meaning two things is how the old
-  bot made everybody an administrator. The teacher-facing phrase "Regional admin" is a *job title*
-  and is left exactly as it is.
-- **The eight case statuses stay.** Staff type four words; the system writes the rest.
-- **`Action required` means the TEACHER must act.** `/await <ref> <what is needed>` writes it, and
-  the text goes to `public_update` so the teacher actually receives the request. A taxonomy of
-  action types is coming later; until then it is free text, and the runbook says so.
-- **`Closed` therefore needed a writer**, because D28 keeps unresolved cases for ever and removed
-  the one D25 had assumed. `/close <ref> unresolved <reason>` is it. **The head of project asked
-  specifically for a hand-written reason rather than a list to pick from.** The reason goes to a
-  case note, never to the teacher.
-- **`/restore <chat_id>` exists**, at the same rank as `/revoke`.
-- **Retention:** unresolved cases kept indefinitely; resolved ones deleted after **7 days**, or
-  **180 days** if `importance` is Urgent or Critical; `messages` after **3 days**; `audit_log`
-  never. **The three periods are settings, not constants** — their explicit choice after I
-  recommended the opposite. Nothing is built for this in Stage 4; it is all Stage 5.
+**Three more were answered on 30 July**, while the Stage 5 plan was being written. All three are
+recorded at the top of that plan with their costs.
 
-**One correction worth carrying.** I proposed exempting the `ANSWER_HELPFUL`/`ANSWER_UNHELPFUL`
-rows from the 3-day rule to save the monthly content review, and was told **"plan supersedes my
-choices!"** Three days means three days for every row. The cost is recorded as a cost —
-`RUNBOOK.md` §4.7 is deleted rather than left as an instruction that silently returns nothing — and
-the roll-up that would recover the signal is offered as their choice, not written in.
+- **The nightly content roll-up: no.** Nothing is built for it. The cost stands and is written down
+  twice so nobody rediscovers it in November: past three days, *what are teachers asking that the
+  answer bank cannot cover* and *which confident answers are they rejecting* cannot be answered at
+  all. **Task 71 must record in the runbook that §4.7 was offered and declined**, not merely
+  deleted — a section that reads as an oversight is one somebody restores by accident, and a
+  restored §4.7 returns nothing and looks like good news.
+- **The bot names a teacher's regional manager: yes, by name and Telegram username.** Not a
+  telephone number. It needed `staff.telegram_username`, which is why it had to be settled before
+  the migration. **The handle is verified rather than trusted** — see D47 and R33.
+- **The re-consent gate stands in front of cases and leaves the answer bank open.** The
+  recommended option, and the only one that produces a record saying a named teacher confirmed a
+  specific version on a specific date.
 
-## 4. What is built, and the nine things that will bite
+**One correction worth carrying, from Stage 4.** I proposed exempting the answer-feedback rows from
+the 3-day rule and was told **"plan supersedes my choices!"** Three days means three days for every
+row.
 
-| Task | What a person types | File |
+## 4. What is built in Stage 5, and the eight things that will bite
+
+| Task | What | File |
 |---|---|---|
-| 31 | the dispatcher, the deny path, `/whoami` | `src/telegram/commands/{index,context,staff}.ts` |
-| 32 | new-case notification (nothing to type) | `src/cases/notify.ts` |
-| 33 | `/cases` `/mycases` `/urgent` `/case` `/search` | `src/telegram/commands/cases.ts` |
-| 34 | `/reply` `/await` `/close` `/reopen` `/note` | same file |
-| 35 | `/assign` | same file |
-| 45 | `/mark` `/due` `/snooze` | same file |
-| 45 | `/region` `/regions` | `src/telegram/commands/staff.ts` |
-| 46 | the teacher's region prompt | `router.ts`, `keyboards.ts`, `handlers/menu.ts` |
-| 36 | `/staff` `/staff_add` `/staff_role` `/staff_remove` `/revoke` `/restore` | `commands/staff.ts` |
-| 37 | `/maintenance` `/generate_urgent_code` | `src/telegram/commands/ops.ts` |
-| 38 | the group gate (nothing to type) | `src/telegram/chat-gate.ts`, `bot.ts` |
-| 39 | alarms reaching System staff (nothing to type) | `src/telegram/alerter.ts` |
+| 47 | The migration | `drizzle/0008_retention_and_chasing.sql` |
+| 48 | Retention periods, and the re-consent rule | `src/config/retention.ts` |
+| 49 | The notice, generated | `src/config/privacy.ts` |
+| 50 | The CSV writer | `src/export/csv.ts` |
+| 51 | `sendDocument` | `src/telegram/send.ts` |
+| 52 | Every message the jobs will send | `src/digest/format.ts` |
+| 53 | Announcement audiences | `src/announcements/audience.ts` |
+| 54 | Reading the three periods | `src/config/settings.ts` |
+| 55 | Every delete and the one scrub | `src/retention/purge.ts` |
+| 57 | What a teacher accepted | `src/teachers/privacy.ts` |
+| 58 | Anonymising a teacher | `src/teachers/forget.ts` |
+| 59 | The announcement store | `src/announcements/store.ts` |
+| 60 | The chase queries and the counter reset | `cases/queries.ts`, `cases/service.ts` |
 
-**`updateCase`, `addNote`, `markImportance`, `setDue` and `setSnooze` do not check who is asking.**
-They take a bare reference and write. Every mutation command resolves through `findCase` first —
-which applies the scope — in the shared `resolveCase` helper in `cases.ts`. **A new command that
-writes to a case and skips this lets a staff member change a case in a queue they do not hold, and
-nothing anywhere will notice.** This is the single most important property in layer 3.
+**`privacyNotice` takes the periods and renders them. Never type a number of days into
+`privacy.ts`.** A test reads that module's own source and fails if you do. The whole design rests on
+the notice being unable to disagree with the settings, and a literal that happens to match today
+passes every other test and fails the day somebody changes a period.
 
-**Every staff answer goes through `reply()` or `replyAndTell()` in `context.ts`, which clamp.**
-Telegram rejects a message over 4096 characters; `send` throws, `deliver` catches it and alerts, so
-the staff member gets silence and an operator gets woken. `/case` and `/reply` both carry text of
-unbounded length. A new command that builds its own `RouterOutcome` loses the guarantee.
+**`requiresReconsent` is asymmetric on purpose. Do not replace it with a hash.** Lengthening a
+period asks 1,800 teachers to read the notice again; shortening one must not. Any digest of the
+notice text changes in both directions. `null` means indefinite and is the longest period there is,
+in every direction and at every layer.
 
-**A new command must be registered or it is not recognised at all** — and, by D9, an unrecognised
-word falls through to ordinary teacher handling rather than erroring. That is deliberate, and it
-means a forgotten registration fails *silently*. `STAFF_COMMANDS` is
-`[...PEOPLE_COMMANDS, ...CASE_COMMANDS, ...OPS_COMMANDS]`, so a command is registered in the file it
-lives in.
+**Every purge function returns 0 and touches nothing when its period is `null`.** That is not
+defensive coding, it is the rule (D30): a job that invents a retention period deletes real records
+against a number nobody chose, and there is no undo. A `0`, a typo and an empty string all become
+`null` in `parsePeriod`. **The first test in `purge.integration.test.ts` is the one asserting
+nothing is deleted, and it is first deliberately.**
 
-**`CAPABILITY_INTERFACE` in `context.ts` is total over `Capability` on purpose**, and it is what
-`/whoami` and `/help` render from. `announce` and `export` still have no command and are listed as
-"no command for this yet" rather than hidden — hiding them would make the bot describe a smaller
-permission model than the one in force. **Do not "fix" this by trimming the table.**
+**The purge reads `importance` and never `status`.** A `Critical` case that was resolved is
+`Completed`, and nothing about `Completed` remembers it was an emergency. There is a test.
 
-**`teacherHasAccess` answers two questions, not one.** It is the sign-in gate *and* the "can this
-teacher still receive what we send" check that `/reply` warns on. A teacher loses the bot two ways —
-`/revoke`, and their roster row being deactivated or removed — and only the first is a `Revoked`
-state. Never compare against `verificationState` directly. **`/restore` has to say which of the two
-it found**, and it does.
+**`deleteResolvedCases` takes no reference and must never take one** (D35). A delete that took one
+would be reachable from a command, and a command that can delete a case by reference is a command
+that deletes the wrong case, with `case_notes` cascading out from under it.
 
-**Nothing may let a revoked teacher back in by signing in again.** `bindTeacher` clears
-`revoked_at`, which is correct for a teacher who changed phone and catastrophic for one revoked on
-purpose. Three places refuse a revoked chat now — `startReply`, `requireSignIn` and
-`verifyIdentifier` itself. The last one is the guarantee rather than the courtesy: it is at the
-function that writes, so a fourth route into sign-in added later inherits the rule. See §6.
+**The chase counters reset inside `updateCase`, beside `closed_at`.** Not in `/await`. Leaving
+`Action required` and re-entering it both restart the clock, and `updateCase` is the one write path
+that sees every status change — putting it in the command is the exact hole that let a reopened case
+keep a stale `closed_at` for three stages.
 
-**The chat lock is the *sender's*.** Two staff acting on one case hold two different locks, so any
-read-modify-write on a case races. Every write in this stage is a single statement. `resolveCase`'s
-read is for permission, not for a value being modified, which is why it is safe.
+**`casesAwaitingTeacher` and `casesExhaustedChasing` are the only unscoped functions in
+`queries.ts`.** That file's guarantee is about a *person* asking; these feed a job and there is
+nobody whose visibility applies. Both say so at their definition. Anything that later hands their
+rows to a staff member must apply the scope itself.
 
-**A region is compared case-insensitively everywhere it decides anything** (`visibleToStaff` lowers
-both sides). `/region` and `/staff_add` additionally canonicalise what is typed against
-`knownRegions`, so the database does not grow two spellings of one province. If you add a third
-place that compares regions, lower both sides there too.
+**`bindTeacher` writes the accepted periods.** Without it every teacher who signs in is asked to
+re-accept on their very next tap, having accepted moments earlier. `/restore` must **not** touch
+those columns — restoring is undoing one act, not re-running a sign-in (D27). Both have tests.
 
-**The group gate's exemption is one function read by two callers** (`chat-gate.ts`). Two expressions
-of it could disagree in either direction, and both are bad: a bot that ignores the operations chat's
-messages but still leaves it, or one that stays and tries to hold a conversation there. An unset
-`OPS_ALERT_CHAT_ID` exempts **nothing** — reading "unset" as "exempt everything" would switch the
-gate off in the one environment where nobody is watching.
+**The audience freeze must not alias its tables.** `audienceWhere` is built from drizzle column
+references that render fully qualified, and an alias makes them unresolvable. See §6.
 
-## 5. Deliberate departures from the plan — twenty-six
+## 5. Deliberate departures from the Stage 5 plan — four so far
 
-Each is explained in a comment at the site. **Do not revert them.** 1–6 are from the first session,
-7–12 from tasks 31–32, 13–15 from tasks 33–34, 16–20 from task 45, 21–24 from task 46, 25–26 from
-tasks 36–39.
+Each is explained at the site. **Do not revert them.** Stage 4's own twenty-six are listed in
+`docs/plans/2026-07-28-stage-4-staff.md`'s history and in the Stage 4 sections of this file's
+predecessor; they remain in force and are not repeated here.
 
-1. `OutgoingMessage.purpose` built early, not at Task 39. Every non-first message must set it.
-2. All five case queries return `{ cases, total }`.
-3. `staleCases` reads `OVERDUE_DAYS` itself rather than taking it as an argument.
-4. `findCase` lives in `queries.ts`, not `service.ts` — it needs the visibility scope.
-5. Migration `0006`'s enum statements are hand-written. If `drizzle-kit generate` re-emits a
-   `DROP TYPE`, hand-fix it again; the snapshot in `drizzle/meta/` is correct.
-6. `requireSignIn` refuses a revoked teacher rather than prompting — prompting let them undo their
-   own revocation, because `bindTeacher` clears `revoked_at`. **This is the departure whose gap
-   became the fault in §6.**
-7. `routeStaffCommand` takes the conversation state. The denial is logged with it, so a teacher
-   mid-case-detail has their words redacted as case detail rather than written to `messages`.
-8. `src/telegram/commands/context.ts` exists and is not in the plan's file list — shared vocabulary,
-   so command files never value-import the dispatcher that imports them.
-9. `helpReply(supportContact, staffSection)` rather than `helpReply(db, chatId, deps)`.
-10. `routeStaffCommand` has an optional `commands` registry parameter, so the rank-too-low branch
-    could be tested the day it was written. **The same shape is reused in departure 26.**
-11. `markCaseReceived` is its own function in `service.ts`, not `updateCase` — it needs
-    `AND status = 'New'`, which is what stops an urgent case being demoted out of `Escalated`.
-12. New-case notification does **not** fire on the ordinary dedup path and **does** on the urgent
-    one. Urgent-plus-deduplicated is the common path, not an edge case.
-13. `src/cases/status.ts` exists. The status vocabulary was written out three times and
-    `OPEN_CASE_STATUSES` was defined in two files that different code imported.
-    `CASE_STATUS_ORDER` in the schema is now the source.
-14. `/case` budgets its own output because `send.ts` does not split messages.
-15. `updateCase` now **clears** `closed_at` when a case leaves a terminal status. See §6.
-16. `/region` refuses **both ends** of a move, not only the destination. Refusing only the
-    destination still lets a Samarkand lead pull a teacher *out* of Bukhara, which is the same act
-    from the other side. A `null` region is covered by everybody, because D10 already says an
-    unknown region hides a case from nobody.
-17. `knownRegions` in `teachers/region.ts` — `/region` refuses a region the system has never seen
-    and canonicalises the spelling. A typo would otherwise put a teacher in a province nobody
-    covers, routed nowhere, wrong in a way nothing reports. **`/staff_add` applies the same rule**,
-    where the failure is quieter still: an over-narrow staff row looks like a quiet week.
-18. `listRegionFlags` takes a region scope. It is scoped by the region **we currently hold**,
-    because where the teacher actually is, is the thing nobody has been told yet.
-19. `clearSnooze` in `service.ts`, so `/snooze <ref> clear` exists. Somebody who types `90` meaning
-    `9` otherwise has no recovery short of a database session.
-20. `parseDueDate` lives in `commands/parse.ts` and imports `TIMEZONE`. `/due` refuses a slashed
-    date rather than guessing, and lands on the **end** of the day in Tashkent. `/mark` is at
-    `case.mark`, not `case.update` as the plan text said — D7's table is the source.
-21. **A second migration in the stage** — `drizzle/0007_region_asked_at.sql`. Task 42 said one
-    migration for the whole stage and it could not hold: nothing in the schema could answer "when
-    did we last ask". One `ADD COLUMN`, generated by `drizzle-kit`, **read before it was accepted**,
-    verified against an empty database as well as the incremental path, and renamed to match the
-    file convention.
-22. **`region_asked_at` is stamped when the question is SHOWN, not answered.** Stamped on answer, a
-    teacher who ignores it is asked again on every visit to the menu, which is the nagging D21
-    rules out.
-23. **The prompt is on `/start` and `MENU:MAIN` only, not on `mainMenuReply()`.** That function is
-    reached from a dozen recovery branches and is documented as the one thing that cannot itself
-    fail. `startReply` now returns `{ signedIn, reply }` so the teacher lookup happens once.
-24. **"Still right" clears an outstanding mismatch flag** (`confirmRegion`). A teacher who reported
-    a move nobody acted on, and now says the record is correct, has withdrawn the report.
-25. **The last-System guard is on `/staff_role` as well as `/staff_remove`**, which the plan does not
-    ask for and which is the same hole: demoting the only System member empties the rank exactly as
-    deactivating them does, with the same recovery — SSH and SQL. **Working it backwards found that
-    the guard the plan *did* ask for is unreachable**, because `staff.manage` floors at System, so
-    the caller is always an active System member and the only way to reach a count of one is to be
-    that one, which the self-check refuses first. It is kept anyway, with the reason at the site, and
-    the *property* is tested rather than the branch so a later change to either rule fails a test
-    rather than emptying the staff table. Two more of the same shape: `/revoke` refuses a chat that
-    never signed in, and `restoreTeacher` refuses one in SQL, because otherwise the two commands
-    between them *grant* access rather than returning it. And `TEACHER_REVOKED` / `TEACHER_RESTORED`
-    are written by the repository only when the statement matched a row, which makes R16's "no audit
-    row when nothing happened" structural rather than something a caller must remember.
-26. **`telegramAlerter` takes an injectable System-staff reader, defaulting to the real one**, and
-    `src/telegram/chat-gate.ts` exists and is not in the plan's file list. Both are the same choice
-    for the same two reasons: no call site passes anything, so no call site can forget the
-    behaviour, and it can still be driven in a test with no database and no network. `listCases`
-    also gained a teacher filter rather than `/revoke` getting an unscoped count of its own — a
-    count is the cheapest possible way to lose `queries.ts`'s guarantee that nothing it returns is
-    invisible to the asker, and the commands say "you can see" rather than implying a total.
+1. **Task 54 was pulled forward** out of the stated build order. Task 49 changes `privacyNotice`'s
+   signature and its callers cannot compile without the settings reader — the two are one change,
+   and splitting them leaves typecheck broken across a task boundary.
+2. **`SETTING` spreads `RETENTION_SETTING` from `retention.ts`** rather than declaring the three
+   keys a second time. Two lists that must agree with nothing enforcing it is the fault `status.ts`
+   was created to fix.
+3. **`forgetTeacher` reports three outcomes, not two.** `alreadyForgotten` is kept apart from
+   `notFound`, because reporting the latter for somebody removed last month sends an operator
+   looking for a row that is behaving correctly.
+4. **The chase tests are a new file**, `src/cases/chase.integration.test.ts`. The reset lives in
+   `service.ts` and the queries in `queries.ts`, so either existing home would have split one
+   behaviour across two files.
 
-## 6. Faults found by building, in code that was already committed
+Also: the three `RETENTION_DAYS` tests in `settings.integration.test.ts` are **re-pointed at
+`OVERDUE_DAYS` rather than deleted** — what they pin is the reader, and all three behaviours are
+still worth having. And `RETENTION_DAYS` itself is **deleted, not renamed** (D34).
 
-**A revoked teacher could give themselves their access back** (`a37fef8`). **The worst one this
-project has produced, and it survived three tasks of review.** `/start` from a revoked chat saved
-`AwaitingIdentifier` and showed the sign-in prompt, because it branched on "is this teacher
-Verified" and treated everything else alike. Typing the recruitment address then reached
-`bindTeacher`, whose `set` object clears `revoked_at` and writes `Verified` — correct for a teacher
-who changed phone, and a complete self-service undo of a staff decision for one who was revoked on
-purpose. Nothing anywhere reported it. Departure 6 had closed the same door on `requireSignIn` and
-`/start` was the one nobody checked. **Found the moment Task 36's own prescribed test was written**
-(`does not let a restore be faked by signing in again`), which failed on the first run.
+## 6. Faults found by building
 
-> **A committed test asserted the old behaviour and was inverted rather than deleted**, with the
-> reason recorded at the site. It was written to stop the R11 fix widening by one field and pinned
-> `bindTeacher` clearing `revoked_at`. That line is still correct and still there; no revoked row
-> can reach it now, so the guard has nothing left to guard.
+**Two in Stage 5, both by running things.**
 
-**A reopened case kept its `closed_at`** (`8f2b84c`). `updateCase` stamped the column on the way
-into a terminal status and never on the way out. Harmless when written; **not** harmless after D28,
-because Stage 5's retention measures its seven days from exactly that column — a reopened case
-somebody was actively working would have been deleted a week later, silently.
+**The audience freeze did not run at all.** `audienceWhere` renders drizzle column references as
+fully-qualified `"teachers"."verification_state"`, and the `INSERT … SELECT` around it had aliased
+its tables as `t` and `r` — so PostgreSQL could not resolve the names and rejected the statement
+outright. Every test in the file failed at once. The same class of trap `visibility.ts` documents
+one row along: it fails at the database, where neither the typechecker nor a reading can see it.
 
-**The status vocabulary existed three times** (`5df3f92`), with two definitions of
-`OPEN_CASE_STATUSES` reached by different importers, agreeing only by luck.
+**`delivery_state` had no `Sending` value, and the plan assumed one.** Without it a recipient cannot
+be *claimed*, so two overlapping sweeps would both read the same `Pending` rows and message that
+teacher twice — the one failure a broadcast to 1,800 people must not have. Added to `0008` as
+`ALTER TYPE … ADD VALUE`, which is additive and safe inside the migration transaction on PG 17. The
+migration was regenerated and both paths reproven. **This was a schema change the plan did not
+anticipate**, and it is recorded in the plan's own table rather than folded quietly into D45.
 
-All three are the same lesson every session here has produced: **these are found by running things
-and by needing to use them, never by reading.** Two earlier ones were the same shape — a SQL
-fragment the database rejects outright, and the region fix that the one place it mattered still
-ignored.
+**Five more were found before any code was written**, by reading the system closely enough to plan
+against it. All five are handled in the plan and are traced as R22–R26. The two that matter most for
+what is still to build:
+
+- **`graphile-worker` matches its crontab in UTC** (`getUTCHours` in `dist/cron.js`), whatever
+  `TZ: Asia/Tashkent` in `docker-compose.yml` says. Both existing entries are intervals, so nothing
+  has hit it. **The digest is the first absolute-time job in this system.** 07:00 Tashkent is
+  `0 2 * * *`. `constants.ts` warns about this exact failure in these exact words.
+- **`recordJobRun` must never wrap on-demand work.** `checkHeartbeats` alarms on any `job_runs` row
+  whose last success is older than 1.5× its interval, so an announcement job would raise a critical
+  alarm every hour in which nobody sent an announcement. Announcements are driven by a **scheduled
+  sweeper** instead, which is also what makes a restart mid-broadcast resume rather than repeat.
+
+**Stage 4's three faults in already-committed code** — a revoked teacher restoring their own access,
+a reopened case keeping its `closed_at`, and the status vocabulary existing three times — are fixed
+and are described in `docs/plans/2026-07-28-stage-4-staff.md`. The `closed_at` one is why Stage 5's
+retention can measure from that column at all.
+
+All of them are the same lesson: **these are found by running things and by needing to use them,
+never by reading.**
 
 ## 7. Running anything
 
@@ -278,52 +210,33 @@ Then, in PowerShell:
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run
 ```
 
-**With the database down the suite reports roughly `226 passed | 468 skipped`.** That was measured
-on 29 July with `TEST_DATABASE_URL` unset, before the last three tasks; the exact figures have moved
-but the *shape* has not. **A run with hundreds of skips proved nothing**, and this project has been
-misled by exactly that before. A real run reports **0 skipped**.
+**A run reporting hundreds of skips proved nothing** — that is the exact shape of a no-database run,
+and this project has been misled by it before. A real run reports **0 skipped**.
+
+**Docker Desktop can be *paused*.** A run then hangs with no output at all. Check with
+`docker desktop status` — if it says `paused`, **`docker desktop start` does NOT unpause it**. Only
+the tray icon or the Dashboard does, and `docker desktop restart` would tear down the test database.
+Ask the head of project to click Resume. `starting` is different and resolves itself.
+
+`docker` **is** on the PATH. Do not call it through `wsl`; that distro refuses.
+
+**Use the git that is already installed.** The Bash tool in this environment *is* their Git Bash.
+Never install another.
 
 ### One intermittent failure, observed once and not reproduced
 
 **`src/staff/repository.integration.test.ts` → `reports a duplicate as a duplicate when two callers
-race` failed once**, in a full-suite run, on 30 July. It then passed in **three** further full-suite
-runs and **four** runs of that file alone. The assertion text was not captured, which is the reason
-this note is vague and is itself the lesson: capture it if you see it again.
-
-The test fires two `addStaff` calls at once with `Promise.allSettled` and asserts exactly one
-rejection, of type `StaffAlreadyExistsError`. What I could not rule out, in rough order of
-likelihood:
-
-- **The loser got a different error code than `23505`.** `addStaff` converts only `23505` and
-  rethrows anything else, so a deadlock or serialization failure under load would still be a
-  rejection but not a `StaffAlreadyExistsError` — and `toBeInstanceOf` would fail while
-  `rejected.length` passed.
-- A pool connection in a bad state after 46 files had run before it.
-
-**What it is not:** a fault in `addStaff`'s logic. Both the pre-check and the primary key are doing
-their job in every run, and the duplicate is refused either way. If this recurs, widen the `catch`
-to name whatever code actually arrived rather than loosening the assertion — a raw constraint error
-reaching `bot.catch` is silence to the staff member, which is the thing that `catch` exists to
-prevent.
-
-**Docker Desktop can be *paused*.** A run then hangs with no output at all. Check with
-`docker desktop status` — if it says `paused`, **`docker desktop start` does NOT unpause it** (it
-reports "already running"). Only the tray icon or the Dashboard does, and `docker desktop restart`
-would tear down the test database with everything else. Ask the head of project to click Resume.
-`starting` is different and resolves itself; wait for `running`.
-
-`docker` **is** on the PATH. Do not call it through `wsl`; that distro refuses.
-
-**Use the git that is already installed.** The Bash tool in this environment *is* their Git Bash —
-`which git` gives `/mingw64/bin/git`. Never install another, and never suggest a GUI step for
-something the CLI does.
+race` failed once**, on 30 July, and has passed in every full run since — including three today. The
+assertion text was not captured, which is the reason this note is vague and is itself the lesson.
+The likeliest cause is the loser getting an error code other than `23505`, which `addStaff` rethrows
+rather than converting. **If it recurs, widen the `catch` to name whatever code actually arrived**
+rather than loosening the assertion.
 
 ### If you touch the schema
 
-`npx drizzle-kit generate` and then **read the SQL it emitted before accepting it.** It has emitted
-a destructive `DROP TYPE`/recreate in this repository once already (departure 5). Rename the file
-from its generated nonsense to match the convention, and change the `tag` in
-`drizzle/meta/_journal.json` to match.
+`npx drizzle-kit generate` and then **read the SQL it emitted before accepting it.** It has emitted a
+destructive `DROP TYPE`/recreate in this repository once already. Rename the file from its generated
+nonsense to match the convention, and change the `tag` in `drizzle/meta/_journal.json` to match.
 
 Then prove the **deploy** path, not only the incremental one, because the server applies every
 migration to a database that has none:
@@ -332,85 +245,54 @@ migration to a database that has none:
 docker exec mopse-test-postgres-1 psql -U mopse -d mopse_test -c "CREATE DATABASE mopse_migrate_check"
 TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_migrate_check' node --experimental-strip-types \
   -e "import('./src/test/global-setup.ts').then(m => m.setup()).then(() => console.log('OK'))"
-docker exec mopse-test-postgres-1 psql -U mopse -d mopse_migrate_check -c "\d teachers"
+docker exec mopse-test-postgres-1 psql -U mopse -d mopse_migrate_check -c "\d cases"
 docker exec mopse-test-postgres-1 psql -U mopse -d mopse_test -c "DROP DATABASE mopse_migrate_check"
 ```
 
-A throwaway database, so the test database is never at risk.
+**If you regenerate a migration that has already been applied locally, drop and rebuild
+`mopse_test`.** Drizzle tracks migrations by hash, so a regenerated file is a new migration and its
+`ADD COLUMN`s fail against a database that already has them. The test database has no volume, so
+rebuilding it costs nothing:
 
-## 8. What to do next — Stage 5, which has no plan yet
+```bash
+docker exec mopse-test-postgres-1 psql -U mopse -d postgres -c "DROP DATABASE mopse_test"
+docker exec mopse-test-postgres-1 psql -U mopse -d postgres -c "CREATE DATABASE mopse_test"
+```
 
-Stage 4 built everything it set out to build. **Stage 5 needs a plan written before any of it is
-started**, in the shape the Stage 3 and Stage 4 plans use: decisions recorded with their reasoning,
-a ripple analysis, and a dependency tree that is checked rather than asserted.
+## 8. What to do next — Task 61 onward
 
-### Where the plan goes, and what not to touch while writing it
+**The plan is written and its build order is stated. Follow it top to bottom.** What remains is
+Layer 3 (six commands), Layer 4 (three scheduled jobs), the optional layer checker, and the
+documentation pass.
 
-**A new document: `docs/plans/2026-07-30-stage-5-scheduled-work.md`.** Plans are never written into
-this file and never into the stage-4 plan. Both of those are records of work that is finished, and
-editing them to hold the next stage's intentions is how a document stops being able to say what
-happened.
+`61 · 62 · 63 · 64 · 65 · 66 · 67 · 68 · 69 · 70? · 71`
 
-**Do not edit `BOT-SPEC.md`, `RUNBOOK.md` or `CONCERNS-AND-IT-ACTIONS.md` while building Stage 5.**
-They were brought current through Stage 4 by task 41 (`807284c`) and they are *correct today*.
-Correcting them again is Stage 5's own final task, done in one pass at the end — exactly as task 41
-was — because a document edited a little at a time as code lands is a document that describes a
-system half-way between two states. **If Stage 5 makes one of them wrong, write that down in the
-Stage 5 plan as a documentation item; do not fix it in passing.**
+**Task 56 is not built** (the roll-up, declined) and its number is kept in place so that a reference
+to a task number still means what it said.
 
-The one exception, and it is why the ordering matters: **the privacy notice is code**
-(`src/config/privacy.ts`), and it ships with the retention job rather than with the documentation
-pass. See below.
+### The four things not to get wrong, restated because they are what is left
 
-### The four things Stage 5 inherits, and what the plan must answer for each
+**Retention is one release or it is a lie.** The job, the three settings, the rewritten notice, the
+bumped version and the re-consent flow ship together. The first four are built; the gate (Task 65)
+and the job (Task 67) are not. **Nothing may deploy until both are.**
 
-**What Stage 4 deliberately left for it, each with its permission or its query already in place, so
-Stage 5 adds the missing half rather than a new model:**
+**The crontab is UTC.** 07:00 Tashkent is `0 2 * * *`. Assert the arithmetic in a test rather than
+in a comment.
 
-- **Retention, and it is the largest.** Three settings, the deletion job, the rewritten privacy
-  notice, a version bump, and **a re-consent flow for 1,800 teachers** — all in one release, because
-  the current notice promises exactly that and any three without the fourth is a false statement in
-  one direction or the other. Five things must be in the job's scope and none is obvious: notes
-  cascade from the case; the job reads `importance` and never `status`, or it deletes exactly the
-  cases most worth keeping; it measures from `closed_at`; the notice must be *generated from* the
-  settings rather than have numbers typed into it; and `RUNBOOK.md` §4.7 is already deleted, so the
-  content-review signal needs a nightly roll-up if the head of project wants it back (R18).
-- **`/announce` and `/export`.** The same feature wearing two hats — bulk egress with a confirmation
-  step, a paced fan-out and a report back. `announcements` and `announcement_recipients` exist for
-  it. `/export` additionally needs a document-sending path; `send.ts` sends text only.
-- **The daily digest and chasing.** `staleCases` and `casesPastDue` are both written and tested.
-  What is missing is a schedule. **Chasing must chase the teacher for a case at `Action required`**,
-  not the staff member who is correctly doing nothing.
-- **Anonymising a teacher who asks to be removed.** Smaller than it looked — see the correction in
-  §6 of `CONCERNS-AND-IT-ACTIONS.md`.
+**Only scheduled work calls `recordJobRun`.** Announcements are swept, never enqueued.
 
-**Nothing in Stage 4 is half-built.** If something looks unfinished, check the plan's table before
-assuming.
+**Chasing chases the teacher.** The queries already do; the job must not re-derive who to message.
 
-### Two things the Stage 5 plan must put to the head of project, and one rule about doing so
+### Where the documentation stands
 
-Neither is a question a developer may answer, and both were deliberately left to this stage:
+**`BOT-SPEC.md`, `RUNBOOK.md` and `CONCERNS-AND-IT-ACTIONS.md` are still correct as of Stage 4 and
+must not be edited before Task 71.** They are corrected once, at the end, in one pass, as task 41
+was — a document edited a little at a time as code lands describes a system half-way between two
+states. **Anything Stage 5 makes wrong is a documentation item in the Stage 5 plan**, and Task 71's
+checklist there is already written from the work done so far. `src/config/privacy.ts` is the one
+exception, because it is code; it has already been rewritten and ships with the job.
 
-- **The content-review roll-up.** Three days of interaction log killed `RUNBOOK.md` §4.7, and the
-  recovery — a nightly count taken *before* the delete, keeping no teacher's words — is **their
-  choice to ask for, not a thing to build because it seems sensible.** Offer it; record the answer.
-  It is explicitly **not** an argument for a longer retention period.
-- **Whether the bot tells a teacher who their regional manager is.** Asked during Stage 4 and never
-  answered. Nothing in Stage 4 depended on it, so it was withdrawn rather than left blocking. It
-  publishes staff names, and possibly telephone numbers, to 1,800 people, so it wants a real
-  decision rather than a passing one.
-
-**The rule, which has held for four stages: ask, do not assume, and do not decide it yourself.** A
-question answered by a developer becomes an accident nobody recorded. Put it in the plan as an open
-question with the cost of each answer stated, and build the rest around it.
-
-### A loose end that is not a task: the layer rule has no mechanical enforcement
-
-The architecture rests on one rule — **nothing may import from a layer above it** — and today that
-rule is enforced by whoever is reading carefully. Everything else load-bearing in this project is a
-compile error when it breaks; this is not.
-
-**The graph itself exists, built rather than installed** (`340966f`):
+### The dependency graph
 
 ```
 npm run deps          → writes docs/dependency-tree.md
@@ -418,60 +300,38 @@ npm run deps:check    → silent, exits non-zero on a cycle, an unresolvable
                         import, or a file nothing uses
 ```
 
-`scripts/dependency-tree.mjs` — plain Node, no dependencies, no build step, and nothing a compiler
-upgrade can break. It already knows the three things an off-the-shelf tool has to be taught: entry
-points and test files are imported by nothing and that is correct; a `.js` on a relative import
-means a `.ts` file; and a type-only import may point upward and is not a cycle. **Current state: 64
-source files, 47 test files, no cycles, no unresolved imports, nothing unused.** Run `npm run deps`
-after adding files and commit the regenerated document.
+**Current state: 72 source files, 56 test files, no cycles, no unresolved imports, nothing unused.**
+Run `npm run deps` after adding files and commit the regenerated document — **Task 71 step 4 does
+this and it has not been done yet**, so `docs/dependency-tree.md` is currently stale at 64 source
+files. `deps:check` passes regardless; it computes the graph rather than reading the document.
 
-**What is still missing is the rule, not the graph.** The layers map cleanly onto directories —
-`src/staff/roles.ts` and `src/cases/status.ts` are pure leaves, `src/cases/queries.ts` and the
-repositories are stores, `src/telegram/commands/` is layer 3. A script of roughly thirty lines can
-read the import lines of every file and fail on one that points upward. Three things it must know,
-all already true in this codebase:
+**Task 70 would give the layer rule a checker.** It is droppable and nothing depends on it.
 
-- Entry points (`src/web/main.ts`, `src/worker/main.ts`, `src/scripts/*`) and `*.test.ts` files are
-  imported by nothing, and that is correct — they are not orphans.
-- Nothing in `src/` may import a `*.test.ts` file.
-- **A type-only import may point upward and is not a violation.** `import type { OutgoingMessage }
-  from '../telegram/router.js'` in `src/cases/notify.ts` and in the command files is deliberate:
-  type imports are erased at compile time, which is what lets a lower layer borrow a shape without
-  depending on it at run time, and it is how the dispatcher and the router avoid a real cycle.
+### Two tools, both settled — do not spend time on either
 
-### Two tools, both already settled — do not spend time on either
-
-**`dependency-cruiser` cannot work here yet, and nobody is behind.** Version 18.1.0 already supports
-TypeScript 7, but its release note says the first usable version is **`typescript@7.1.0`**, because
-7.0.x exposes no public API for tools to hook into. As of 29 July 2026 `typescript@latest` is
-**7.0.2**. Installed on 29 July, it cruised **0 modules while printing a green tick** — the exact
-"looks configured and does nothing" failure this rebuild exists to remove — and was uninstalled.
+**`dependency-cruiser` cannot work here yet.** It needs `typescript@7.1.0` and `latest` is `7.0.2`.
+Installed on 29 July, it cruised **0 modules while printing a green tick** and was removed. Do not
+install a nightly TypeScript to make a linter run, and do not downgrade it either.
 
 ```bash
 npm view typescript version   # 7.1.0 or above → dependency-cruiser can work here
 ```
 
-**Do not install a nightly TypeScript to make a linting tool run, and do not downgrade it either.**
-The compiler the whole build depends on does not move to suit a linter.
-
-**`repowise` is rejected. The head of project's words were "ignore repowise forever".** It is
-uninstalled and the `.repowise/`, `.mcp.json` and `.vscode/` it wrote were removed from the repo.
-**This is a closed decision: do not propose it, do not re-test it, do not mention it.**
+**`repowise` is rejected. The head of project's words were "ignore repowise forever".** This is a
+closed decision: do not propose it, do not re-test it, do not mention it.
 
 ## 9. Open questions
 
-**None.** All four original questions and both follow-ups are answered — see §3. If a new one
-arises, **ask; do not assume, and do not decide it yourself.**
+**None.** Nine have been answered across the project — four original, two during Stage 4, three
+during Stage 5 planning. If a new one arises, **ask; do not assume, and do not decide it yourself.**
 
 Two things are still waiting on MoPSE, and neither is a decision about how the software behaves:
-whether the privacy notice says the right things — now more urgent, because it has to be rewritten
-for the retention periods anyway, and reviewing it first means one round of re-consent instead of
-two — and whether sign-in should be reconsidered before launch, which expires at launch by itself.
-Both are in the artifact (§11) under "what we need from you".
+whether the privacy notice says the right things — **now urgent, because the rewritten notice is
+already in the code and re-consent has not yet shipped, so reviewing it now still means one round
+of re-consent instead of two** — and whether sign-in should be reconsidered before launch, which
+expires at launch by itself. Both are in the artifact (§11) under "what we need from you".
 
-**The launch gate has moved off engineering.** `RUNBOOK.md` §1.4 is the checklist, and none of it is
-code: a proven backup restore, two named System members, the operations group, the privacy notice
-review, an FAQ content owner, and staff who know what the four case words mean.
+**The launch gate is off engineering.** `RUNBOOK.md` §1.4 is the checklist and none of it is code.
 
 ## 10. How this project is run
 
@@ -479,63 +339,55 @@ review, an FAQ content owner, and staff who know what the four case words mean.
   survey; correct a wrong premise directly rather than working around it.
 - **Do not commit per task.** Work through, offer once at a boundary; they say "commit" and that is
   the standing pattern. A fix to already-committed code gets its own `fix:` commit, separate from
-  the feature that found it. When two tasks are committed together, split them properly — including
-  splitting a shared file — and **verify each commit stands on its own rather than only the tip**.
-  `git stash push -u -- <the other task's files>`, run the suite, commit, `git stash pop` is how
-  that was done for `a37fef8`, and it caught nothing but proved something.
+  the feature that found it. When two tasks are committed together, split them properly — and
+  **verify each commit stands on its own rather than only the tip**.
 - **Verify before claiming done.** Tests, typecheck, build, with the numbers stated plainly. This
   project has repeatedly found faults in code that was written, reviewed and committed the day
-  before, and every one was found by running something rather than by reading. If you used a
-  find-and-replace across a document, read the diff — one has already ticked a checkbox belonging
-  to a different task.
+  before, and every one was found by running something rather than by reading.
 - **Their answers are decisions, not opening positions.** Raise a concern once, then build what was
-  asked and record the cost. See §3.
+  asked and record the cost.
 - **Say what you did not do.** A gap named in this document is cheap; a gap discovered in November
   is not.
 
 ## 11. Ending a session — the three things that must be current
 
-Do all three **before** saying the session is finished. Each one has been left behind at least once,
-and each time the next session started from something that was quietly wrong.
+Do all three **before** saying the session is finished.
 
 **1. This document, rewritten in place.** Not patched — rewritten. It has been amended five times in
-a single session before, and the result contradicted itself in three places. There is one of it and
-it is the first thing the next session reads.
+a single session before, and the result contradicted itself in three places.
 
 > **This is the only document rewritten in place, and that is the whole point of it.** Everything
 > else is either a record of finished work — the stage plans — or a description of the running
-> system — `BOT-SPEC.md`, `RUNBOOK.md`, `CONCERNS-AND-IT-ACTIONS.md`. A stage's plan goes in **a new
-> document**; the three specification documents are corrected **once, at the end of a stage, in one
-> pass**, as task 41 did. Nothing else is edited mid-stage, and nothing else needs reading at length
-> to get started: this file plus the current stage's plan is the whole briefing.
+> system. A stage's plan goes in **a new document**; the three specification documents are corrected
+> **once, at the end of a stage, in one pass**. This file plus the current stage's plan is the whole
+> briefing.
 
-**2. The plan's "Where this stands" table**, at the top of `docs/plans/2026-07-28-stage-4-staff.md`,
-plus the checkboxes on any task that was finished, with its commit hash.
+**2. The plan's "Where this stands" table**, at the top of
+`docs/plans/2026-07-30-stage-5-scheduled-work.md`, plus the checkboxes on any task that was finished,
+with its commit hash.
 
 **3. The artifact — `https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53`.**
 
 > **It is the head of project's document, not an input to this one.** Do not read it to get up to
-> speed and do not copy anything out of it: a second copy of this content is exactly the drift this
-> project keeps finding in its own documents, and the header of this file says so. It flows one
-> way — from what was actually built, to them.
+> speed and do not copy anything out of it. It flows one way — from what was actually built, to them.
 
 Update it **in place** by passing that URL as `url`. Never mint a new one; favicon 🤖, keep it.
-**Currently v9, covering the whole of Stage 4.**
+**Currently v10, covering Stage 4 in full and Stage 5 through Layer 2.**
 
 The mechanism, because getting it wrong costs a whole rewrite:
 
 - `WebFetch` the URL. It saves the full HTML to a local file and prints the path.
 - Strip the `<!doctype>`/`<head>` frame wrapper and the trailing `</body></html>`. What remains —
   starting at `<title>` — is what gets republished.
-- **Edit the remainder; never rewrite it from scratch.** The design system and every section you
-  are not touching survive intact that way, and the document stays theirs rather than becoming a
-  new one each time.
-- Bump the version in three places — the sidebar, the masthead eyebrow, and the footer — and update
-  the six numbers in the metrics row. State only figures that were actually run.
+- **Edit the remainder; never rewrite it from scratch.** The design system and every section you are
+  not touching survive intact that way.
+- Bump the version in **four** places — the sidebar, the masthead eyebrow, the footer's "Version N",
+  and the footer's prose — and update the six numbers in the metrics row. State only figures that
+  were actually run.
 - Republish with `url` set and the same favicon.
 
 What belongs in it, in their words rather than the code's: what a person can now *do* that they
 could not before; anything that changes what a teacher sees; every fault found, including the ones
 in already-committed code; anything that cost more than the plan said it would; and what is still
-waiting on MoPSE. What does not belong: file names, function names, task numbers as the *subject*
-of a sentence, or any figure nobody ran.
+waiting on MoPSE. What does not belong: file names, function names, task numbers as the *subject* of
+a sentence, or any figure nobody ran.
