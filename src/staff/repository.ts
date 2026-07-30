@@ -13,6 +13,7 @@
  * every automated alternative is a permanent back door.
  */
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { isUniqueViolation } from '../db/errors.js';
 import type { Database } from '../db/index.js';
 import { type StaffRole, staff } from '../db/schema.js';
 import { recordAudit } from '../log/audit.js';
@@ -135,7 +136,7 @@ export async function addStaff(db: Database, request: AddStaffRequest): Promise<
      * command reports "they already have a row" instead of an unhandled error
      * that `bot.catch` swallows into silence.
      */
-    if ((err as { code?: string }).code === '23505') {
+    if (isUniqueViolation(err)) {
       throw new StaffAlreadyExistsError(request.telegramId);
     }
     throw err;

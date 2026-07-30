@@ -38,6 +38,7 @@ import {
   URGENT_CODE_TTL_HOURS,
   TIMEZONE,
 } from '../config/constants.js';
+import { isUniqueViolation } from '../db/errors.js';
 import type { Database } from '../db/index.js';
 import { log } from '../log.js';
 import { recordAudit } from '../log/audit.js';
@@ -131,7 +132,7 @@ export async function issueUrgentCode(db: Database, actor: string): Promise<Issu
 
       return { code, expiresAt: new Date(raw as unknown as string) };
     } catch (err: unknown) {
-      if ((err as { code?: string }).code === '23505') continue;
+      if (isUniqueViolation(err)) continue;
       throw err;
     }
   }
