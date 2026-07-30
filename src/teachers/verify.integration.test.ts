@@ -19,13 +19,34 @@ import { withChatLock } from '../conversation/lock.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { findTeacher } from './repository.js';
-import { verifyIdentifier } from './verify.js';
+import { verifyIdentifier as verifyWithPeriods } from './verify.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
 
 const CHAT = '940001';
 const OTHER_CHAT = '940002';
 const IDENTIFIER = 'a.karimov@example.com';
+
+/**
+ * Stage 5 gave `verifyIdentifier` a fifth argument: the retention periods the
+ * notice stated when this teacher read it, recorded as part of the acceptance.
+ *
+ * These tests are about verification rather than about consent, so they pass the
+ * periods every teacher bound before stage 5 accepted under — all three unset,
+ * which is what "kept until the Ministry sets a period" means. The acceptance
+ * itself is covered in `privacy.integration.test.ts`.
+ */
+const verify = (
+  db: Database,
+  chatId: string,
+  raw: string,
+  attempts: number,
+): ReturnType<typeof verifyWithPeriods> =>
+  verifyWithPeriods(db, chatId, raw, attempts, {
+    caseDays: null,
+    urgentCaseDays: null,
+    messageDays: null,
+  });
 
 describe.skipIf(!TEST_DATABASE_URL)('verifying a teacher', () => {
   let pool: pg.Pool;
@@ -47,7 +68,7 @@ describe.skipIf(!TEST_DATABASE_URL)('verifying a teacher', () => {
   });
 
   it('verifies a teacher whose identifier is on the roster', async () => {
-    const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    const outcome = await verify(db, CHAT, IDENTIFIER, 0);
     expect(outcome.kind).toBe('verified');
 
     const teacher = await findTeacher(db, CHAT);
@@ -58,7 +79,7 @@ describe.skipIf(!TEST_DATABASE_URL)('verifying a teacher', () => {
   it('accepts an identifier typed with different case and spacing', async () => {
     // The Apps Script version compared raw cell values, so a trailing space in a
     // pasted cell meant a teacher simply could not sign in, with nothing to say why.
-    const outcome = await verifyIdentifier(db, CHAT, '  A.Karimov@Example.COM ', 0);
+    const outcome = await verify(db, CHAT, '  A.Karimov@Example.COM ', 0);
     expect(outcome.kind).toBe('verified');
   });
 
@@ -68,13 +89,13 @@ describe.skipIf(!TEST_DATABASE_URL)('verifying a teacher', () => {
     // check it does nothing at all.
     await db.execute(sql`UPDATE roster_entries SET active = false WHERE identifier = ${IDENTIFIER}`);
 
-    const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    const outcome = await verify(db, CHAT, IDENTIFIER, 0);
     expect(outcome).toMatchObject({ kind: 'refused', reason: 'rosterRowDeactivated' });
     expect(await findTeacher(db, CHAT)).toBeNull();
   });
 
   it('refuses an identifier that is not on the roster at all', async () => {
-    const outcome = await verifyIdentifier(db, CHAT, 'stranger@example.com', 0);
+    const outcome = await verify(db, CHAT, 'stranger@example.com', 0);
     expect(outcome).toMatchObject({ kind: 'refused', reason: 'notOnRoster' });
   });
 
@@ -82,14 +103,14 @@ describe.skipIf(!TEST_DATABASE_URL)('verifying a teacher', () => {
     // Stage 4's entire region axis reads teachers.region, and bind time is the
     // only moment it is ever populated. Omitting it makes half of Stage 4's
     // permission model structurally dead.
-    await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    await verify(db, CHAT, IDENTIFIER, 0);
     expect((await findTeacher(db, CHAT))?.region).toBe('Tashkent');
   });
 
   it('records the privacy notice version in the same write as the bind', async () => {
     // Otherwise a teacher is Verified with no recorded acceptance, and the
     // column proves nothing.
-    await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    await verify(db, CHAT, IDENTIFIER, 0);
 
     const rows = await db.execute<{ accepted_at: Date | null; version: string | null }>(sql`
       SELECT privacy_notice_accepted_at AS accepted_at, privacy_notice_version AS version
@@ -101,7 +122,7 @@ describe.skipIf(!TEST_DATABASE_URL)('verifying a teacher', () => {
 
   it('works under the chat lock, which is how it is really called', async () => {
     const outcome = await withChatLock(db, CHAT, async (tx) =>
-      verifyIdentifier(tx, CHAT, IDENTIFIER, 0),
+      verify(tx, CHAT, IDENTIFIER, 0),
     );
     expect(outcome.kind).toBe('verified');
     expect(await findTeacher(db, CHAT)).not.toBeNull();
@@ -120,7 +141,7 @@ describe.skipIf(!TEST_DATABASE_URL)('a second account presenting the same identi
       INSERT INTO roster_entries (identifier, name, region, active)
       VALUES (${IDENTIFIER}, 'Aziz Karimov', 'Tashkent', true)
     `);
-    await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    await verify(db, CHAT, IDENTIFIER, 0);
   });
 
   afterAll(async () => {
@@ -130,13 +151,13 @@ describe.skipIf(!TEST_DATABASE_URL)('a second account presenting the same identi
   it('is allowed to bind — detected, not blocked', async () => {
     // D1. Blocking would lock out any teacher who changes phone, and would let
     // anyone holding a leaked recruitment email lock the real teacher out.
-    const outcome = await verifyIdentifier(db, OTHER_CHAT, IDENTIFIER, 0);
+    const outcome = await verify(db, OTHER_CHAT, IDENTIFIER, 0);
     expect(outcome.kind).toBe('verified');
     expect((await findTeacher(db, OTHER_CHAT))?.verificationState).toBe('Verified');
   });
 
   it('reports the prior holder, so the alarm can be raised and they can be told', async () => {
-    const outcome = await verifyIdentifier(db, OTHER_CHAT, IDENTIFIER, 0);
+    const outcome = await verify(db, OTHER_CHAT, IDENTIFIER, 0);
     if (outcome.kind !== 'verified') throw new Error(`expected a binding, got ${outcome.kind}`);
     expect(outcome.priorHolders).toEqual([CHAT]);
   });
@@ -144,14 +165,14 @@ describe.skipIf(!TEST_DATABASE_URL)('a second account presenting the same identi
   it('leaves the original binding in place', async () => {
     // Both chats hold the identity. The second binding is a signal for a human,
     // not a reason to revoke the first.
-    await verifyIdentifier(db, OTHER_CHAT, IDENTIFIER, 0);
+    await verify(db, OTHER_CHAT, IDENTIFIER, 0);
     expect((await findTeacher(db, CHAT))?.verificationState).toBe('Verified');
   });
 
   it('reports nobody when a teacher re-verifies on the same chat', async () => {
     // The ordinary case, and the one that would cry wolf if the chat being bound
     // were not excluded from the lookup.
-    const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    const outcome = await verify(db, CHAT, IDENTIFIER, 0);
     if (outcome.kind !== 'verified') throw new Error(`expected a binding, got ${outcome.kind}`);
     expect(outcome.priorHolders).toEqual([]);
   });
@@ -176,17 +197,17 @@ describe.skipIf(!TEST_DATABASE_URL)('failed attempts (D3)', () => {
   });
 
   it('consumes an attempt when the identifier is not on the roster', async () => {
-    const outcome = await verifyIdentifier(db, CHAT, 'stranger@example.com', 0);
+    const outcome = await verify(db, CHAT, 'stranger@example.com', 0);
     expect(outcome).toMatchObject({ consumedAttempt: true, attempts: 1 });
   });
 
   it('counts down the attempts remaining', async () => {
-    const outcome = await verifyIdentifier(db, CHAT, 'stranger@example.com', 2);
+    const outcome = await verify(db, CHAT, 'stranger@example.com', 2);
     expect(outcome).toMatchObject({ attempts: 3, attemptsRemaining: MAX_VERIFICATION_ATTEMPTS - 3 });
   });
 
   it('locks out once the budget is spent', async () => {
-    const outcome = await verifyIdentifier(
+    const outcome = await verify(
       db,
       CHAT,
       'stranger@example.com',
@@ -202,21 +223,21 @@ describe.skipIf(!TEST_DATABASE_URL)('failed attempts (D3)', () => {
      * inactive, the teacher retries honestly, and five retries exhaust a budget
      * meant for guessers.
      */
-    await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    await verify(db, CHAT, IDENTIFIER, 0);
     await db.execute(sql`UPDATE roster_entries SET active = false WHERE identifier = ${IDENTIFIER}`);
 
-    const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 3);
+    const outcome = await verify(db, CHAT, IDENTIFIER, 3);
     expect(outcome).toMatchObject({ kind: 'refused', consumedAttempt: false, attempts: 3 });
   });
 
   it('still lets that teacher through once the roster row is restored', async () => {
-    await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    await verify(db, CHAT, IDENTIFIER, 0);
     await db.execute(sql`UPDATE roster_entries SET active = false WHERE identifier = ${IDENTIFIER}`);
-    await verifyIdentifier(db, CHAT, IDENTIFIER, MAX_VERIFICATION_ATTEMPTS);
+    await verify(db, CHAT, IDENTIFIER, MAX_VERIFICATION_ATTEMPTS);
     await db.execute(sql`UPDATE roster_entries SET active = true WHERE identifier = ${IDENTIFIER}`);
 
     // Never locked out, because none of those retries were guesses.
-    const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, MAX_VERIFICATION_ATTEMPTS);
+    const outcome = await verify(db, CHAT, IDENTIFIER, MAX_VERIFICATION_ATTEMPTS);
     expect(outcome.kind).toBe('verified');
   });
 });

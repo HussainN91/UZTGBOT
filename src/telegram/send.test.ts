@@ -1,7 +1,14 @@
 import { GrammyError, HttpError } from 'grammy';
 import { describe, expect, it, vi } from 'vitest';
 import type { Api } from 'grammy';
-import { TelegramSendError, classifyError, isRetryable, send, trySend } from './send.js';
+import {
+  TelegramSendError,
+  classifyError,
+  isRetryable,
+  send,
+  sendDocument,
+  trySend,
+} from './send.js';
 
 /** Build the error shape grammY raises for a given Telegram API response. */
 function apiError(error_code: number, description: string, parameters: Record<string, unknown> = {}) {
@@ -35,6 +42,42 @@ describe('send throws rather than letting a caller assume delivery', () => {
       chatId: '123',
       failure: { kind: 'blocked' },
     });
+  });
+});
+
+describe('sendDocument', () => {
+  const okDocApi = (messageId = 11) =>
+    ({ sendDocument: vi.fn().mockResolvedValue({ message_id: messageId }) }) as unknown as Api;
+
+  const failingDocApi = (err: unknown) =>
+    ({ sendDocument: vi.fn().mockRejectedValue(err) }) as unknown as Api;
+
+  it('returns the message id when Telegram confirms', async () => {
+    await expect(sendDocument(okDocApi(11), '123', 'cases.csv', 'a,b\r\n')).resolves.toBe(11);
+  });
+
+  it('throws when Telegram refuses, exactly as send does', async () => {
+    // A file that did not arrive must not look like one that did. The whole
+    // reason `send` throws rather than returning {ok} applies unchanged here.
+    const api = failingDocApi(apiError(403, 'Forbidden: bot was blocked by the user'));
+    await expect(sendDocument(api, '123', 'x.csv', 'a')).rejects.toBeInstanceOf(TelegramSendError);
+  });
+
+  it('classifies its failures through the same function the text path uses', async () => {
+    const api = failingDocApi(apiError(429, 'Too Many Requests', { retry_after: 12 }));
+    await expect(sendDocument(api, '123', 'x.csv', 'a')).rejects.toMatchObject({
+      failure: { kind: 'rate_limited', retryAfterSeconds: 12 },
+    });
+  });
+
+  it('sends the filename and the bytes, not a path', () => {
+    // Nothing is written to disk. An export is built in memory and handed
+    // straight to Telegram — a temporary file is a copy of case data sitting on
+    // a server with no retention rule of its own.
+    const api = okDocApi();
+    void sendDocument(api, '123', 'cases-2026-07-30.csv', 'a,b\r\n', 'Cases you can see');
+    const [, document] = (api.sendDocument as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(document).toMatchObject({ filename: 'cases-2026-07-30.csv' });
   });
 });
 

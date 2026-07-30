@@ -402,6 +402,71 @@ export const CASE_NOTE_SHOWN_CHARS = 280;
 export const MAX_SNOOZE_DAYS = 90;
 
 /**
+ * How long a case may sit at `Action required` before the TEACHER is reminded.
+ *
+ * The teacher, not the staff member. A case waiting on the teacher is one the
+ * person holding it is correctly doing nothing about, and a digest that nags
+ * people about work they are not permitted to move is a digest they learn to
+ * ignore (plan D26, D40).
+ *
+ * Three days rather than one, for D21's reason one axis along: a teacher is
+ * being asked to do something that may need a document, an appointment or a
+ * trip to an office, and a daily reminder for a thing that takes a week is how
+ * a person learns to mute the bot that files their emergencies.
+ */
+export const TEACHER_CHASE_AFTER_DAYS = 3;
+
+/**
+ * How many reminders one case may send its teacher before it stops.
+ *
+ * Three unanswered reminders over nine days is a teacher who has left, changed
+ * number, or given up — and at that point the useful act is not a fourth
+ * message. The case's owner is told instead, which is the situation
+ * `/close <ref> unresolved <reason>` was built for (D26) and which nothing has
+ * ever produced a signal for.
+ *
+ * The count is also the marker for "the owner has been told": one past this
+ * means the report has gone out. A sixth column on `cases` for a boolean that
+ * one query reads is not worth a migration.
+ */
+export const TEACHER_CHASE_MAX = 3;
+
+/**
+ * Cases shown in one list inside the daily digest, before "and N more".
+ *
+ * Smaller than `STAFF_CASE_LIST_CAP` because a digest carries three lists at
+ * once and arrives unasked. Somebody who wants the whole queue types `/cases`;
+ * this is the summary that tells them whether they need to.
+ */
+export const DIGEST_LIST_CAP = 10;
+
+/**
+ * Recipients one run of the announcement sweeper may send to.
+ *
+ * A latency bound on a single job run, not a policy about how many people may be
+ * messaged. The worker is deliberately `concurrency: 1`, so a job that paced
+ * itself through 1,800 sends would hold the only slot for minutes — during which
+ * the ten-minute sync and the five-minute heartbeat do not run, and the first
+ * symptom is a false alarm that the sheet sync has stopped, raised late by the
+ * heartbeat that was itself starved.
+ *
+ * At 200 a run and one run a minute, 1,800 teachers take about nine minutes and
+ * no single run takes more than a few seconds.
+ */
+export const ANNOUNCEMENT_BATCH = 200;
+
+/**
+ * The most rows one export may contain.
+ *
+ * A cap rather than pagination, for `STAFF_CASE_LIST_CAP`'s reason and one more:
+ * the file is built in memory and handed to Telegram, which refuses a document
+ * past 50MB. Ten thousand rows is far inside that and far past what anybody
+ * reads — and the count of what is not included is always stated, because a
+ * truncated report that does not say it is truncated is one somebody plans from.
+ */
+export const EXPORT_ROW_CAP = 10_000;
+
+/**
  * How long between asking one teacher whether the region we hold is still right.
  *
  * Deliberately rare, and D21 gives the reason: there is no session to attach the

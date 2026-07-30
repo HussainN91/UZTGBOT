@@ -7,6 +7,7 @@
  * thing that cannot itself fail.
  */
 import { privacyNotice } from '../../config/privacy.js';
+import type { RetentionPeriods } from '../../config/retention.js';
 import { backToMenuKeyboard, mainMenuKeyboard, regionCheckKeyboard } from '../keyboards.js';
 import type { Reply } from '../reply.js';
 
@@ -49,11 +50,17 @@ export function regionCheckReply(region: string): Reply {
  * The notice is part of the prompt rather than a separate message the teacher
  * has to have read: replying with an identifier is the acknowledgement, so the
  * two cannot be separated by a teacher who scrolled past.
+ *
+ * `periods` comes from settings and is threaded in rather than read here,
+ * because this file must stay free of the database — it is the one thing in the
+ * bot that cannot itself fail. A teacher signing in for the first time therefore
+ * reads exactly the text an existing teacher re-accepts, which is the point of
+ * generating it in one place.
  */
-export function signInPromptReply(supportContact: string): Reply {
+export function signInPromptReply(supportContact: string, periods: RetentionPeriods): Reply {
   return {
     text:
-      `${privacyNotice(supportContact)}\n\n` +
+      `${privacyNotice(supportContact, periods)}\n\n` +
       '— — —\n\n' +
       'To continue, please reply with the email address you were recruited with. ' +
       'Replying means you have read the notice above.',
@@ -85,8 +92,8 @@ export function accessEndedReply(supportContact: string): Reply {
 }
 
 /** `/privacy`, which must work whether or not the teacher has signed in. */
-export function privacyReply(supportContact: string): Reply {
-  return { text: privacyNotice(supportContact), keyboard: backToMenuKeyboard() };
+export function privacyReply(supportContact: string, periods: RetentionPeriods): Reply {
+  return { text: privacyNotice(supportContact, periods), keyboard: backToMenuKeyboard() };
 }
 
 /**

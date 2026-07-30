@@ -23,7 +23,26 @@ import {
   regionFor,
   setRegionOverride,
 } from './region.js';
-import { verifyIdentifier } from './verify.js';
+import { verifyIdentifier as verifyWithPeriods } from './verify.js';
+
+/**
+ * Stage 5 gave `verifyIdentifier` a fifth argument: the retention periods the
+ * notice stated when the teacher read it, recorded as part of the acceptance.
+ * These tests are not about consent, so they pass the periods every teacher
+ * bound before stage 5 accepted under — all three unset, which is what "kept
+ * until the Ministry sets a period" means.
+ */
+const verify = (
+  db: Database,
+  chatId: string,
+  raw: string,
+  attempts: number,
+): ReturnType<typeof verifyWithPeriods> =>
+  verifyWithPeriods(db, chatId, raw, attempts, {
+    caseDays: null,
+    urgentCaseDays: null,
+    messageDays: null,
+  });
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
 
@@ -65,7 +84,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
       // has already signed in: teachers.region is written once, by bindTeacher,
       // and a verified teacher never verifies again. Recruitment's edits reach
       // nobody. This is the test that proves the old behaviour wrong.
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRosterRegion(IDENTIFIER, 'Samarkand');
 
       expect(await regionFor(db, CHAT)).toBe('Samarkand');
@@ -75,7 +94,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
       // The column is kept and is now honestly what it always was. If this ever
       // starts equalling the live roster value, something has started writing it
       // again and the join has quietly stopped being the source of truth.
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRosterRegion(IDENTIFIER, 'Samarkand');
 
       expect((await findTeacher(db, CHAT))?.region).toBe('Tashkent');
@@ -85,7 +104,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
     it('returns null when neither the override nor the roster has one', async () => {
       // D10 depends on this: an unknown region hides a case from nobody.
       await setRosterRegion(IDENTIFIER, null);
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
 
       expect(await regionFor(db, CHAT)).toBeNull();
     });
@@ -97,7 +116,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
 
   describe('an override by a named person', () => {
     it('lets a manager override the roster', async () => {
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
       await setRosterRegion(IDENTIFIER, 'Samarkand');
 
@@ -109,10 +128,10 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
       // region from the roster. A manager's correction must not be undone by a
       // teacher buying a phone — and changing phone is the commonest legitimate
       // reason anyone re-verifies.
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
 
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
 
       expect(await regionFor(db, CHAT)).toBe('Bukhara');
     });
@@ -138,12 +157,12 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
        * nothing stale should survive a rebind — but no revoked row can now reach
        * it, so the guard the old test provided has nothing left to guard.
        */
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await db.execute(
         sql`UPDATE teachers SET verification_state = 'Revoked', revoked_at = now(), revoked_by = ${MANAGER} WHERE chat_id = ${CHAT}`,
       );
 
-      const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      const outcome = await verify(db, CHAT, IDENTIFIER, 0);
 
       expect(outcome.kind).toBe('refused');
       const teacher = await findTeacher(db, CHAT);
@@ -156,18 +175,18 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
       // and the answer would be the same every time — so counting it would lock
       // somebody out of a prompt they cannot pass anyway, and would make the
       // attempt budget mean two different things.
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await db.execute(
         sql`UPDATE teachers SET verification_state = 'Revoked', revoked_at = now() WHERE chat_id = ${CHAT}`,
       );
 
-      const outcome = await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      const outcome = await verify(db, CHAT, IDENTIFIER, 0);
 
       expect(outcome.kind === 'refused' && outcome.consumedAttempt).toBe(false);
     });
 
     it('returns to the roster value when the override is cleared', async () => {
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
       await setRosterRegion(IDENTIFIER, 'Samarkand');
 
@@ -177,7 +196,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
     });
 
     it('records who set it and when', async () => {
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
 
       const rows = await db.execute(
@@ -190,7 +209,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
     it('writes an audit row for both setting and clearing', async () => {
       // D18. "Who moved this teacher, and when" is an audit question, and a
       // roster edit cannot answer it.
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
       await clearRegionOverride(db, CHAT, MANAGER);
 
@@ -211,7 +230,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
       // D21. The teacher is the best source of the signal and the worst source
       // of the record — region decides who receives their emergency, so a menu
       // of regions is a menu of whose problem this becomes.
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await flagRegionMismatch(db, CHAT);
 
       expect(await regionFor(db, CHAT)).toBe('Tashkent');
@@ -219,7 +238,7 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
     });
 
     it('clears the flag when a manager sets the region', async () => {
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await flagRegionMismatch(db, CHAT);
       await setRegionOverride(db, CHAT, 'Bukhara', MANAGER);
 
@@ -227,15 +246,15 @@ describe.skipIf(!TEST_DATABASE_URL)('region resolution', () => {
     });
 
     it('lists only flagged teachers', async () => {
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
-      await verifyIdentifier(db, OTHER_CHAT, OTHER_IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
+      await verify(db, OTHER_CHAT, OTHER_IDENTIFIER, 0);
       await flagRegionMismatch(db, OTHER_CHAT);
 
       expect((await listRegionFlags(db)).map((f) => f.chatId)).toEqual([OTHER_CHAT]);
     });
 
     it('reports the region currently held, so a manager can judge it', async () => {
-      await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+      await verify(db, CHAT, IDENTIFIER, 0);
       await setRosterRegion(IDENTIFIER, 'Samarkand');
       await flagRegionMismatch(db, CHAT);
 

@@ -36,7 +36,7 @@ import {
   URGENT_CASE_CATEGORY,
   caseTopicByKey,
 } from '../config/constants.js';
-import { isMaintenanceMode } from '../config/settings.js';
+import { isMaintenanceMode, retentionPeriods } from '../config/settings.js';
 import { fileUrgentCase, checkUrgentCode } from '../cases/urgent.js';
 import { TeacherNotVerifiedError, createCase } from '../cases/service.js';
 import { NO_NOTIFICATION, notifyNewCase, type NotificationOutcome } from '../cases/notify.js';
@@ -253,7 +253,12 @@ async function routeText(
       ? menuWithRegionCheck(db, update.chatId)
       : only(update.chatId, start.reply);
   }
-  if (text === '/privacy') return only(update.chatId, privacyReply(deps.supportContact));
+  if (text === '/privacy') {
+    // Read here rather than held in `deps`: a period changed with /retention
+    // must reach the next teacher who asks, not the next deploy.
+    const periods = await retentionPeriods(db);
+    return only(update.chatId, privacyReply(deps.supportContact, periods));
+  }
   if (text === '/help') {
     // The staff half is appended only for an active staff row, so a teacher is
     // never shown a command they would be refused for typing.
@@ -400,7 +405,10 @@ async function startReply(
   }
 
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0 });
-  return { signedIn: false, reply: signInPromptReply(deps.supportContact) };
+  return {
+    signedIn: false,
+    reply: signInPromptReply(deps.supportContact, await retentionPeriods(db)),
+  };
 }
 
 async function handleIdentifier(
@@ -410,7 +418,16 @@ async function handleIdentifier(
   state: Extract<ConversationState, { kind: 'AwaitingIdentifier' }>,
   deps: RouterDeps,
 ): Promise<RouterOutcome> {
-  const outcome = await verifyIdentifier(db, chatId, text, state.attempts);
+  /**
+   * The periods the notice stated, recorded as part of the acceptance.
+   *
+   * Replying with an identifier *is* the acknowledgement — the prompt says so —
+   * so this is the moment a teacher agrees to a specific set of numbers, and the
+   * numbers have to be written down with the version. Without this, every
+   * teacher who signs in is asked to re-accept on their very next tap.
+   */
+  const periods = await retentionPeriods(db);
+  const outcome = await verifyIdentifier(db, chatId, text, state.attempts, periods);
 
   if (outcome.kind === 'lockedOut') {
     return only(chatId, {
@@ -914,7 +931,7 @@ async function requireSignIn(
   if (hadAccess) return only(chatId, accessEndedReply(deps.supportContact));
 
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0, resumeAction });
-  return only(chatId, signInPromptReply(deps.supportContact));
+  return only(chatId, signInPromptReply(deps.supportContact, await retentionPeriods(db)));
 }
 
 /**

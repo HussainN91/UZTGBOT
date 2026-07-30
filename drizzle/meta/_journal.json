@@ -57,6 +57,13 @@
       "when": 1785334521833,
       "tag": "0007_region_asked_at",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785401775061,
+      "tag": "0008_retention_and_chasing",
+      "breakpoints": true
     }
   ]
 }

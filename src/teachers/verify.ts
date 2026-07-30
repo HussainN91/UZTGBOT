@@ -19,6 +19,7 @@
  */
 import { MAX_VERIFICATION_ATTEMPTS } from '../config/constants.js';
 import { PRIVACY_NOTICE_VERSION } from '../config/privacy.js';
+import type { RetentionPeriods } from '../config/retention.js';
 import type { Database } from '../db/index.js';
 import { normaliseIdentifier } from '../sheets/parse.js';
 import { bindTeacher, findOtherHolders, findRosterEntry, findTeacher } from './repository.js';
@@ -64,6 +65,15 @@ export async function verifyIdentifier(
   chatId: string,
   rawIdentifier: string,
   attemptsSoFar: number,
+  /**
+   * The periods the notice stated when this teacher was shown it.
+   *
+   * Passed in rather than read here, and that is the whole safety of it: it must
+   * be the periods on the notice they actually saw, not whatever the settings
+   * say at the moment they finish typing an address. Reading them here would
+   * record an acceptance of numbers that changed while they were typing.
+   */
+  acceptedPeriods: RetentionPeriods,
 ): Promise<VerificationOutcome> {
   const identifier = normaliseIdentifier(rawIdentifier);
   const teacher = await findTeacher(db, chatId);
@@ -133,6 +143,7 @@ export async function verifyIdentifier(
     name: roster.name,
     region: roster.region,
     privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
+    privacyAcceptedPeriods: acceptedPeriods,
   });
 
   return {

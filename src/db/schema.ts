@@ -163,7 +163,31 @@ export const announcementStatusEnum = pgEnum('announcement_status', [
   'Cancelled',
 ]);
 
-export const deliveryStateEnum = pgEnum('delivery_state', ['Pending', 'Sent', 'Failed', 'Skipped']);
+/**
+ * Where one recipient of one announcement has got to.
+ *
+ * `Sending` was added in stage 5 and is the state that makes a paced broadcast
+ * safe. Without it there is no way to *claim* a recipient: two overlapping
+ * sweeps — a slow run and the next minute's — would both read the same
+ * `Pending` rows and message that teacher twice, which is the one failure a
+ * broadcast to 1,800 people must not have.
+ *
+ * It also makes a crash mid-batch visible rather than implicit. A run that dies
+ * after claiming leaves rows here, and `resetStalledRecipients` returns them
+ * deliberately after a generous window — the alternative, treating a claim as
+ * self-healing, is the double-send again by another route.
+ *
+ * `Skipped` is for somebody who no longer has access when their turn comes, and
+ * never for a delivery failure. The two need different things done about them
+ * and the report counts them apart.
+ */
+export const deliveryStateEnum = pgEnum('delivery_state', [
+  'Pending',
+  'Sending',
+  'Sent',
+  'Failed',
+  'Skipped',
+]);
 
 // ---------------------------------------------------------------------------
 // Owned by the spreadsheet. Written ONLY by the sync.
@@ -340,8 +364,35 @@ export const teachers = pgTable(
      * Nullable because teachers bound before this column existed genuinely have
      * no recorded version, and inventing one for them would be worse than
      * admitting it.
+     *
+     * As of stage 5 this versions **the wording only**. The notice's numbers are
+     * generated from settings and can change with no deploy at all, so they are
+     * recorded separately in the three columns below. See `requiresReconsent`
+     * in `src/config/retention.ts` for the rule that reads all four.
      */
     privacyNoticeVersion: text('privacy_notice_version'),
+    /**
+     * The retention periods, as they stood when this teacher accepted the notice.
+     *
+     * The notice is generated from three settings (plan D28), which means its
+     * text changes without a deploy and without anybody bumping a version. These
+     * columns are what makes "did they agree to *this*" answerable afterwards.
+     *
+     * The rule they exist for is asymmetric, which is why a hash of the notice
+     * text cannot replace them: **lengthening** a period keeps data longer than
+     * a teacher was promised and must ask them again, while **shortening** one
+     * breaks no commitment to anybody and must not. Any digest of the whole
+     * notice changes in both directions and would march 1,800 people through a
+     * re-consent to be told their data goes sooner.
+     *
+     * `null` is meaningful and is not "unknown": it records an acceptance made
+     * while that class of record was kept indefinitely, which is the longest
+     * period there is. Every teacher bound before stage 5 is in exactly that
+     * position, because the notice they read says the period is not yet set.
+     */
+    privacyAcceptedCaseDays: integer('privacy_accepted_case_days'),
+    privacyAcceptedUrgentCaseDays: integer('privacy_accepted_urgent_case_days'),
+    privacyAcceptedMessageDays: integer('privacy_accepted_message_days'),
   },
   (t) => [
     check('teachers_chat_id_digits', CHAT_ID_IS_DIGITS('chat_id')),
@@ -385,6 +436,24 @@ export const staff = pgTable(
     role: staffRoleEnum('role').notNull().default('Support'),
     /** Case category this person works, or 'All'. */
     queue: text('queue').notNull().default('All'),
+    /**
+     * The Telegram handle shown to a teacher as the person covering their region.
+     *
+     * Set by the staff member themselves, on their own row only — a handle
+     * published under somebody's name is theirs to publish. `null` means "not
+     * published", never "unknown", and a teacher then sees the name and the
+     * support address instead.
+     *
+     * **Verified, never trusted.** A Telegram username is not an identifier; it
+     * is a label its owner can release, and a released handle can be claimed by
+     * anybody. Every other stale value in this system degrades towards nothing
+     * happening — this one degrades towards the ministry's own bot pointing
+     * 1,800 teachers at a stranger, confidently and silently. So the handle is
+     * checked against `api.getChat` when it is set and again every day: if it
+     * no longer resolves to this row's `telegram_id`, the column is cleared and
+     * somebody is told.
+     */
+    telegramUsername: text('telegram_username'),
     /** Empty array means every region — so adding this column cannot narrow existing access. */
     regions: text('regions').array().notNull().default(sql`ARRAY[]::text[]`),
     active: boolean('active').notNull().default(true),
@@ -435,6 +504,30 @@ export const cases = pgTable(
     dueAt: tsz('due_at'),
     /** Suppresses chasing until this passes. Never suppresses the case itself. */
     snoozedUntil: tsz('snoozed_until'),
+    /**
+     * When the TEACHER was last reminded that this case is waiting on them, and
+     * how many times.
+     *
+     * The teacher, not the staff member. A case at `Action required` is one the
+     * teacher has to move, and the person holding it is correctly doing nothing
+     * — a digest that nags staff about work they are not permitted to move is a
+     * digest they learn to ignore (plan D26, D40).
+     *
+     * **Both are reset by `updateCase` whenever the status changes**, in the same
+     * place and for the same reason as `closed_at`. Leaving `Action required`
+     * and re-entering it both mean the clock restarts, and `updateCase` is the
+     * one write path that sees every status change — putting the reset in the
+     * command that writes the status today would mean a command written later
+     * inherits nothing, which is exactly how a reopened case kept a stale
+     * `closed_at` for three stages.
+     *
+     * The count stops the reminders at `TEACHER_CHASE_MAX`, and one past that
+     * marks "the owner has been told they have stopped responding" — which is
+     * the signal `/close <ref> unresolved <reason>` was built for and which
+     * nothing has ever produced.
+     */
+    teacherChasedAt: tsz('teacher_chased_at'),
+    teacherChaseCount: integer('teacher_chase_count').notNull().default(0),
     lastActor: chatId('last_actor'),
     createdAt: tsz('created_at').notNull().defaultNow(),
     updatedAt: tsz('updated_at').notNull().defaultNow(),
@@ -451,6 +544,23 @@ export const cases = pgTable(
      * columns together: open, past its promised date, not snoozed.
      */
     index('cases_chasing_idx').on(t.status, t.dueAt, t.snoozedUntil),
+    /**
+     * Serves the nightly retention pass, which reads exactly these two columns
+     * and never `status` (plan D28, D22).
+     *
+     * The pairing is the point. A case that has ended has a `closed_at`, and how
+     * long it is then kept depends only on `importance` — a `Critical` case that
+     * was resolved is `Completed`, and nothing about `Completed` remembers it
+     * was ever an emergency. `cases_status_idx` cannot serve this: it leads with
+     * a column the retention query does not mention.
+     */
+    index('cases_retention_idx').on(t.closedAt, t.importance),
+    /**
+     * Serves the teacher chase: cases at `Action required` whose reminder clock
+     * is due. Distinct from `cases_chasing_idx`, which answers the other idea of
+     * late — a promise somebody made and missed — and leads with `due_at`.
+     */
+    index('cases_teacher_chase_idx').on(t.status, t.teacherChasedAt),
   ],
 );
 

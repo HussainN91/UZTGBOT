@@ -19,7 +19,26 @@ import { TeacherNotVerifiedError, createCase, getCasesForChatId } from '../cases
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { findTeacher, revokeTeacher, teacherHasAccess } from './repository.js';
-import { verifyIdentifier } from './verify.js';
+import { verifyIdentifier as verifyWithPeriods } from './verify.js';
+
+/**
+ * Stage 5 gave `verifyIdentifier` a fifth argument: the retention periods the
+ * notice stated when the teacher read it, recorded as part of the acceptance.
+ * These tests are not about consent, so they pass the periods every teacher
+ * bound before stage 5 accepted under — all three unset, which is what "kept
+ * until the Ministry sets a period" means.
+ */
+const verify = (
+  db: Database,
+  chatId: string,
+  raw: string,
+  attempts: number,
+): ReturnType<typeof verifyWithPeriods> =>
+  verifyWithPeriods(db, chatId, raw, attempts, {
+    caseDays: null,
+    urgentCaseDays: null,
+    messageDays: null,
+  });
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
 
@@ -48,7 +67,7 @@ describe.skipIf(!TEST_DATABASE_URL)('revocation', () => {
       INSERT INTO roster_entries (identifier, name, region, active)
       VALUES (${IDENTIFIER}, 'Revocation Tester', 'Tashkent', true)
     `);
-    await verifyIdentifier(db, CHAT, IDENTIFIER, 0);
+    await verify(db, CHAT, IDENTIFIER, 0);
   });
 
   afterAll(async () => {

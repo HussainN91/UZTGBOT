@@ -7,6 +7,7 @@
  * used to.
  */
 import { and, eq, isNotNull, ne, sql } from 'drizzle-orm';
+import type { RetentionPeriods } from '../config/retention.js';
 import type { Database } from '../db/index.js';
 import { rosterEntries, teachers } from '../db/schema.js';
 import { recordAudit } from '../log/audit.js';
@@ -221,6 +222,16 @@ export interface BindRequest {
   readonly name: string;
   readonly region: string | null;
   readonly privacyNoticeVersion: string;
+  /**
+   * The retention periods stated by the notice this teacher just read.
+   *
+   * Required, not optional. Signing in *is* an acceptance — the prompt says
+   * replying means you have read the notice above — so a teacher bound without
+   * these would be asked to re-accept on their very next tap, having accepted
+   * moments earlier. This is R11's shape one column-set along: `bindTeacher`'s
+   * `set` object is where a field gets forgotten.
+   */
+  readonly privacyAcceptedPeriods: RetentionPeriods;
 }
 
 /**
@@ -247,6 +258,9 @@ export async function bindTeacher(db: Database, request: BindRequest): Promise<v
     verificationState: 'Verified' as const,
     privacyNoticeAcceptedAt: sql`now()`,
     privacyNoticeVersion: request.privacyNoticeVersion,
+    privacyAcceptedCaseDays: request.privacyAcceptedPeriods.caseDays,
+    privacyAcceptedUrgentCaseDays: request.privacyAcceptedPeriods.urgentCaseDays,
+    privacyAcceptedMessageDays: request.privacyAcceptedPeriods.messageDays,
     lastSeen: sql`now()`,
     /** A previously revoked chat that verifies again is active once more. */
     revokedAt: null,

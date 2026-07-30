@@ -12,7 +12,7 @@
  * broadcasting to 1,800 teachers, some of whom have blocked the bot — and it
  * returns a result that has to be inspected before anything can be read from it.
  */
-import { GrammyError, HttpError } from 'grammy';
+import { GrammyError, HttpError, InputFile } from 'grammy';
 import type { Api } from 'grammy';
 import type { InlineKeyboardMarkup } from 'grammy/types';
 
@@ -95,6 +95,42 @@ export async function send(
 ): Promise<number> {
   try {
     const message = await api.sendMessage(chatId, text, buildOptions(options));
+    return message.message_id;
+  } catch (err) {
+    throw new TelegramSendError(chatId, classifyError(err));
+  }
+}
+
+/**
+ * Send a file, or throw.
+ *
+ * The same contract as `send` and for the same reason: a report that did not
+ * arrive must not be indistinguishable from one that did. `/export` is the only
+ * caller, and an export that silently failed is a staff member planning from a
+ * file they never received.
+ *
+ * **The contents are held in memory and never written to disk.** A temporary
+ * file is a second copy of case data sitting on a server with no retention rule
+ * of its own and nothing that deletes it — which is precisely the property the
+ * nightly job exists to give the first copy.
+ *
+ * This is the only half of document handling this system has. D24 keeps teachers
+ * submitting documents through Google Forms and the bot never accepts or stores
+ * a file, so there is deliberately no `receiveDocument` beside this.
+ */
+export async function sendDocument(
+  api: Api,
+  chatId: string,
+  filename: string,
+  contents: string,
+  caption?: string,
+): Promise<number> {
+  try {
+    const message = await api.sendDocument(
+      chatId,
+      new InputFile(Buffer.from(contents, 'utf8'), filename),
+      caption === undefined ? {} : { caption },
+    );
     return message.message_id;
   } catch (err) {
     throw new TelegramSendError(chatId, classifyError(err));

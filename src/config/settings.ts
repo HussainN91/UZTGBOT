@@ -24,6 +24,7 @@ import { eq } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { settings } from '../db/schema.js';
 import { log } from '../log.js';
+import { RETENTION_SETTING, type RetentionPeriods, parsePeriod } from './retention.js';
 
 export const SETTING = {
   /**
@@ -34,15 +35,24 @@ export const SETTING = {
    * and turning the whole bot off would tell them nothing.
    */
   MAINTENANCE_MODE: 'MAINTENANCE_MODE',
-  /**
-   * How long records are kept. Owned by MoPSE, consumed by the retention job.
-   *
-   * Still unset. The privacy notice promises teachers their data can be removed,
-   * so this is a commitment already made, not a preference.
-   */
-  RETENTION_DAYS: 'RETENTION_DAYS',
   /** Days before an open case is treated as overdue in the daily digest. */
   OVERDUE_DAYS: 'OVERDUE_DAYS',
+  /**
+   * The three retention periods, spread from `retention.ts` rather than written
+   * out again here.
+   *
+   * They are declared there because the rules that read them are there — the
+   * purge and the re-consent comparison — and a settings key listed in two files
+   * is two lists that have to agree with nothing enforcing it. That is the exact
+   * shape of the fault `status.ts` was created to fix, where the case vocabulary
+   * existed three times and agreed only by luck.
+   *
+   * `RETENTION_DAYS` used to sit here and is **deleted, not renamed** (plan
+   * D34). It was never read by anything, and one number could not carry three
+   * different promises. A renamed key would leave a plausible-looking value in a
+   * production settings table that nothing consumes.
+   */
+  ...RETENTION_SETTING,
 } as const;
 
 export type SettingKey = (typeof SETTING)[keyof typeof SETTING];
@@ -128,6 +138,35 @@ export async function setSetting(
       set: { value, updatedBy, updatedAt: new Date() },
     });
   cache.delete(key);
+}
+
+/**
+ * The three retention periods, as the deletion job and the notice read them.
+ *
+ * Read together rather than one at a time so that a caller cannot honour two of
+ * them and forget the third — the notice states all three, and the job that
+ * enforces them must be looking at exactly what the notice said.
+ *
+ * **Every unusable value becomes `null`, and `null` deletes nothing** (D30).
+ * That includes a missing row, an empty string, a zero and anything that is not
+ * a plain number of days. `parsePeriod` decides, so the wording of the notice
+ * and the behaviour of the job cannot disagree about what a bad value means.
+ *
+ * Each is parsed independently: a mistyped `MESSAGE_RETENTION_DAYS` must not
+ * stop cases being deleted on the period MoPSE did set correctly.
+ */
+export async function retentionPeriods(db: Database): Promise<RetentionPeriods> {
+  const [caseDays, urgentCaseDays, messageDays] = await Promise.all([
+    getSetting(db, SETTING.CASE_RETENTION_DAYS),
+    getSetting(db, SETTING.URGENT_CASE_RETENTION_DAYS),
+    getSetting(db, SETTING.MESSAGE_RETENTION_DAYS),
+  ]);
+
+  return {
+    caseDays: parsePeriod(caseDays),
+    urgentCaseDays: parsePeriod(urgentCaseDays),
+    messageDays: parsePeriod(messageDays),
+  };
 }
 
 /** Test seam, and the escape hatch after an out-of-band change. */

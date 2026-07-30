@@ -271,6 +271,22 @@ export async function updateCase(
   const closedAt: SQL | null | undefined =
     fields.status === undefined ? undefined : isClosedStatus(fields.status) ? sql`now()` : null;
 
+  /**
+   * The teacher's chase clock restarts whenever the status moves — the same
+   * place, and for the same reason, as `closed_at` above.
+   *
+   * Leaving `Action required` and re-entering it both mean the clock starts
+   * again: the first because the case is no longer waiting on the teacher, the
+   * second because `/await` has asked them for something new. `updateCase` is
+   * the one write path that sees every status change, which is what makes this
+   * hold for a command written in a later stage that nobody has thought of yet.
+   *
+   * Putting it in `/await` instead would be the exact hole that let a reopened
+   * case keep a stale `closed_at` for three stages — correct at the one call
+   * site somebody remembered, and silently absent from the next one.
+   */
+  const chaseReset = fields.status === undefined ? {} : { teacherChasedAt: null, teacherChaseCount: 0 };
+
   const result = await db
     .update(cases)
     .set({
@@ -278,6 +294,7 @@ export async function updateCase(
       ...(fields.owner !== undefined ? { owner: fields.owner } : {}),
       ...(fields.publicUpdate !== undefined ? { publicUpdate: fields.publicUpdate } : {}),
       ...(closedAt !== undefined ? { closedAt } : {}),
+      ...chaseReset,
       updatedAt: sql`now()`,
       lastActor: actor,
     })
@@ -285,6 +302,49 @@ export async function updateCase(
     .returning({ reference: cases.reference });
 
   return result.length > 0;
+}
+
+/**
+ * Record that the teacher has been reminded their case is waiting on them.
+ *
+ * One statement, incrementing and stamping together. Two would let a crash
+ * between them chase somebody again on the next run with the count unchanged,
+ * which for a cap of three is the difference between three reminders and
+ * indefinitely many.
+ *
+ * `last_actor` is deliberately untouched, exactly as `markCaseReceived` leaves
+ * it: nobody did this, the system did, and overwriting the last person who acted
+ * would lose the only record of who that was.
+ */
+export async function markTeacherChased(db: Database, reference: string): Promise<boolean> {
+  const result = await db.execute<{ reference: string }>(sql`
+    UPDATE cases
+    SET teacher_chased_at = now(), teacher_chase_count = teacher_chase_count + 1
+    WHERE reference = ${reference}
+    RETURNING reference
+  `);
+  return result.rows.length > 0;
+}
+
+/**
+ * Record that the case's owner has been told the teacher stopped answering.
+ *
+ * Marked by pushing the count one past the cap rather than by a sixth column on
+ * `cases`. A boolean that exactly one query reads is not worth a migration, and
+ * the meaning is exact: at the cap means "reminders are finished", one past it
+ * means "and somebody has been told".
+ *
+ * It rides the same reset as everything else — `/await` moves the status, so a
+ * fresh request to the teacher starts the whole cycle again.
+ */
+export async function markChaseReported(db: Database, reference: string): Promise<boolean> {
+  const result = await db.execute<{ reference: string }>(sql`
+    UPDATE cases
+    SET teacher_chase_count = teacher_chase_count + 1
+    WHERE reference = ${reference}
+    RETURNING reference
+  `);
+  return result.rows.length > 0;
 }
 
 /**

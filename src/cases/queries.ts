@@ -220,7 +220,12 @@ export async function overdueDays(db: Database): Promise<number | null> {
  * thing (`AdminCommands.gs:551`). The rule lives in here rather than in the
  * caller because a caller is a thing that forgets.
  */
-export async function staleCases(db: Database, scope: StaffScope): Promise<StaffCaseList> {
+export async function staleCases(
+  db: Database,
+  scope: StaffScope,
+  /** Only cases with no owner at all — the standing backlog the digest shows. */
+  options: { readonly unassigned?: boolean } = {},
+): Promise<StaffCaseList> {
   const days = await overdueDays(db);
   if (days === null) return EMPTY_LIST;
 
@@ -228,6 +233,7 @@ export async function staleCases(db: Database, scope: StaffScope): Promise<Staff
     visibleToStaff(scope),
     inArray(cases.status, [...OPEN_CASE_STATUSES]),
     sql`${cases.updatedAt} < now() - make_interval(days => ${days})`,
+    options.unassigned === true ? isNull(cases.owner) : undefined,
   )!;
 
   // Oldest first: the case nobody has touched for longest is the one to look at.
@@ -251,17 +257,105 @@ export async function staleCases(db: Database, scope: StaffScope): Promise<Staff
  * Nothing calls this on a schedule until stage 5. It exists now so that stage
  * adds a trigger rather than a trigger and a query.
  */
-export async function casesPastDue(db: Database, scope: StaffScope): Promise<StaffCaseList> {
+export async function casesPastDue(
+  db: Database,
+  scope: StaffScope,
+  /**
+   * Restrict to one person's own cases — what the daily digest sends them.
+   *
+   * A filter rather than a second function, because the *rule* about what "past
+   * due" means must not exist twice. The digest asks "which of mine did I
+   * promise and miss"; `/urgent` asks the same question of a whole queue.
+   */
+  ownerChatId?: string,
+): Promise<StaffCaseList> {
   const where = and(
     visibleToStaff(scope),
     inArray(cases.status, [...OPEN_CASE_STATUSES]),
     sql`${cases.dueAt} IS NOT NULL AND ${cases.dueAt} < now()`,
     or(isNull(cases.snoozedUntil), sql`${cases.snoozedUntil} < now()`),
+    ownerChatId === undefined ? undefined : eq(cases.owner, ownerChatId),
   )!;
 
   // Longest-missed first: the promise broken furthest back is the one to answer.
   const rows = await scoped(db).where(where).orderBy(cases.dueAt).limit(STAFF_CASE_LIST_CAP);
   return { cases: rows as StaffCaseRow[], total: await countMatching(db, where) };
+}
+
+/**
+ * Cases waiting on the TEACHER whose reminder is due.
+ *
+ * **The one query in this file that takes no `StaffScope`, and it says so here
+ * rather than leaving a reader to wonder.** Every other function guarantees that
+ * no question asked of it returns a case the asker may not see — that guarantee
+ * is about a *person* asking, and this feeds a scheduled job. There is nobody
+ * whose visibility could apply. Anything that hands these rows to a staff member
+ * must apply the scope itself; the only caller is the digest job, which sends to
+ * the case's own owner.
+ *
+ * The four conditions each rule out a different wrong reminder:
+ *
+ *   `Action required` only — the case must actually be waiting on the teacher.
+ *   D26 is what makes this the right target: chasing the staff member who is
+ *   correctly doing nothing is a digest people learn to ignore.
+ *
+ *   Under the cap, and not chased recently. Three reminders over nine days, not
+ *   a daily nag at somebody who may need a document or an appointment.
+ *
+ *   Not snoozed. A snooze suppresses chasing and never the case itself, and it
+ *   must suppress this exactly as it suppresses `casesPastDue`.
+ *
+ *   The teacher can still receive something (R29). A revoked teacher, or one
+ *   whose roster row went, is a case to close unresolved rather than one to
+ *   message — and messaging them costs a send and tells nobody anything.
+ */
+export async function casesAwaitingTeacher(
+  db: Database,
+  afterDays: number,
+  maxChases: number,
+): Promise<StaffCaseRow[]> {
+  const rows = await scoped(db)
+    .where(
+      and(
+        eq(cases.status, 'Action required'),
+        sql`${cases.teacherChaseCount} < ${maxChases}`,
+        or(
+          isNull(cases.teacherChasedAt),
+          sql`${cases.teacherChasedAt} < now() - make_interval(days => ${afterDays})`,
+        ),
+        or(isNull(cases.snoozedUntil), sql`${cases.snoozedUntil} < now()`),
+        // `teacherHasAccess`, as SQL. Both halves, for D17's reason.
+        eq(teachers.verificationState, 'Verified'),
+        isNull(teachers.revokedAt),
+        eq(rosterEntries.active, true),
+      )!,
+    )
+    .orderBy(cases.teacherChasedAt, cases.createdAt);
+
+  return rows as StaffCaseRow[];
+}
+
+/**
+ * Cases whose teacher has run out of reminders and whose owner has not been told.
+ *
+ * Also unscoped, and for the same reason. The count is exactly at the cap: one
+ * past it means the owner has already been told, which is what
+ * `markChaseReported` writes.
+ */
+export async function casesExhaustedChasing(
+  db: Database,
+  maxChases: number,
+): Promise<StaffCaseRow[]> {
+  const rows = await scoped(db)
+    .where(
+      and(
+        eq(cases.status, 'Action required'),
+        sql`${cases.teacherChaseCount} = ${maxChases}`,
+      )!,
+    )
+    .orderBy(cases.teacherChasedAt);
+
+  return rows as StaffCaseRow[];
 }
 
 /**
