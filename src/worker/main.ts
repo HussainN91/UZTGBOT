@@ -82,9 +82,12 @@ export function tashkentCron(hour: number, minute = 0): string {
  * matter exactly when a job runs. Here it does matter, so both are explicit.
  */
 export const CRONTAB = `
-# Copy the FAQ bank and the teacher roster out of the spreadsheet. Ten minutes
-# is the promise made to staff: an edited answer reaches teachers within ten
-# minutes, rather than the up-to-six-hours the Apps Script cache allowed.
+# Copy the FAQ bank, the teacher roster and the document form links out of the
+# spreadsheet, then read each form's responses back and file what arrived. Ten
+# minutes is the promise made to staff: an edited answer reaches teachers within
+# ten minutes, rather than the up-to-six-hours the Apps Script cache allowed —
+# and it is the same ten minutes RUNBOOK §4.18 tells them to wait before checking
+# that a test submission became a case.
 */10 * * * * ${SYNC_SHEETS_TASK}
 
 # Watch the other jobs. A job that fails is noisy and will be noticed; a job

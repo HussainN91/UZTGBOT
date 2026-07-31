@@ -407,7 +407,7 @@ doing it — which is the exact failure this whole rebuild exists to remove.
 | What | How | If it is never done |
 |---|---|---|
 | **The three retention periods** | §2.4's insert, or `/retention` | Nothing is ever deleted. The notice tells teachers their records are kept until the Ministry sets a period, which is then true |
-| **The regions each staff member covers** | `/staff_add`, or `/staff_region` afterwards | **See below — this is the one with a wrong-looking answer rather than no answer** |
+| **The regions each staff member covers** | `/staff_add` at the time, or **`/staff_region <chat id> <regions>`** at any point afterwards | **See below — this is the one with a wrong-looking answer rather than no answer** |
 | **The two System members** | §2.5 | Nobody can add staff, set a period, remove a teacher, or take an export |
 | **The operations chat** | `.env`, before the first deploy | Every alarm in this document goes nowhere |
 | **The support contact address** | `.env` | Teachers are given a blank where an address should be |
@@ -416,6 +416,14 @@ doing it — which is the exact failure this whole rebuild exists to remove.
 | **The `FORMS` tab** | The spreadsheet, synced every ten minutes | Submit Documents says "there are no document forms available at the moment" to every teacher. The button still appears |
 | **Each form's responses linked into the same spreadsheet** | §4.18 — and this is the one with a procedure of its own | Teachers can still submit. **Nothing is read back**, so no case is filed, nobody is chased, and no alarm sounds — because from the bot's side nothing has happened |
 | **The word "email" in each form's email question, and in no other question** | When the form is built. §4.18 | That form's responses are refused whole, with an alarm naming it. **This one does complain** |
+
+> **One set is deliberately not on this list, and you still have to set it.**
+> `BACKUP_PASSPHRASE`, `BACKUP_REMOTE` and `BACKUP_DATABASE_URL` live in
+> `.env.example` and `deploy/README.md`. They are absent above because they fail
+> **loudly** — `backup.sh` refuses to run and names the one that is missing, which
+> is the opposite of everything in this table. But an unset backup is still an
+> unset backup, and `CONCERNS-AND-IT-ACTIONS.md` **A5 calls proving the restore a
+> launch blocker.** §4.9.
 
 ### The regions, specifically — this one is being done later, on purpose
 
@@ -433,6 +441,25 @@ on cases, wherever that person actually sits.
 That is a reasonable answer and it is not the right one. Once the regions are
 entered, whoever explicitly names the teacher's region is preferred over anybody
 covering all of them, and rank only breaks the remaining tie.
+
+**Entering them is `/staff_region`, one person at a time:**
+
+```
+/staff_region 991001 Tashkent, Samarkand
+/staff_region 991001 clear
+```
+
+Region names are checked against the ones teachers are actually in, so a typo is
+refused with the real list rather than quietly putting somebody in a region that
+does not exist. `clear` puts them back to covering everywhere, and is spelled out
+rather than implied by an empty line — "everybody sees everything" is a real
+configuration, but not one to arrive at by pressing enter.
+
+> **This command did not exist until 31 July 2026, and this page said it did.**
+> Regions could be set at `/staff_add` and never changed, which meant the plan
+> above — add staff now, set regions later — could not actually be carried out.
+> Recorded because the failure had no symptom: nobody would have got an error,
+> everybody would simply have kept seeing the whole country.
 
 Two smaller things follow from the same rule, and both are worth knowing while
 the regions are still blank:
@@ -959,7 +986,7 @@ cannot describe access you do not have.
 | | |
 |---|---|
 | `/username @handle` \| `/username clear` | Publish your Telegram handle to teachers in your region — §4.17 |
-| `/retention` | Read the three retention periods. With a name and a number, change one — §4.11 |
+| `/retention` | Read the three retention periods. With a name and a number, change one — §4.11. **System only** |
 | `/forget <chat id> FORGET` | Honour a removal request. **System only, no undo** — §4.15 |
 
 **People**
@@ -970,6 +997,7 @@ cannot describe access you do not have.
 | `/regions` | Teachers who have told us their region is wrong |
 | `/revoke` `/restore` | §4.3 |
 | `/staff` `/staff_add` `/staff_role` `/staff_remove` | Who is staff — System only |
+| `/staff_region <chat id> <regions>` | Which regions somebody covers. `clear` means **every** region — §2.6. System only |
 | `/maintenance` | §4.5 — System only |
 | `/generate_urgent_code` | §4.4 |
 
@@ -1075,6 +1103,12 @@ Three things it refuses, each for a reason:
   side. Ask somebody who covers both; Program and System cover all of them.
 - Nothing at all, if the teacher already has that region. It says so.
 
+**The bot asks each verified teacher whether their region is still right at most
+once every 180 days.** Not on every visit — there is no session to hang it on, so
+in practice that would be a question 1,800 people tap through without reading. A
+slow trickle of flags is therefore what working looks like; a sudden burst is
+worth asking about.
+
 **`/regions` is a teacher's report, not a change.** When the bot asks a teacher
 whether the region it holds is still right and they say no, it raises a flag and
 writes nothing. They are deliberately **not** asked where they are now: a menu of
@@ -1155,14 +1189,19 @@ gets "no such case", and `/reopen` has nothing to reopen.
 
 ## 4.12 What happens on its own, and when
 
-Four things now happen without anybody asking. All four times are Tashkent time.
+Five things now happen without anybody asking. All times are Tashkent time.
 
 | When | What |
 |---|---|
 | **02:00, nightly** | Records past their retention period are deleted (§4.11) |
 | **07:00, daily** | Each staff member gets their own morning list; teachers who owe a reply are reminded; published Telegram handles are re-checked |
 | **Every minute** | Any confirmed announcement sends its next two hundred people (§4.14) |
-| **Every ten minutes** | The spreadsheet is copied in — answers and roster |
+| **Every ten minutes** | The spreadsheet is copied in — **answers, roster and document form links** — and then **every form's submissions are read back and filed** (§4.18) |
+| **Every five minutes** | The other four are checked for having stopped. This is the one that raises the alarm below |
+
+**That ten-minute line is the one to remember when somebody asks why a submitted
+document has not appeared yet.** It is the same ten minutes §4.18 tells you to
+wait before checking that a test submission became a case.
 
 **If one of these stops running, an alarm arrives in the operations chat** naming
 the job and when it last succeeded. That alarm exists because a job that stops
