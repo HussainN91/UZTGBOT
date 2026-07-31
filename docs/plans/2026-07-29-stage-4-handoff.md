@@ -25,13 +25,17 @@ what it promised to delete, reaches 1,800 teachers with an announcement, tells a
 their region, and — as of this session — hands out document forms and reads the submissions back.
 
 ```
-1,134 tests across 64 files · 0 failed · 0 skipped · 220 seconds
+1,140 tests across 64 files · 0 failed · 0 skipped · 219 seconds
 typecheck clean · build clean · deps:check clean · lint 0 warnings
 79 source files · 64 test files
 ```
 
 **Every number above was run on 31 July 2026 against the tree as committed.** `npm run lint`
 reporting nothing is a first for this project.
+
+**Then the runbook was audited against the code, in both directions**, and that found six things —
+one of which was a missing command rather than a missing paragraph. `docs/plans/2026-07-31-runbook-code-audit.md`
+is the record. §6 has the one worth carrying.
 
 **What is left is not engineering.** §9 has it: two questions for MoPSE, a launch checklist that is
 all people rather than code, and a list of things somebody has to type in.
@@ -48,6 +52,9 @@ Stages 3 to 5 are not re-listed; `git log --oneline d743d72..6ff0ac0` has them.
 | `fd15e14` | **`fix:` a duplicate check that could never fire**, in two places. §6 |
 | `5315f08` | `fix:` the three cosmetic lint findings |
 | `ed16807` | **Stage 6 — documents.** Tasks 72–82 |
+| `600ed48` `c105f6d` `333646a` | Documentation: this handoff, the third specification document, and two stale version headers |
+| `13c6d6f` | **`/staff_region`** — a command the runbook promised and nobody had built. §6 |
+| `a836167` | **The runbook↔code audit** and the five documentation faults it found |
 
 **Each of the two `fix:` commits was checked out into a scratch worktree and typechecked and
 `deps:check`ed on its own**, rather than only the tip being verified. That is what §10 asks for.
@@ -170,6 +177,25 @@ purpose** — the race test let this through twice and was written off both time
 > otherwise; it is evidence that the path it covers is only sometimes reached. Ask which path, and
 > whether it has ever worked.
 
+### ⚠️ A documentation audit found a code defect. Do the audit in both directions.
+
+`/staff_region` was named by `RUNBOOK.md` §2.6 and **had never been built.** `staff.regions` was
+written by `addStaff` and by nothing else, so a staff member's coverage could be set once, at
+creation, and never changed — while the same section says regions are entered **after launch, on
+purpose.** The documented plan could not be carried out.
+
+**It had no symptom, and that is the part to remember.** An empty `regions` array means *every*
+region, deliberately. So "regions can never be set" and "regions have not been set yet" look
+identical from the outside — no error, no warning, just staff seeing the whole country, which is
+what the runbook tells you to expect at that stage.
+
+Built at `13c6d6f` with six integration tests. **The only reason it surfaced is that the audit ran
+in both directions**: the runbook named a command, and the command list did not have it.
+
+**Five documentation faults came out of the same pass** and are at `a836167` — the worst being
+§4.12, the page whose whole job is saying what happens on its own, still describing the ten-minute
+sync as "answers and roster" after Stage 6 added form links and submission reading to it.
+
 ## 7. Running anything
 
 The test database is a container **with no volume**. It does not survive a `down` or a Docker
@@ -225,7 +251,17 @@ twice. `docker desktop stop`, run knip, `docker desktop start`.
 
 ## 8. What to do next
 
-**There is no next feature.** The rebuild is complete. What remains is in rough order of value:
+**There is no next feature, and the runbook has been audited against the code.** What remains is in
+rough order of value:
+
+**A first real deploy, and `RUNBOOK.md` Part 3.** This is the recommendation. **Nothing in this
+system has ever talked to a real Telegram or a real Google Sheet** — all 1,140 tests use fakes for
+both. Every fault this project has found was found by running something, and the one thing never run
+is the whole system. Part 3 is fifteen numbered checks. It needs a server, the bot token, the
+spreadsheet and the service account, none of which are engineering.
+
+**Prove the backup restores** (`CONCERNS` A5). `deploy/backup.sh` and `deploy/restore-drill.sh`
+exist and have never been run against a real server. An untested backup is a belief.
 
 **The resignation route** (decision 9 of `docs/plans/2026-07-29-staff-and-lifecycle-design.md`) is the
 one agreed thing never built. `forgetTeacher` is a callable function with its own tests; the
