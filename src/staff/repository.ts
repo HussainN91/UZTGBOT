@@ -160,6 +160,50 @@ export async function addStaff(db: Database, request: AddStaffRequest): Promise<
  * Returns false when there is no such row, so the command can say so. A typo'd
  * id that silently succeeds is the R3 failure — the caller believes it worked.
  */
+/**
+ * Change which regions a staff member covers.
+ *
+ * **This did not exist until 31 July 2026, and its absence was a live gap rather
+ * than a missing nicety.** `regions` was written by `addStaff` and by nothing
+ * else, so a staff member's coverage could be set once, at creation, and never
+ * again — while `RUNBOOK.md` §2.6 told the operator to set regions *after*
+ * launch with a `/staff_region` command that had never been built. There was no
+ * way round it either: `/staff_remove` deactivates rather than deletes, and
+ * `addStaff` refuses a row that exists active or not.
+ *
+ * It failed in the direction that looks healthy. An empty `regions` array means
+ * **every** region, deliberately, so the symptom was not an error — it was every
+ * staff member quietly seeing the whole country's cases.
+ *
+ * Unlike `setStaffRole` this does **not** reactivate. Changing where somebody
+ * works is not a decision to bring them back, and quietly restoring access as a
+ * side effect of an unrelated edit is how a removed person returns unnoticed.
+ * Returns false when there is no such row, so the command can say so.
+ */
+export async function setStaffRegions(
+  db: Database,
+  telegramId: string,
+  regions: readonly string[],
+  actor: string,
+): Promise<boolean> {
+  const existing = await findAnyStaff(db, telegramId);
+  if (existing === null) return false;
+
+  await db
+    .update(staff)
+    .set({ regions: [...regions] })
+    .where(eq(staff.telegramId, telegramId));
+
+  await recordAudit(db, {
+    actor,
+    action: 'STAFF_REGIONS_SET',
+    subject: telegramId,
+    detail: { from: existing.regions, to: regions },
+  });
+
+  return true;
+}
+
 export async function setStaffRole(
   db: Database,
   telegramId: string,

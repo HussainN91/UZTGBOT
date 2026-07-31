@@ -20,6 +20,7 @@ import {
   findAnyStaff,
   findStaff,
   listStaff,
+  setStaffRegions,
   setStaffRole,
   systemStaffIds,
 } from './repository.js';
@@ -158,6 +159,69 @@ describe.skipIf(!TEST_DATABASE_URL)('the staff repository', () => {
       // A typo'd id must not silently succeed — the R3 lesson, applied to staff
       // rather than to case owners.
       expect(await setStaffRole(db, '404404', 'Support', ACTOR)).toBe(false);
+    });
+  });
+
+  /**
+   * Until 31 July 2026 there was no way to do any of this. `regions` was written
+   * by `addStaff` and by nothing else, while the runbook told the operator to set
+   * regions after launch with a command that had never been built.
+   */
+  describe('changing which regions somebody covers', () => {
+    it('changes them after the row already exists — the gap this closed', async () => {
+      await addStaff(db, { telegramId: ID, role: 'Support', queue: QUEUE.ALL, actor: ACTOR });
+      expect((await findStaff(db, ID))?.regions).toEqual([]);
+
+      expect(await setStaffRegions(db, ID, ['Tashkent', 'Samarkand'], ACTOR)).toBe(true);
+      expect((await findStaff(db, ID))?.regions).toEqual(['Tashkent', 'Samarkand']);
+    });
+
+    it('replaces the list rather than adding to it', async () => {
+      await addStaff(db, {
+        telegramId: ID, role: 'Support', queue: QUEUE.ALL, regions: ['Tashkent'], actor: ACTOR,
+      });
+      await setStaffRegions(db, ID, ['Bukhara'], ACTOR);
+      expect((await findStaff(db, ID))?.regions).toEqual(['Bukhara']);
+    });
+
+    /** An empty list means every region — deliberately, and it must be reachable. */
+    it('clears back to every region', async () => {
+      await addStaff(db, {
+        telegramId: ID, role: 'Support', queue: QUEUE.ALL, regions: ['Tashkent'], actor: ACTOR,
+      });
+      await setStaffRegions(db, ID, [], ACTOR);
+      expect((await findStaff(db, ID))?.regions).toEqual([]);
+    });
+
+    /**
+     * Unlike `setStaffRole`, which reactivates on purpose. Changing where somebody
+     * works is not a decision to bring them back, and restoring access as a side
+     * effect of an unrelated edit is how a removed person returns unnoticed.
+     */
+    it('does NOT reactivate a removed member', async () => {
+      await addStaff(db, { telegramId: ID, role: 'Support', queue: QUEUE.ALL, actor: ACTOR });
+      await deactivateStaff(db, ID, ACTOR);
+
+      expect(await setStaffRegions(db, ID, ['Tashkent'], ACTOR)).toBe(true);
+      expect(await findStaff(db, ID)).toBeNull();
+      expect((await findAnyStaff(db, ID))?.regions).toEqual(['Tashkent']);
+    });
+
+    it('reports when there is nobody to change', async () => {
+      expect(await setStaffRegions(db, '404404', ['Tashkent'], ACTOR)).toBe(false);
+    });
+
+    it('records who changed it, and from what', async () => {
+      await addStaff(db, {
+        telegramId: ID, role: 'Support', queue: QUEUE.ALL, regions: ['Tashkent'], actor: ACTOR,
+      });
+      await setStaffRegions(db, ID, ['Bukhara'], ACTOR);
+
+      const rows = await db.execute<{ action: string; detail: unknown }>(
+        sql`SELECT action, detail FROM audit_log WHERE action = 'STAFF_REGIONS_SET'`,
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]?.detail).toMatchObject({ from: ['Tashkent'], to: ['Bukhara'] });
     });
   });
 

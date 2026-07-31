@@ -22,6 +22,7 @@ import {
   findAnyStaff,
   listStaff,
   normaliseHandle,
+  setStaffRegions,
   setStaffRole,
   setUsername,
   type StaffRecord,
@@ -1289,6 +1290,81 @@ export const username: StaffCommand = {
   },
 };
 
+/**
+ * `/staff_region` — change which regions a staff member covers.
+ *
+ * **Built on 31 July 2026 to close a gap the runbook had already promised was
+ * closed.** §2.6 told the operator to set regions with this command "afterwards",
+ * and it did not exist: `regions` was written by `/staff_add` and by nothing
+ * else, so coverage could be set once, at creation, and never changed except by
+ * hand in SQL.
+ *
+ * That mattered because §2.6 also records that regions are entered **after
+ * launch, on purpose** — and because the failure looks like working software. An
+ * empty `regions` array means *every* region, deliberately, so nobody gets an
+ * error; every staff member simply sees the whole country.
+ *
+ * `clear` is spelled out rather than implied by an empty argument. "Everybody
+ * sees everything" is a real and sometimes correct configuration, but it is not
+ * one to reach by pressing enter with nothing typed.
+ */
+export const staffRegion: StaffCommand = {
+  name: '/staff_region',
+  capability: CAPABILITY.STAFF_MANAGE,
+  handle: async (ctx) => {
+    const usage = [
+      '/staff_region 991001 Tashkent, Samarkand',
+      '/staff_region 991001 clear   — every region, which is what an empty list means',
+    ].join('\n');
+
+    const split = splitChatId(ctx.rest);
+    if (split === null) {
+      return reply(ctx.member.telegramId, `Whose regions? I need their chat id.\n\n${usage}`);
+    }
+
+    const wanted = split.rest.trim();
+    if (wanted === '') {
+      return reply(ctx.member.telegramId, `Which regions?\n\n${usage}`);
+    }
+
+    const existing = await findAnyStaff(ctx.db, split.chatId);
+    if (existing === null) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${split.chatId} has no staff row, so there are no regions to change.`,
+          '',
+          `/staff_add ${split.chatId} Support All — adds them.`,
+        ].join('\n'),
+      );
+    }
+
+    const parsed =
+      wanted.toLowerCase() === 'clear'
+        ? ({ ok: true, regions: [] } as const)
+        : await parseRegions(ctx, wanted);
+    if (!parsed.ok) return reply(ctx.member.telegramId, parsed.text);
+
+    const written = await setStaffRegions(ctx.db, split.chatId, parsed.regions, ctx.member.telegramId);
+    if (!written) {
+      return reply(ctx.member.telegramId, `${split.chatId} has no staff row, so nothing was changed.`);
+    }
+
+    const now = { ...existing, regions: parsed.regions };
+    return reply(
+      ctx.member.telegramId,
+      parsed.regions.length === 0
+        ? [
+            `${describeStaff(now)} now covers **every region**.`,
+            '',
+            'That is what an empty list means here, and it is not a fault — but it does',
+            'mean they see every teacher’s cases, so set it deliberately.',
+          ].join('\n')
+        : `${describeStaff(now)} now covers ${describeRegions(parsed.regions)}.`,
+    );
+  },
+};
+
 /** Every command in this file, so registering one is a single edit. */
 export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   whoami,
@@ -1297,6 +1373,7 @@ export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   staffList,
   staffAdd,
   staffRole,
+  staffRegion,
   staffRemove,
   revoke,
   restore,
