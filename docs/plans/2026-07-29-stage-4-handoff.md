@@ -251,18 +251,36 @@ no migration at all.**
 
 ## 9. Open questions
 
-**None about how the software behaves.** Five are waiting on the head of project, and none blocks
+**None about how the software behaves.** Three are waiting on the head of project, and none blocks
 starting work:
 
 1. **The privacy notice** — the sharpest item. Reviewing it before the deploy means one round of
    re-consent; afterwards, two.
-2. **Whether staff case lists may show teacher names.** Part 5G needs this.
-3. **Whether a case-list row shows the submitted date, the age, or both.** A date says when; an age
-   is what makes somebody act.
-4. **Whether to drop `urgent_codes` and `urgent_code_attempts`.** Nothing reads or writes them.
-5. **Whether the Contact Support button under FAQ answers should be hidden from unsigned chats**,
+2. **Whether to drop `urgent_codes` and `urgent_code_attempts`.** Nothing reads or writes them.
+3. **Whether the Contact Support button under FAQ answers should be hidden from unsigned chats**,
    as the menu's four gated buttons now are. **This one was decided by the builder rather than
    asked** — §5 of the login-gating design has the reasoning. Roughly two hours to change.
+
+### ✅ Answered 1 August, and Part 5G is now unblocked
+
+**The case-list row is the reference, the region, and the submitted date.**
+
+```
+VISA-2026-00311
+Tashkent — submitted 12 Jul 2026
+Under review — promised by 20 Jul
+```
+
+- **No teacher name.** It stays in `/case`. Recognising a case without opening it is not worth
+  parking every teacher's name in the scrollback of everybody who runs `/cases`.
+- **The date, not the age.** Not both. **The age is what makes somebody act, and it is being given
+  up deliberately** — if staff later report that old cases stop standing out, that is this decision
+  showing, and the answer is a marker on the row rather than reopening it.
+
+**One 5G decision is still open and is in Part 5G of the plan, not here:** taking a case is
+`case.assign`, which floors at Lead. A "take it" button shown to a Support member and refused on tap
+is worse than no button, so either it is shown only to those who hold the capability, or the floor is
+lowered deliberately and the reason written down.
 
 **The launch gate is off engineering.** `RUNBOOK.md` §1.4 is the checklist and nothing on it
 announces its own absence.

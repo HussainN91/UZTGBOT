@@ -450,22 +450,46 @@ authorization path in `routeCallback`, and a scope check through `findCase`.
 
 ### The list row the head of project asked for
 
-```
+~~```
 VISA-2026-00311
 Nodira Karimova - Tashkent - submitted 12 Jul 2026
 Under review - promised by 20 Jul
-```
+```~~
+
+> ### ✅ SETTLED, 1 August 2026. The row is this:
+>
+> ```
+> VISA-2026-00311
+> Tashkent - submitted 12 Jul 2026
+> Under review - promised by 20 Jul
+> ```
+>
+> **Case reference, region, submitted date. No teacher name, and no age.**
 
 Then one button per case, opening it in full.
 
-Two questions were raised and not settled - **ask before building**:
+Two questions were raised, put to the head of project on 1 August, and **both are
+now answered**:
 
-- **The teacher's name now appears in lists**, where today it appears only in
-  `/case`. Their name is not their words, and it is the reader's own queue, so
-  this is probably right - but it puts personal data into more staff scrollbacks
-  and is the head of project's call, not the builder's.
-- **The date replaces the age.** Today the row says "12 days", which is what
-  makes somebody act; a date says when. Possibly both.
+- ~~**The teacher's name now appears in lists**~~ — **No.** It stays where it is
+  today, in `/case`, and a staff member who needs to know who a case belongs to
+  opens it. The draft row above had the name on it and the head of project's
+  answer left it off; asked directly, they confirmed that was deliberate.
+
+  The reasoning against was the one that decided it: the row still tells a staff
+  member everything they need in order to choose what to open next, and putting
+  the name on it would park every teacher's name permanently in the chat history
+  of everybody who runs `/cases`. **Recognising a case without opening it is not
+  worth that**, and the bot treats personal data this way everywhere else.
+
+- ~~**The date replaces the age**~~ — **The date.** "submitted 12 Jul 2026", not
+  "12 days". Not both. The row is already three lines and a fourth number on it
+  earns less than it costs in width.
+
+  Worth knowing when building: **the age is what makes somebody act**, and it is
+  being given up deliberately. If staff later report that old cases stop standing
+  out, that is this decision showing, and the fix is a marker on the row rather
+  than reopening the question.
 
 ### What gets a button, and what cannot
 
@@ -549,7 +573,9 @@ should be built once, deliberately, and not smuggled in behind a button.
 3. **Whether to drop `urgent_codes` and `urgent_code_attempts`** — added
    1 August. Nothing reads or writes them. Left in place because dropping a table
    cannot be walked back
-4. **Whether staff lists may show teacher names** — added 1 August, see Part 5G
+4. ~~**Whether staff lists may show teacher names**~~ — ✅ **answered 1 August:
+   no.** Nor the age; the row carries the reference, the region and the submitted
+   date. See Part 5G, where both answers and their reasoning are recorded
 
 # Order
 
