@@ -1,4 +1,17 @@
-# Handoff — 1 August 2026
+# Handoff — 1 August 2026 · ⛔ RETIRED
+
+> ## STOP. This document is no longer maintained and is no longer true.
+>
+> **Retired 1 August 2026.** It had become a third copy of things written down better elsewhere, and
+> three copies drift. Read **`CLAUDE.md`** for how to work here, and
+> **`docs/plans/2026-08-01-identity-and-urgent-design.md`** for where the project stands.
+>
+> Nothing was dropped — `docs/plans/archive/README.md` says where each part went. It is kept
+> because it is the record of two features being built and of what building them found.
+>
+> Everything below was accurate on 1 August 2026 and is frozen there.
+
+---
 
 **This document is rewritten in place at the end of every session. There is one of it, and it is
 current. If you are reading a copy of this content anywhere else, that copy is stale.**

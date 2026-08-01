@@ -1,7 +1,18 @@
 # MoPSE bot — programme plan
 
-**Date:** 1 August 2026 · **Status:** plan of record · Supersedes the "what's
-next" list in `2026-07-31-vps-deployment-handoff.md`, which is stale.
+**Date:** 1 August 2026 · **Status: THE PLAN OF RECORD.** This is the one
+document that says where the project stands, what is next, and what is
+undecided. Supersedes the "what's next" list in
+`2026-07-31-vps-deployment-handoff.md`, which is stale.
+
+> **Read `CLAUDE.md` for how to work here** — the layer rule, the coding
+> patterns, the ripple and dependency-tree procedures, how to run the tests, and
+> what verification has to pass before anything is called done. It loads
+> automatically, so it is already in front of you.
+>
+> **The rolling handoff was retired on 1 August 2026** and is in
+> `docs/plans/archive/`. Its two surviving open decisions are items 0 and 5 of
+> Open questions below. Do not go looking for a handoff; there is not one.
 
 > **Revised 1 August 2026, after building Feature B.** Three changes, all made by
 > the head of project and all binding:
@@ -561,6 +572,22 @@ should be built once, deliberately, and not smuggled in behind a button.
 
 # Open questions
 
+**All of these are waiting on the head of project. None of them blocks starting
+work.** Ordered by how much they cost to leave.
+
+0. **The privacy notice, reviewed before the deploy — the sharpest item on this
+   list.** Reviewing it before launch costs **one** round of re-consent.
+   Reviewing it afterwards costs **two**, because every teacher who accepted the
+   old wording has to be asked again. Nothing technical is waiting on it and that
+   is exactly why it keeps slipping.
+
+   Feature B added the ⏫ Ask for Priority path and Part 5F changed what a chat
+   sees before it accepts anything, so the notice has moved further from the text
+   it describes than it was in July.
+
+   Moved here on 1 August 2026 from the rolling handoff, which was retired that
+   day. It was the handoff's §9.1 and it must not be lost with it.
+
 1. **Wording of seven messages** — two dispute notices, manager escalation,
    System forward, urgent acknowledgement, confirmation, owner notification.
    Needs MoPSE review.
@@ -576,6 +603,28 @@ should be built once, deliberately, and not smuggled in behind a button.
 4. ~~**Whether staff lists may show teacher names**~~ — ✅ **answered 1 August:
    no.** Nor the age; the row carries the reference, the region and the submitted
    date. See Part 5G, where both answers and their reasoning are recorded
+5. **Whether the Contact Support button under FAQ answers should be hidden from
+   chats that have not signed in**, as the main menu's four gated buttons now are
+   after Part 5F.
+
+   **This one was decided by the builder rather than asked, so it is flagged
+   rather than buried.** It was left visible: the menu is a list of what you can
+   do, but that button is an escape hatch at the moment somebody has failed to
+   find an answer, and it leads somewhere — `requireSignIn` records what they
+   wanted and puts them back on it. Removing it would leave a teacher who has
+   just failed to find an answer with nowhere to go, which is the same shape of
+   defect Part 5F existed to fix.
+
+   §5 of `2026-08-01-login-gating-design.md` has the full reasoning. **Roughly two
+   hours to change if the head of project disagrees.** Also moved here on
+   1 August from the retired handoff.
+
+6. **Part 5G: whether the "take it" button is shown only to Leads, or the
+   `case.assign` floor is lowered.** Taking a case floors at Lead today. A button
+   shown to a Support member and refused on tap is worse than no button, so
+   either it is drawn only for those who hold the capability, or the floor comes
+   down deliberately and the reason is written next to it. **Part 5G cannot be
+   finished without this**, though it can be started.
 
 # Order
 
