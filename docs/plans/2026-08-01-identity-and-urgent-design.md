@@ -355,7 +355,157 @@ Safe to build: today's refusal to guess rank or queue exists because defaulting
 "would give somebody more than you asked for, and nothing in what you typed
 would show it." A menu defaults nothing — it just makes choosing a tap.
 
-## D. Region-based case routing — **already built, recommend no work**
+## H. Staff management by button, and automatic ownership — **new, 1 August 2026**
+
+**Asked for directly by the head of project.** Their words, in order, because two
+of the three parts are decisions and the third rests on a premise that needs
+correcting first.
+
+### H.0 — Answers to the three things they asked
+
+**"We don't have regional admins, or do we, idk."** **You do.** Every staff row
+carries a `regions` list. Empty means every region. A staff member with
+`['Tashkent']` sees Tashkent cases and no others. There is no separate rank for
+it — region is an attribute of any staff member at any rank, which is why
+`/region` exists as a command.
+
+**"Confirm what the list has."** Two lists, and they are not the same list.
+
+| Queues — what a staff member holds | Case categories — what a teacher files under |
+|---|---|
+| `Visa` | `Visa` |
+| `Travel` | `Travel and Arrival` |
+| `Contract` | `Contract Signing` |
+| `Accommodation` | `Accommodation` |
+| `All` — every queue | `Submit Documents` → routed to `All` |
+| `None` — no case queue at all | `Contact Support` → routed to `All` |
+
+**There is no `Medical`.** It was named as an example and it does not exist.
+Adding one is three things, not one: a case category, a queue, and the mapping
+between them — plus an FAQ topic if teachers are to read about it. `Recruitment`
+and `Technical` were deliberately removed during the rebuild for exactly this
+reason: a queue with no category that can reach it is a setting that looks
+configured and does nothing.
+
+**Ranks**, for completeness: `Observer` · `Support` · `Lead` · `Program` ·
+`System`, in that order, each holding everything the one below it holds.
+
+### H.1 — ⚠️ The routing described is already built
+
+> *"if i give them role visa beside their names it means they handle ALL visa
+> matters within their regions"*
+
+**That is what the bot does today.** A staff member has a queue and a region
+list, and `visibleToStaff` filters every read by both. Give a Lead `Visa` and
+`Tashkent` and their `/cases` already shows exactly the Visa cases in Tashkent
+and nothing else. `/staff_add` already takes both. Nothing needs building for
+this.
+
+**What does not exist is ownership.** `cases.owner` is set only by a manual
+`/assign`, which is why `/mycases` is empty: `/cases` lists cases you *can see*
+and `/mycases` lists cases *assigned to you*.
+
+So the real question is narrower than it first looks: **is a name against each
+case worth having, when the right person already sees it and nobody else does?**
+
+**It probably is**, for two reasons that visibility cannot give: a case with an
+owner has somebody accountable for it, and `/mycases` becomes the list a staff
+member works from rather than a permanently empty command.
+
+**And it raises the question that stopped this being built in Part 5D: who owns
+it when two people hold the same queue and region?** That is not a technical
+problem, it is a staffing one, and it needs an answer before code. The options
+are round-robin, fewest-open-cases, or a named default per queue-and-region.
+**Needs the head of project's answer.**
+
+### H.2 — ✅ Decided: nobody "takes" a case except Program and System
+
+> *"staff cannot TAKE OVER a case, no one can do that except system and program
+> admin"*
+
+**So there is no "take it" button**, and `case.assign` moves from its current
+floor of `Lead` up to `Program`.
+
+> **Sequencing, and this is the one caution.** Raising the floor on its own makes
+> the present state worse, not better: manual `/assign` is the *only* way a case
+> gets an owner today, so restricting it to two ranks before H.1 exists would
+> leave almost every case unowned and `/mycases` emptier than it already is.
+> **Make the floor change in the same piece of work as automatic assignment**, so
+> that the moment humans stop assigning, the system starts.
+
+### H.3 — Staff management, entirely by button
+
+> *"i do /staff, i see a list of staff listed as buttons, i choose the staff,
+> then bot prompts me, what to do with them … add role, revoke, promote or
+> whatever … i need it button based PLEASE"*
+
+```
+/staff  →  [ Nodira K. — Lead · Visa · Tashkent ]
+           [ Bekzod T. — Support · Accommodation · Samarkand ]
+           …
+    ↓ tap a person
+        What would you like to do with Bekzod T.?
+           [ 🎖 Change rank ]  [ 📁 Change queue ]
+           [ 📍 Change regions ]  [ 🚫 Deactivate ]
+    ↓ tap an action
+        Which queue should Bekzod T. hold?
+           [ Visa ]  [ Travel ]  [ Contract ]
+           [ Accommodation ]  [ All ]  [ None ]
+```
+
+**This subsumes Feature C** (interactive `/staff_add`), which was the same idea
+for one command. Build them together.
+
+**The real cost is not the menus.** Conversation state is a *teacher-facing*
+machine today — `AwaitingIdentifier`, `AwaitingCaseDetail`, `AwaitingCaseTopic`.
+**There is no staff-facing multi-step flow anywhere in this codebase.** Part 5G
+avoided needing one by making every button a single tap that carries everything
+it needs in its payload. A three-level menu cannot: "which staff member are we
+talking about" has to survive between taps.
+
+Two ways to do it, and the choice should be deliberate:
+
+1. **Carry the subject in the payload** — `SM:<chatId>:RANK:Lead`. No state at
+   all, every tap self-contained, and it inherits Part 5G's whole safety
+   argument. Constrained by the 64-byte ceiling, which a chat id plus an action
+   plus a value fits inside comfortably.
+2. **Extend conversation state to staff.** More general, and needed eventually
+   for `/reply` and `/note` by button — the free-text actions Part 5G left as
+   commands precisely because they need it.
+
+**Recommendation: (1) for this, and (2) as its own separate piece of work when
+free-text staff actions are wanted.** Doing (2) here would mean building the
+harder thing to solve the easier problem, and the payload approach is strictly
+safer — there is no state to go stale between taps.
+
+### Non-negotiables for whichever is built
+
+- **Every tap re-validates**, exactly as `confirmUrgent` and the case-list
+  buttons do. `staff.manage` floors at `System`, and a button sits in a
+  scrollback for ever.
+- **A staff member must not be able to change their own rank**, and the existing
+  `/staff_add` rules on this must be read before the buttons are written.
+- **Buttons are capped**, as the case lists are. A ministry with forty staff must
+  not produce a forty-button wall.
+- **Every change writes an audit row in the same transaction as the change.**
+
+### Cost
+
+H.1 automatic ownership 1.5 days, once the two-people-one-queue question is
+answered · H.2 folded into H.1 · H.3 staff management by button 2 days,
+including the `/staff` list, three submenus and revalidation on every tap.
+**Roughly 3.5 days together.**
+
+---
+
+## D. Region-based case routing — ~~**already built, recommend no work**~~
+
+> **Superseded 1 August 2026 by Part 5H.** The recommendation below — that
+> `/cases` already delivers the routing, and auto-assignment is not worth its
+> questions — was accepted at the time and has now been overruled by the head of
+> project, who asked for cases to be assigned automatically by type and region.
+> **The reasoning below is still the accurate description of what exists**, and
+> H.1 turns on it. What changed is the decision, not the facts.
 
 `visibleToStaff()` already filters by queue **and** region. System bypasses both
 axes; an empty regions list means every region; a teacher with **no** region is
@@ -619,12 +769,14 @@ work.** Ordered by how much they cost to leave.
    hours to change if the head of project disagrees.** Also moved here on
    1 August from the retired handoff.
 
-6. **Part 5G: whether the "take it" button is shown only to Leads, or the
-   `case.assign` floor is lowered.** Taking a case floors at Lead today. A button
-   shown to a Support member and refused on tap is worse than no button, so
-   either it is drawn only for those who hold the capability, or the floor comes
-   down deliberately and the reason is written next to it. **Part 5G cannot be
-   finished without this**, though it can be started.
+6. ~~**Part 5G: whether the "take it" button is shown only to Leads, or the
+   `case.assign` floor is lowered**~~ — ✅ **answered 1 August: neither.** Nobody
+   takes a case. Assignment is restricted to Program and System, and the system
+   assigns automatically. See Part 5H.2.
+7. **Part 5H.1: who owns a case when two staff hold the same queue and region?**
+   Round-robin, fewest open cases, or a named default per queue-and-region. This
+   is a staffing question rather than a technical one, and **automatic assignment
+   cannot be built without an answer.** It is the only thing blocking Part 5H.
 
 # Order
 
@@ -638,13 +790,27 @@ work.** Ordered by how much they cost to leave.
 3. ~~**Part 5F, the login-gating hole**~~ — ✅ **built 1 August at `c0d0b74`**, to
    its own design document. The defect is closed: a teacher who has never signed
    in reaches the answer bank from the front door
-4. **Part 5G, buttons on case lists** — a day and a half. Directly requested,
-   and now cheap because Feature B built the staff-callback machinery
+4. **Part 5G, buttons on case lists** — ✅ **the open-case button is built at
+   `cfb3e55`**, with the row in the agreed shape. The four *action* buttons the
+   plan proposed are **not** built and mostly will not be: "take it" was ruled
+   out by the head of project (Part 5H.2), and close, reopen and mark-urgent are
+   worth revisiting only alongside 5H's menus rather than as a separate pass
 5. **Feature A** — identity disputes
-6. **Feature C** — interactive `/staff_add`. Note it needs the staff-facing
-   conversation state that Part 5G deliberately avoids
-7. **Feature E** — largest, and benefits most from having lived with the bot.
+6. ~~**Feature C** — interactive `/staff_add`~~ — **subsumed by Part 5H.3**,
+   which is the same idea for every staff command rather than one. Build them
+   together
+7. **Part 5H — staff management by button, and automatic ownership.** ~3.5 days,
+   requested 1 August. **H.1 needs one answer before it can start:** who owns a
+   case when two staff hold the same queue and region
+8. **Feature E** — largest, and benefits most from having lived with the bot.
    Needs its own spec first
+
+> **Buttons wherever they fit, from here on.** Asked for on 1 August: *"add
+> buttons whenever you can."* Part 5G is the template — a single tap carrying
+> everything it needs in its payload, re-validated on arrival. The one thing a
+> button cannot yet do is take free text (`/reply`, `/note`, `/due`, `/snooze`),
+> because that needs staff-facing conversation state, which does not exist. See
+> Part 5H.3.
 
 ---
 
