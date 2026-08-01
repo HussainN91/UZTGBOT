@@ -24,9 +24,25 @@ describe('the capability table', () => {
     }
   });
 
-  it('does not let Support assign cases', () => {
+  it('lets nobody below Program move a case to somebody else', () => {
+    /**
+     * Part 5H.2, and the floor rose from `Lead` on 1 August 2026 at the head of
+     * project's instruction: *"staff cannot TAKE OVER a case, no one can do that
+     * except system and program admin."*
+     *
+     * It is not a tightening for its own sake. Cases now arrive with an owner
+     * already on them (Part 5H.1), chosen by who has the fewest open — so
+     * reassignment stopped being how work is distributed and became an override
+     * of that, which is a decision worth two ranks.
+     *
+     * **The order mattered.** Raising this before automatic assignment existed
+     * would have left almost every case unowned, because a manual `/assign` was
+     * the only thing that ever set an owner.
+     */
     expect(can({ role: 'Support', active: true }, 'case.assign')).toBe(false);
-    expect(can({ role: 'Lead', active: true }, 'case.assign')).toBe(true);
+    expect(can({ role: 'Lead', active: true }, 'case.assign')).toBe(false);
+    expect(can({ role: 'Program', active: true }, 'case.assign')).toBe(true);
+    expect(can({ role: 'System', active: true }, 'case.assign')).toBe(true);
   });
 
   it('lets an Observer see a case and change nothing', () => {

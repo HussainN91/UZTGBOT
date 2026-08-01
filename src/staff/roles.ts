@@ -62,7 +62,24 @@ const FLOOR: Readonly<Record<Capability, StaffRole>> = {
   'case.view': 'Observer',
   'case.update': 'Support',
   'case.mark': 'Support',
-  'case.assign': 'Lead',
+  /**
+   * Moving a case to somebody else — raised from `Lead` to `Program` on
+   * 1 August 2026, Part 5H.2, at the head of project's instruction: *"staff
+   * cannot TAKE OVER a case, no one can do that except system and program
+   * admin."*
+   *
+   * **It reads as a tightening and is really a consequence.** Until Part 5H.1
+   * a manual `/assign` was the only thing that ever set an owner, so this floor
+   * was the floor on work being distributed at all. Cases now arrive with an
+   * owner already on them, chosen by who has the fewest open — so what is left
+   * here is *overriding* that choice, which is a different and rarer act, and
+   * worth two ranks rather than one.
+   *
+   * **The order was load-bearing.** Raising it before automatic assignment
+   * existed would have left almost every case unowned, and `/mycases` emptier
+   * than it already was.
+   */
+  'case.assign': 'Program',
   'urgent.issue': 'Support',
   'teacher.region': 'Lead',
   'teacher.revoke': 'Program',

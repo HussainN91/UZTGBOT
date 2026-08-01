@@ -417,14 +417,29 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
   });
 
   describe('/assign', () => {
-    // case.assign is Lead and above, so the Support members above cannot use it.
-    const LEAD = '995004';
+    /**
+     * `case.assign` floors at **Program** as of Part 5H.2, raised from `Lead` on
+     * 1 August 2026. Cases now arrive with an owner already chosen by load, so
+     * moving one is an override of that rather than the way work is handed out.
+     */
+    const PROGRAM = '995004';
+    const LEAD = '995005';
 
     beforeEach(async () => {
       await db.execute(sql`
-        INSERT INTO staff (telegram_id, name, role, queue, regions, active)
-        VALUES (${LEAD}, 'The Lead', 'Lead', 'All', ARRAY[]::text[], true)
+        INSERT INTO staff (telegram_id, name, role, queue, regions, active) VALUES
+          (${PROGRAM}, 'The Program Admin', 'Program', 'All', ARRAY[]::text[], true),
+          (${LEAD},    'The Lead',          'Lead',    'All', ARRAY[]::text[], true)
       `);
+    });
+
+    it('is refused for a Lead, naming the rank it needs', async () => {
+      // A refusal that names the floor is worth more than "you may not": the
+      // recovery is asking a named person for a rank rather than guessing.
+      const body = await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+
+      expect(body).toContain('Program');
+      expect(await ownerOf(VISA_REF)).toBeNull();
     });
 
     const auditRows = async (): Promise<{ action: string; subject: string | null }[]> => {
@@ -446,7 +461,7 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
       // constraint error, which reaches bot.catch, which acknowledges the update
       // and says nothing — so the assigner reads silence as success and nobody
       // is working the case.
-      const body = await run(`/assign ${VISA_REF} 999999`, LEAD);
+      const body = await run(`/assign ${VISA_REF} 999999`, PROGRAM);
 
       expect(body).toMatch(/not an active staff member/i);
       expect(await ownerOf(VISA_REF)).toBeNull();
@@ -457,7 +472,7 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
       // asked by a person who can no longer ask.
       await db.execute(sql`UPDATE staff SET active = false WHERE telegram_id = ${ACCOM_STAFF}`);
 
-      await run(`/assign ${ACCOM_REF} ${ACCOM_STAFF}`, LEAD);
+      await run(`/assign ${ACCOM_REF} ${ACCOM_STAFF}`, PROGRAM);
 
       expect(await ownerOf(ACCOM_REF)).toBeNull();
     });
@@ -466,7 +481,7 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
       // The check a foreign key cannot make. An id can be real staff and still
       // be the wrong person: the case leaves /cases unassigned and is invisible
       // in the new owner's /mycases, which is worse than leaving it unowned.
-      const body = await run(`/assign ${VISA_REF} ${ACCOM_STAFF}`, LEAD);
+      const body = await run(`/assign ${VISA_REF} ${ACCOM_STAFF}`, PROGRAM);
 
       expect(body).toMatch(/cannot see/i);
       expect(body).toContain('Accommodation');
@@ -474,7 +489,7 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
     });
 
     it('assigns to somebody whose queue does cover it, and tells them', async () => {
-      const outcome = await command(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+      const outcome = await command(`/assign ${VISA_REF} ${VISA_STAFF}`, PROGRAM);
 
       expect(await ownerOf(VISA_REF)).toBe(VISA_STAFF);
 
@@ -486,7 +501,7 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
     });
 
     it('puts the case in the new owner’s /mycases and out of the backlog', async () => {
-      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, PROGRAM);
 
       expect(await run('/mycases', VISA_STAFF)).toContain(VISA_REF);
       expect(await run('/cases unassigned', VISA_STAFF)).not.toContain(VISA_REF);
@@ -495,36 +510,38 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
     it('records who handed the case to whom', async () => {
       // D18. recordAudit propagates its errors on purpose — an assignment that
       // cannot be recorded should not happen.
-      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, PROGRAM);
 
       expect(await auditRows()).toEqual([{ action: 'CASE_ASSIGNED', subject: VISA_REF }]);
     });
 
     it('writes no audit row when it refused', async () => {
-      await run(`/assign ${VISA_REF} 999999`, LEAD);
+      await run(`/assign ${VISA_REF} 999999`, PROGRAM);
 
       expect(await auditRows()).toHaveLength(0);
     });
 
     it('names the previous owner when a case moves hands', async () => {
-      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, PROGRAM);
 
-      expect(await run(`/assign ${VISA_REF} ${LEAD}`, LEAD)).toContain(VISA_STAFF);
+      expect(await run(`/assign ${VISA_REF} ${LEAD}`, PROGRAM)).toContain(VISA_STAFF);
     });
 
     it('does not message somebody about their own action', async () => {
-      // Assigning a case to yourself is the commonest use of this.
-      const outcome = await command(`/assign ${VISA_REF} ${LEAD}`, LEAD);
+      // Taking a case yourself is now a Program act rather than the commonest
+      // use of this command, but the rule is unchanged: nobody is sent a notice
+      // about something they just did.
+      const outcome = await command(`/assign ${VISA_REF} ${PROGRAM}`, PROGRAM);
 
       expect(outcome.messages).toHaveLength(1);
       expect(outcome.messages[0]?.text).toMatch(/your \/mycases/i);
     });
 
     it('says so, and writes nothing, when the case is already theirs', async () => {
-      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD);
+      await run(`/assign ${VISA_REF} ${VISA_STAFF}`, PROGRAM);
       await db.execute(sql`DELETE FROM audit_log`);
 
-      expect(await run(`/assign ${VISA_REF} ${VISA_STAFF}`, LEAD)).toMatch(/already belongs/i);
+      expect(await run(`/assign ${VISA_REF} ${VISA_STAFF}`, PROGRAM)).toMatch(/already belongs/i);
       expect(await auditRows()).toHaveLength(0);
     });
 
@@ -537,16 +554,17 @@ describe.skipIf(!TEST_DATABASE_URL)('changing a case', () => {
 
     it('refuses a case the assigner themselves cannot see', async () => {
       // The assigner is scoped too. resolveCase runs under their scope before
-      // anything about the assignee is considered.
-      await db.execute(sql`UPDATE staff SET queue = 'Visa' WHERE telegram_id = ${LEAD}`);
+      // anything about the assignee is considered — and rank does not exempt
+      // them, which is why this scopes the Program admin rather than a junior.
+      await db.execute(sql`UPDATE staff SET queue = 'Visa' WHERE telegram_id = ${PROGRAM}`);
 
-      await run(`/assign ${ACCOM_REF} ${ACCOM_STAFF}`, LEAD);
+      await run(`/assign ${ACCOM_REF} ${ACCOM_STAFF}`, PROGRAM);
 
       expect(await ownerOf(ACCOM_REF)).toBeNull();
     });
 
     it('asks for an id rather than guessing', async () => {
-      expect(await run(`/assign ${VISA_REF}`, LEAD)).toMatch(/who should own it/i);
+      expect(await run(`/assign ${VISA_REF}`, PROGRAM)).toMatch(/who should own it/i);
     });
   });
 

@@ -238,7 +238,17 @@ function renderCase(row: StaffCaseRow, notes: CaseNote[], noteTotal: number): st
     '',
     `Teacher: ${row.teacherName ?? 'name not recorded'} (chat ${row.teacherChatId})`,
     renderRegion(row),
-    `Owner: ${row.owner ?? 'nobody — /assign to take it'}`,
+    /**
+     * "Nobody" now means something specific — Part 5H. A case is given an owner
+     * as it is filed, so an empty one is not work waiting to be claimed; it is a
+     * queue-and-region no active staff member holds.
+     *
+     * It no longer says "/assign to take it" either. `case.assign` floors at
+     * Program, and naming a command most readers will be refused for is the
+     * failure `handleWhoAmI_` was written to avoid — a staff member offered a
+     * command will type it, and then be refused by the bot that suggested it.
+     */
+    `Owner: ${row.owner ?? 'nobody — no active staff member covers this queue and region'}`,
     `Opened: ${formatTashkent(row.createdAt)} (${ageInDays(row.createdAt)} ago)`,
     `Last touched: ${formatTashkent(row.updatedAt)}`,
     `Promised by: ${row.dueAt === null ? 'no date given' : formatTashkent(row.dueAt)}`,

@@ -105,8 +105,23 @@ describe.skipIf(!TEST_DATABASE_URL)('the staff command dispatcher', () => {
       // list: what it reports cannot disagree with what is enforced.
       const body = firstText(await text('/whoami', LEAD));
 
-      expect(body).toContain('/assign');
+      expect(body).toContain('/region');
       expect(body).not.toContain('/maintenance');
+    });
+
+    it('stopped offering /assign to a Lead the moment the floor moved', async () => {
+      /**
+       * Part 5H.2 raised `case.assign` from `Lead` to `Program`, and **this test
+       * changed by itself** — it asserted `/assign` was listed here, and failed
+       * on the run after the one-line change, without `/whoami` being touched.
+       *
+       * That is the property being protected, demonstrated rather than
+       * described: the message is generated from the same table the gates read,
+       * so a permission cannot move in one place and stay put in the other. The
+       * Apps Script version drifted precisely because "what am I allowed to do"
+       * and "may I do this" were two lists.
+       */
+      expect(firstText(await text('/whoami', LEAD))).not.toContain('/assign');
     });
 
     it('tells an Observer they may look and change nothing', async () => {

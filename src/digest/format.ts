@@ -106,14 +106,24 @@ export interface DigestLists {
  *
  * The three lists stay apart because they mean different things and need
  * different acts. A promise somebody made and missed is not the same as a case
- * nobody has touched, and neither is the same as a case nobody has taken — a
+ * nobody has touched, and neither is the same as a case nobody covers — a
  * case can be in all three or in none.
+ *
+ * **The third list changed meaning on 1 August 2026 and its heading changed with
+ * it — Part 5H.** It used to read "Waiting to be taken", which was true when a
+ * staff member picked work up with `/assign`. Cases now arrive with an owner
+ * already chosen, and only Program and System may move one, so nothing in that
+ * list is waiting for its reader to take it. What puts a case there now is that
+ * **no active staff member holds its queue in its region** — a staffing gap
+ * rather than a queue of unclaimed work, and the heading has to say so or it
+ * asks people to do something they cannot do about something they did not
+ * cause.
  */
 export function staffDigest(lists: DigestLists): string | null {
   const body = [
     ...section('⏰ *Past the date you promised*', lists.pastDue),
     ...section('🕸 *Nobody has touched these*', lists.stale),
-    ...section('📥 *Waiting to be taken*', lists.unassigned),
+    ...section('📥 *Nobody covers these — no owner could be found*', lists.unassigned),
   ];
 
   if (body.length === 0) return null;
