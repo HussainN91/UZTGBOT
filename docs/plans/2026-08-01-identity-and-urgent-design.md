@@ -778,6 +778,107 @@ work.** Ordered by how much they cost to leave.
    is a staffing question rather than a technical one, and **automatic assignment
    cannot be built without an answer.** It is the only thing blocking Part 5H.
 
+# PART 9 — Execution order, and what breaks if it is ignored
+
+**Written 1 August 2026, at the head of project's request**, after Part 5H was
+added: *"we don't want the concepts we are trying to code to overlap,
+contradict, or ruin anything, in code or in the following steps of the plan that
+aren't coded yet."*
+
+**The order below changed as a result.** Part 5H moves ahead of Feature A, and
+the reason is in §9.2.
+
+## 9.1 — The five places two unbuilt parts touch the same thing
+
+### ⚠️ A. "Who is responsible for this region?" is asked by both 5H and Feature A
+
+`src/staff/recipients.ts` holds the one answer today — `staffCovering` and
+`regionalRecipients`, built with Feature B. **Two unbuilt parts each need a
+version of that question and they are not the same question:**
+
+- **5H.1** asks *"who should own a `Visa` case in Tashkent?"* — one person, out
+  of everyone holding that queue and region.
+- **Feature A** asks *"who adjudicates a dispute about a teacher in Tashkent?"* —
+  a person with authority, regardless of queue.
+
+**Built in the wrong order they will disagree.** If Feature A goes first it must
+invent its own notion of a regional authority; when 5H then introduces a named
+owner per queue-and-region, the bot holds two answers to "who is responsible
+here" and nothing makes them agree. **5H first**, and Feature A then escalates to
+the person 5H already established, or to System where 5H established nobody.
+
+### ⚠️ B. Automatic ownership changes what `/cases unassigned` means
+
+`/cases unassigned` is the intake backlog, and its whole reason is R4: a case
+filed into a queue nobody holds, sitting unseen. **Once 5H assigns
+automatically, that list is empty by construction** — and an empty list will read
+as "nothing is waiting" when the real failure has simply changed shape, from
+*nobody owns it* to *its owner is inactive, on leave, or holds forty others*.
+
+**5H must replace the question, not delete the command.** The digest's third
+section — `📥 Waiting to be taken` — has the same problem and must move with it.
+Leaving either as-is is the "looks configured and does nothing" failure the
+rebuild exists to remove.
+
+### ⚠️ C. Feature E rewrites the menu that Part 5F just made access-aware
+
+Part 5F built three menus — signed in, sign-in offered, access ended — and
+hiding the gated buttons from a stranger is now a property of
+`mainMenuKeyboard(access)`. **Feature E replaces the first screen entirely.**
+
+Built without that in view, Feature E reopens the login-gating hole it will not
+know exists. **Its spec must start from `mainMenuKeyboard(access)` and keep all
+three forms**, and its own success criteria must include a chat that has never
+signed in reaching the answer bank.
+
+### ⚠️ D. Adding a case category ripples further than it looks
+
+Raised by the `Medical` example in 5H.0. A category is not one setting:
+`CASE_CATEGORY`, `QUEUE_FOR_CATEGORY` (typed total, so it is a compile error to
+miss), `CASE_REFERENCE_PREFIX`, retention, the FAQ topic list if teachers are to
+read about it, and — once Feature E exists — its area-to-category mapping.
+
+**So: add any new category before Feature E, never after.** Afterwards it is the
+same work plus a mapping table built against a list that has since moved.
+
+### ⚠️ E. Feature A creates personal data teachers have not been told about
+
+A dispute record holds an identifier and two chat ids, and **dispute retention is
+not covered by the three periods the privacy notice states** — that is open
+question 2, and it has been open since July.
+
+**This is the sharpest sequencing item in the whole plan.** Reviewing the notice
+before launch costs one round of re-consent. Building Feature A first and
+reviewing afterwards costs two, because every teacher who accepted the old
+wording is asked again. **Settle the notice before Feature A starts**, not before
+it ships.
+
+## 9.2 — What the order therefore is
+
+1. **Operational launch blockers.** Unchanged, untouched, and they gate
+   everything — 5H and Feature A both add function to a bot that cannot yet
+   safely launch.
+2. **Part 5H**, staff management by button and automatic ownership. **Moved
+   ahead of Feature A** by §9.1.A. It is also the only remaining part that is
+   entirely staff-facing: no teacher sees anything different, so it carries no
+   privacy or re-consent ripple at all, which makes it the safest thing to build
+   while the notice is still being settled.
+3. **The privacy notice**, settled — in parallel, by the head of project, not by
+   engineering. It gates step 4.
+4. **Feature A**, identity disputes.
+5. **Feature E**, which needs its own spec, and that spec must start from
+   §9.1.C.
+
+## 9.3 — What is safe to do at any time
+
+Adding buttons to existing commands, on Part 5G's pattern: a single tap carrying
+everything it needs in its payload, re-validated on arrival. It touches no
+concept any later part depends on. **The exception is anything needing free
+text** — `/reply`, `/note`, `/due`, `/snooze` — which needs staff-facing
+conversation state and belongs with 5H.3, not before it.
+
+---
+
 # Order
 
 1. **Operational launch blockers** — hours, and they gate everything. **Still
@@ -795,15 +896,25 @@ work.** Ordered by how much they cost to leave.
    plan proposed are **not** built and mostly will not be: "take it" was ruled
    out by the head of project (Part 5H.2), and close, reopen and mark-urgent are
    worth revisiting only alongside 5H's menus rather than as a separate pass
-5. **Feature A** — identity disputes
-6. ~~**Feature C** — interactive `/staff_add`~~ — **subsumed by Part 5H.3**,
-   which is the same idea for every staff command rather than one. Build them
-   together
-7. **Part 5H — staff management by button, and automatic ownership.** ~3.5 days,
-   requested 1 August. **H.1 needs one answer before it can start:** who owns a
-   case when two staff hold the same queue and region
-8. **Feature E** — largest, and benefits most from having lived with the bot.
-   Needs its own spec first
+5. **Part 5H — staff management by button, and automatic ownership.** ~3.5 days.
+   **Moved ahead of Feature A on 1 August** — Part 9.1.A: both need "who is
+   responsible for this region" and building them the other way round leaves the
+   bot holding two answers to it. Also the only remaining part no teacher sees,
+   so it is the safe thing to build while the privacy notice is settled.
+   **Blocked on one answer:** who owns a case when two staff hold the same queue
+   and region
+6. **The privacy notice, settled** — the head of project's, not engineering's,
+   and it gates Feature A. Part 9.1.E. Runs in parallel with step 5; it needs no
+   engineering time at all
+7. **Feature A** — identity disputes. Uses whatever step 5 established as "who
+   is responsible for this region", and must not invent a second answer
+8. ~~**Feature C** — interactive `/staff_add`~~ — **subsumed by Part 5H.3**,
+   which is the same idea for every staff command rather than one command. It is
+   not a separate step
+9. **Feature E** — largest, and benefits most from having lived with the bot.
+   **Needs its own spec, and that spec starts from Part 9.1.C** — it replaces the
+   first screen, which Part 5F just made access-aware, and it must keep all three
+   forms of the menu or it silently reopens the login-gating hole
 
 > **Buttons wherever they fit, from here on.** Asked for on 1 August: *"add
 > buttons whenever you can."* Part 5G is the template — a single tap carrying
