@@ -14,6 +14,20 @@ undecided. Supersedes the "what's next" list in
 > `docs/plans/archive/`. Its two surviving open decisions are items 0 and 5 of
 > Open questions below. Do not go looking for a handoff; there is not one.
 
+> ### ⬜ PENDING — picked up 2 August 2026
+>
+> **GitHub has everything through `339d1f9`; the live server does not yet.**
+> Pushed to `origin/main` on 2 August. Deploying it needs an SSH key from the
+> working machine added to the server's `ubuntu` user — none was configured —
+> or the head of project running the pull themselves. **RUNBOOK.md §2.1 is the
+> order and it is not negotiable: build, stop, migrate, start worker, start
+> web.** One schema migration is included, `0010_urgent_request_gate.sql`
+> (Feature B) — everything since (5F, 5G, 5H, the privacy notice) needed no
+> schema change, but the migrate step still has to run.
+>
+> **Then:** Feature A, identity disputes — designed, unblocked, ~3.5 days. See
+> §9.2 for why it comes before Feature E.
+
 > **Revised 1 August 2026, after building Feature B.** Three changes, all made by
 > the head of project and all binding:
 >
