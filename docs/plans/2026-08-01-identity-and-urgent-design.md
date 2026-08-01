@@ -880,18 +880,22 @@ should be built once, deliberately, and not smuggled in behind a button.
 **All of these are waiting on the head of project. None of them blocks starting
 work.** Ordered by how much they cost to leave.
 
-0. **The privacy notice, reviewed before the deploy — the sharpest item on this
-   list.** Reviewing it before launch costs **one** round of re-consent.
-   Reviewing it afterwards costs **two**, because every teacher who accepted the
-   old wording has to be asked again. Nothing technical is waiting on it and that
-   is exactly why it keeps slipping.
+0. ~~**The privacy notice, reviewed before the deploy**~~ — ✅ **amended and
+   approved 1 August 2026, commit `8e5a59f`.** Two sentences added, and
+   `PRIVACY_NOTICE_VERSION` moved to `2026-08-01.1`.
 
-   Feature B added the ⏫ Ask for Priority path and Part 5F changed what a chat
-   sees before it accepts anything, so the notice has moved further from the text
-   it describes than it was in July.
+   The gaps were narrower than expected and both concerned Feature A. "Staff
+   working your case" did not cover a dispute, because a dispute is not a case
+   and what staff are shown to settle one is the *other* chat's Telegram
+   details — one teacher's data read by somebody working on another's claim. And
+   the retention paragraph states three periods, none of which is a dispute
+   record; the permanent-access-record line nearly covered it and "nearly" is not
+   a thing to leave in a legal statement.
 
-   Moved here on 1 August 2026 from the rolling handoff, which was retired that
-   day. It was the handoff's §9.1 and it must not be lost with it.
+   **Done before Feature A on purpose.** A wording change asks every teacher who
+   has already signed in to accept again — one round from a pilot of eight now,
+   against one round from everybody after launch on top of the round this would
+   have needed anyway. **This no longer gates Feature A.**
 
 1. **Wording of seven messages** — two dispute notices, manager escalation,
    System forward, urgent acknowledgement, confirmation, owner notification.
@@ -1053,9 +1057,8 @@ conversation state and belongs with 5H.3, not before it.
 5. ~~**Part 5H — staff management by button, and automatic ownership**~~ — ✅
    **COMPLETE.** H.1 `cb045b9`, H.2 `f67914d`, H.3 `0ab48f7`, all 1 August.
    Feature C is subsumed and needs no separate step
-6. **The privacy notice, settled** — the head of project's, not engineering's,
-   and it gates Feature A. Part 9.1.E. Runs in parallel with step 5; it needs no
-   engineering time at all
+6. ~~**The privacy notice, settled**~~ — ✅ **done 1 August at `8e5a59f`**, and it
+   no longer gates anything. Part 9.1.E is resolved
 7. **Feature A** — identity disputes. Uses whatever step 5 established as "who
    is responsible for this region", and must not invent a second answer
 8. ~~**Feature C** — interactive `/staff_add`~~ — **subsumed by Part 5H.3**,
