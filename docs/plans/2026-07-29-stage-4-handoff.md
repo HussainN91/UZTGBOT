@@ -36,13 +36,33 @@ typecheck clean · build clean · deps:check clean · lint 0 warnings
 **Two of the head of project's decisions reshaped the feature mid-build**, and both reached further
 than they first appear — §3.
 
+### The session of 1 August, second half: Part 5F designed, not built
+
+**No code was written and no test was run in that session.** It was stopped at the design boundary
+on purpose, before implementation, because the context budget was running out and the head of
+project asked for a clean pause rather than an abrupt one.
+
+What it produced is **`docs/plans/2026-08-01-login-gating-design.md`** — the approved design for
+Part 5F, the login-gating hole. **Read it before writing a line of that part.** Two decisions of the
+head of project are recorded in it and both are binding: an unsigned chat sees only the buttons that
+work without an account, and the menu says in words what signing in unlocks.
+
+The design also found something the plan of record gets wrong. The plan says *"the only change is
+what `/start` returns for an unsigned chat."* That is not enough — the Home button renders the menu
+through a different path, so building only `/start` would show the reduced menu once and the full
+menu ever after. §4 of the design has the seven places that render it.
+
+> **This handoff was edited rather than rewritten**, against the rule in §11, for the same budget
+> reason. Everything in it is current; it simply was not retyped.
+
 ## 2. Commits, oldest first
 
 | Hash | What |
 |---|---|
 | `cb1e0c2` | The state at the start of this session |
 | `90827f8` | `feat: priority requests, decided by a person rather than a code` |
-| *(the commit carrying this document)* | `docs: the handoff, the plan, and the two documents Feature B changed` |
+| `5111d91` | `docs: the handoff, the plan, and the two documents Feature B changed` |
+| *(the commit carrying this document)* | `docs: the approved design for the login-gating hole` |
 
 Everything before `cb1e0c2` is the six-stage rebuild and the deployment work; the previous version
 of this handoff listed those and they have not changed.
@@ -232,9 +252,12 @@ of record. In short:
 1. **The operational launch blockers.** Hours, not code, and they gate everything: revoke the test
    bot token, confirm the sheet is not publicly editable, move `OPS_ALERT_CHAT_ID` to a group, set
    up and *drill* backups, confirm Uzbekistan hosting. **Untouched.**
-2. **Part 5F — the login-gating hole.** Half a day, and it is a live defect: a brand-new teacher
-   cannot reach the FAQ, which is deliberately open to everybody, because `/start` hands them a
-   sign-in prompt with no way past. **Read the revoked-chat warning in the plan first.**
+2. **Part 5F — the login-gating hole. ✅ Designed, ⬜ not built.** Half a day of building, and it is
+   a live defect: a brand-new teacher cannot reach the FAQ, which is deliberately open to everybody,
+   because `/start` hands them a sign-in prompt with no way past. **The design is settled and
+   approved — `docs/plans/2026-08-01-login-gating-design.md`. Start there; do not redesign it.**
+   Its §7 is the list of what has to be proved, and §5 is the one thing in it I decided rather than
+   asked, which the head of project may still want to overturn.
 3. **Part 5G — buttons on case lists.** A day and a half, directly requested, and newly cheap
    because Feature B built the staff-callback machinery. Copy `confirmUrgent` in `router.ts`.
 4. **Feature A — identity disputes.** 3.5 days. Uses `staffCovering`/`regionalRecipients` unchanged.

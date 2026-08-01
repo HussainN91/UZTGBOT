@@ -378,6 +378,14 @@ prefixes all unchanged.
 
 **Added 1 August 2026.** Not in the original document, and not a preference.
 
+> ### ✅ Designed 1 August 2026 — `docs/plans/2026-08-01-login-gating-design.md`
+>
+> **Not built.** The design is approved and carries two binding decisions of the head of project:
+> an unsigned chat sees **only** the buttons that work without an account, and the menu says in
+> words what signing in unlocks. It also corrects this section — see the strike below.
+>
+> Build from that document. What follows here is the statement of the problem, which stands.
+
 **What happens today:** a brand-new chat types `/start` and receives the privacy
 notice followed by *"reply with the email address you were recruited with."* No
 menu, no buttons. They are held in `AwaitingIdentifier`, and anything else they
@@ -397,7 +405,14 @@ My Case - and Submit Documents stay exactly as gated as they are now.
 **Almost all of this already exists.** `requireSignIn` shows the notice, asks for
 the address, and - this is the part worth knowing - records what the teacher was
 trying to do and **puts them back on it afterwards**. That is built and tested.
-The only change is what `/start` returns for an unsigned chat.
+~~The only change is what `/start` returns for an unsigned chat.~~
+
+> **WRONG, and found while designing on 1 August.** The 🏠 Main Menu button
+> renders the menu through `MENU_ACTION.MAIN`, not through `/start`. Change only
+> `/start` and a new teacher sees the reduced menu once and the full menu from
+> their first Home tap onwards. **Seven places render the main menu**; §4 of the
+> design document lists them and keeps `mainMenuReply`'s "cannot itself fail"
+> property while doing it.
 
 > ### The trap, and it has been fallen into once already
 >
@@ -542,7 +557,9 @@ should be built once, deliberately, and not smuggled in behind a button.
    regional-recipient lookup as intended
 3. **Part 5F, the login-gating hole** — half a day, and it is a live defect
    rather than an improvement. Cheapest thing on this list and the only one a
-   teacher would notice today
+   teacher would notice today. **✅ Designed and approved 1 August,
+   `docs/plans/2026-08-01-login-gating-design.md`; ⬜ not built.** Next thing to
+   code
 4. **Part 5G, buttons on case lists** — a day and a half. Directly requested,
    and now cheap because Feature B built the staff-callback machinery
 5. **Feature A** — identity disputes
