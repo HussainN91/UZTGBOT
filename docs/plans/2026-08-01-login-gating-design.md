@@ -1,10 +1,20 @@
 # Part 5F — the login-gating hole: the design
 
-**Date:** 1 August 2026 · **Status:** designed and approved, **not built** · Belongs to
+**Date:** 1 August 2026 · **Status: ✅ BUILT — commit `c0d0b74`** · Belongs to
 `2026-08-01-identity-and-urgent-design.md` Part 5F, which stays the plan of record.
 
-> **No code was written for this.** The session that produced this document was stopped at the
-> design boundary, deliberately, before implementation. The working tree is clean.
+> **Designed first, built second, in that order and in two sittings.** The design below is as it was
+> approved. Where building it changed something, the change is marked inline rather than written
+> over the top — §4 carries the one correction, and it is the kind that would have shipped a
+> half-working feature.
+
+```
+1,164 tests across 65 files · 0 failed · 0 skipped · 288 seconds
+typecheck clean · build clean · lint 0 warnings · deps zero cycles, zero layer violations
+```
+
+**Every number above was run on 1 August 2026 against the tree as committed.** The suite gained 17
+tests; nothing was removed.
 
 ---
 
@@ -114,8 +124,20 @@ never again.
 
 So every place the main menu is rendered resolves which of the three it is. In `router.ts` that is:
 `/start`; the Home button; the "I can only read text messages" reply; the undecodable-payload
-fallback; the unknown-prefix fallback; the unknown-menu-action fallback; and the privacy-acceptance
-path for a chat with no teacher row.
+fallback; the unknown-prefix fallback; the unknown-menu-action fallback; the staff-denied answer to
+a confirm-urgent tap; the answer-feedback acknowledgement; and the privacy-acceptance path for a
+chat with no teacher row.
+
+> **Corrected while building, 1 August.** This section originally said seven places, all in
+> `router.ts`. There are **nine**, and two of them are in `handlers/faq.ts` rather than the router:
+> a topic button whose topic no longer exists, and an answer withdrawn since its button was drawn.
+> Both land on the main menu, both are ordinary rather than exceptional, and both are reached by
+> chats that have never signed in — because browsing the answer bank is open to everybody. Missing
+> them would have left a stranger who taps a stale FAQ button holding the full menu.
+>
+> The fix threads the same answer through `topicListingReply`, `answerReply` and `questionReply`.
+> The rule those three now carry is written at the top of `handlers/faq.ts`: **the main menu is
+> never drawn without knowing who is looking at it.**
 
 ### Keeping the property that the menu cannot fail
 
@@ -190,4 +212,25 @@ nothing new is imported across a layer.
 ## 8. What was not settled
 
 Nothing in this part. The four decisions in §9 of the handoff are unrelated to it and none of them
-blocks building this.
+blocked building this.
+
+## 9. What building it actually cost, and what it found
+
+**About half a day, as estimated.** No database change, no migration, one new menu action.
+
+**One thing was wrong in the design and would have shipped a half-working feature** — §4's seven
+places were nine, and the two missing ones were in `handlers/faq.ts`. A new teacher who tapped a
+stale FAQ button would have been handed the full menu, and the reduced menu would have lasted
+exactly one tap. It was found by writing the change rather than by a test, because the compiler
+demanded an answer at every call site: `mainMenuKeyboard` takes its parameter with **no default**,
+which turned "where else is this drawn?" from a question somebody had to remember to ask into one
+the build could not proceed without answering.
+
+**Four test files changed rather than the one expected.** `/start` no longer signs anybody in, so
+every test that reached a signed-in teacher through it needed the Sign in tap inserted. That is the
+change being real: the front door genuinely does something different now.
+
+**The `/revoke` suite gained the assertion that matters.** `does not let a restore be faked by
+signing in again` had a companion added — `does not let the Sign in button fake one either`. It
+**taps** the button rather than checking the button is absent, because a revoked teacher is not
+shown it but yesterday's menu is still in their scrollback and every button in it is still live.

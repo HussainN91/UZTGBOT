@@ -247,15 +247,30 @@ wrong word for what happens throughout this document.
 Two-factor by design: possessing a Telegram account is not identity.
 
 ```
-Teacher taps a gated feature
-  → isVerified_(chatId)?
-      yes → proceed
-      no  → state = AWAITING_IDENTIFIER, prompt for identifier
-            (the prompt includes the full privacy notice — §5.2)
-              → next message checked against ROSTER
-                  match    → bind to USERS, VERIFIED, resume the original action
-                  no match → attempt counter +1, retry (max 5)
+Teacher taps a gated feature, or the Sign in button
+  → menuAccessFor(chatId)?
+      signedIn      → proceed
+      accessEnded   → "your access has ended" — NEVER the prompt
+      signInOffered → state = AWAITING_IDENTIFIER, prompt for identifier
+                      (the prompt includes the full privacy notice — §5.2)
+                        → next message checked against ROSTER
+                            match    → bind, VERIFIED, resume the original action
+                            no match → attempt counter +1, retry (max 5)
 ```
+
+> **One function answers this for every door — Part 5F.** Sign-in is reachable
+> from `/start`, from the Sign in button on the menu, from any of the four gated
+> actions, and from `verifyIdentifier` at the end. `menuAccessFor` is the single
+> expression of who may pass, and it is the same answer that decides which of the
+> three menus (§8.2) a chat is drawn. Four doors sharing one rule cannot drift
+> apart; four copies of it eventually will, and the copy that drifts will be the
+> one nobody was looking at.
+>
+> **There are two ways to have lost access and only one of them is `Revoked`.** A
+> teacher whose roster row was deactivated — which is what every administrator
+> assumes removing a row from the sheet does — keeps `verificationState =
+> 'Verified'` and fails on the roster flag. Testing for `Revoked` alone hands that
+> teacher the prompt, which is the loop this exists to avoid.
 
 **Duplicate identity bindings are detected, not blocked.** `bindUser_` reads,
 before writing, which *other* chats are already `VERIFIED` against the same
@@ -1179,8 +1194,38 @@ the original leak came back.
 Accommodation) + All FAQ topics · Submit Documents · Check My Case · Contact
 Support · Change Language · Ask for Priority · **Who covers my region?**
 
-The last of those is the newest and is deliberately **not** behind the sign-in
-gate or the re-consent gate — §5.3.
+The last of those is deliberately **not** behind the sign-in gate or the
+re-consent gate — §5.3.
+
+#### The menu has three forms — Part 5F, 1 August 2026
+
+The list above is what a **signed-in** teacher sees. There are two others, and
+the difference is not cosmetic.
+
+| Who | What they get |
+|---|---|
+| Verified, roster row live | The full menu above |
+| No teacher row, or never verified | 4 shortcuts · All FAQ topics · Who covers my region? · **🔐 Sign in**, and a line saying what signing in unlocks |
+| Revoked, or verified with the roster row gone | The same reduced menu, **without** the Sign in button and without that line |
+
+**Why the third row exists.** `bindTeacher` clears `revoked_at`, so any route
+into sign-in is a route by which a revoked teacher undoes a staff member's
+decision by typing an email address. The Sign in button is a *fourth* door — after
+`/start`, `requireSignIn` and `verifyIdentifier` — and it is refused by being
+routed through `requireSignIn` itself rather than by a fourth copy of the rule.
+See §5.1.
+
+**Hiding a button is never the gate.** All four gated actions are still refused
+on tap, because a keyboard sits in a teacher's scrollback for ever and a button
+drawn last year is as live as one drawn this morning. The hiding is on top of the
+gate, not instead of it.
+
+**`/start` no longer asks for an address.** It used to hand an unknown chat the
+privacy notice and a sign-in prompt, and hold them in `AwaitingIdentifier` — which
+made the answer bank, deliberately open to everybody, unreachable through the
+front door. The notice is still shown at the moment of sign-in, and replying with
+an address is still the acknowledgement; it moved off the *first screen*, not off
+the *acceptance*.
 
 **FAQ hub:** all 11 topics + Main Menu.
 
@@ -1196,7 +1241,8 @@ against the byte ceiling with real values rather than trusting an estimate.
 | Prefix | Meaning |
 |---|---|
 | `MENU:MAIN` / `MENU:FAQ` | Main menu / topic hub |
-| `MENU:<ACTION>` | `CHECK_CASE`, `CONTACT_SUPPORT`, `URGENT_CASE` |
+| `MENU:<ACTION>` | `CHECK_CASE`, `CONTACT_SUPPORT`, `URGENT_CASE`, `SUBMIT_DOCS`, `MY_MANAGER` |
+| `MENU:SIGN_IN` | Start sign-in — routed through the same `requireSignIn` that guards the gated actions, so a revoked chat is refused here too (§8.2) |
 | `CAT:<CODE>` | Enter an FAQ topic (`VISA`, `LIVING`, …) |
 | `PG:<CODE>:<page>` | Paged topic browsing |
 | `ANS:<CODE>` | Send one approved answer |

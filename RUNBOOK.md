@@ -500,9 +500,21 @@ something broken.
 
 ### 2. Sign-in
 
-Send `/start`. Expect the privacy notice and the request for a recruitment address
-in **one message** — replying is the acknowledgement, so the two are never
-separated.
+Send `/start`. Expect the **main menu**, not a question — the FAQ shortcuts, All
+FAQ topics, Who covers my region?, and **🔐 Sign in**, under a line saying you can
+read the answers without signing in. There should be **no** Contact Support, Ask
+for Priority, Check My Case or Submit Documents button yet.
+
+> **Changed 1 August 2026 — Part 5F.** `/start` used to reply with the sign-in
+> prompt and hold the chat there, which made the answer bank unreachable for
+> anybody who had not signed in. If you see the address request here instead of a
+> menu, you are running a build older than that.
+
+Tap an FAQ topic and read an answer. It should work with no sign-in at all.
+
+Tap **🔐 Sign in**. *Now* expect the privacy notice and the request for a
+recruitment address in **one message** — replying is the acknowledgement, so the
+two are never separated.
 
 Send a wrong address. Expect a refusal that does not reveal whether the address
 exists, and a count of remaining attempts.

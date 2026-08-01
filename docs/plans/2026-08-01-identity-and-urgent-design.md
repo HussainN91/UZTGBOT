@@ -378,13 +378,15 @@ prefixes all unchanged.
 
 **Added 1 August 2026.** Not in the original document, and not a preference.
 
-> ### ✅ Designed 1 August 2026 — `docs/plans/2026-08-01-login-gating-design.md`
+> ### ✅ BUILT — 1 August 2026, commit `c0d0b74`
 >
-> **Not built.** The design is approved and carries two binding decisions of the head of project:
-> an unsigned chat sees **only** the buttons that work without an account, and the menu says in
-> words what signing in unlocks. It also corrects this section — see the strike below.
+> Designed first (`docs/plans/2026-08-01-login-gating-design.md`), built second, roughly to the
+> half-day estimate. Two binding decisions of the head of project shaped it: an unsigned chat sees
+> **only** the buttons that work without an account, and the menu says in words what signing in
+> unlocks.
 >
-> Build from that document. What follows here is the statement of the problem, which stands.
+> **`RUNBOOK.md` §5.2 and `BOT-SPEC.md` §5 and §8.2 are rewritten to match.** What follows here is
+> the statement of the problem, which stands, and one claim that did not — struck through below.
 
 **What happens today:** a brand-new chat types `/start` and receives the privacy
 notice followed by *"reply with the email address you were recruited with."* No
@@ -410,9 +412,12 @@ trying to do and **puts them back on it afterwards**. That is built and tested.
 > **WRONG, and found while designing on 1 August.** The 🏠 Main Menu button
 > renders the menu through `MENU_ACTION.MAIN`, not through `/start`. Change only
 > `/start` and a new teacher sees the reduced menu once and the full menu from
-> their first Home tap onwards. **Seven places render the main menu**; §4 of the
-> design document lists them and keeps `mainMenuReply`'s "cannot itself fail"
-> property while doing it.
+> their first Home tap onwards.
+>
+> **Nine places render the main menu** — the design document said seven, and
+> building it found the other two, both in `handlers/faq.ts`: a stale topic
+> button and a withdrawn answer. §4 and §9 of that document carry the list and
+> what made the gap visible.
 
 > ### The trap, and it has been fallen into once already
 >
@@ -555,11 +560,9 @@ should be built once, deliberately, and not smuggled in behind a button.
    confirm Uzbekistan hosting
 2. ~~**Feature B**~~ — ✅ **built 1 August at `90827f8`**, and it carried the shared
    regional-recipient lookup as intended
-3. **Part 5F, the login-gating hole** — half a day, and it is a live defect
-   rather than an improvement. Cheapest thing on this list and the only one a
-   teacher would notice today. **✅ Designed and approved 1 August,
-   `docs/plans/2026-08-01-login-gating-design.md`; ⬜ not built.** Next thing to
-   code
+3. ~~**Part 5F, the login-gating hole**~~ — ✅ **built 1 August at `c0d0b74`**, to
+   its own design document. The defect is closed: a teacher who has never signed
+   in reaches the answer bank from the front door
 4. **Part 5G, buttons on case lists** — a day and a half. Directly requested,
    and now cheap because Feature B built the staff-callback machinery
 5. **Feature A** — identity disputes
