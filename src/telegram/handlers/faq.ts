@@ -18,6 +18,7 @@ import {
   pickerKeyboard,
   questionTopicKeyboard,
   topicListingKeyboard,
+  type MenuAccess,
 } from '../keyboards.js';
 import type { Reply } from '../reply.js';
 
@@ -28,20 +29,34 @@ export function faqHubReply(): Reply {
   return { text: 'Choose a topic:', keyboard: faqHubKeyboard() };
 }
 
-function unknownTopicReply(): Reply {
+/**
+ * `access` is threaded through this module for one reason — Part 5F.
+ *
+ * Two paths in here land a teacher on the **main menu**: a topic button whose
+ * topic no longer exists, and an answer withdrawn since the button was drawn.
+ * Both are ordinary rather than exceptional, and both are reached by chats that
+ * have never signed in, because browsing the answer bank is open to everybody.
+ *
+ * Drawing the full menu there would undo the part: a stranger who taps a stale
+ * FAQ button would be handed Contact Support and Ask for Priority, which then
+ * stop and ask for an email address. The rule is that **the main menu is never
+ * drawn without knowing who is looking at it**, and it holds here too.
+ */
+function unknownTopicReply(access: MenuAccess): Reply {
   // Not an error. A stale button from a previous version of the taxonomy looks
   // exactly like this, and the teacher should land somewhere useful.
-  return { text: MAIN_MENU_PROMPT, keyboard: mainMenuKeyboard() };
+  return { text: MAIN_MENU_PROMPT, keyboard: mainMenuKeyboard(access) };
 }
 
 /** One page of a topic's questions. */
 export async function topicListingReply(
   db: Database,
   topicCode: string,
+  access: MenuAccess,
   page = 1,
 ): Promise<Reply> {
   const topic = faqTopicByCode(topicCode);
-  if (topic === null) return unknownTopicReply();
+  if (topic === null) return unknownTopicReply(access);
 
   const rows = await listTopicAnswers(db, topic.code);
   if (rows.length === 0) {
@@ -69,7 +84,11 @@ export async function topicListingReply(
 }
 
 /** One approved answer. */
-export async function answerReply(db: Database, code: string): Promise<Reply> {
+export async function answerReply(
+  db: Database,
+  code: string,
+  access: MenuAccess,
+): Promise<Reply> {
   const answer = await findAnswer(db, code);
   if (answer === null) {
     /**
@@ -82,7 +101,7 @@ export async function answerReply(db: Database, code: string): Promise<Reply> {
       text:
         'That answer is no longer available — it may have been updated or withdrawn.\n\n' +
         'Please pick another question, or contact support.',
-      keyboard: mainMenuKeyboard(),
+      keyboard: mainMenuKeyboard(access),
     };
   }
 
@@ -103,9 +122,10 @@ export async function questionReply(
   db: Database,
   topicCode: string,
   query: string,
+  access: MenuAccess,
 ): Promise<Reply> {
   const topic = faqTopicByCode(topicCode);
-  if (topic === null) return unknownTopicReply();
+  if (topic === null) return unknownTopicReply(access);
 
   const rows = await answersForScoring(db, topic.code);
   const match = selectAnswer(query, rows);

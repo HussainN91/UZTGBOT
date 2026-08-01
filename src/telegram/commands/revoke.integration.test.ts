@@ -19,6 +19,8 @@ import type { Database } from '../../db/index.js';
 import * as schema from '../../db/schema.js';
 import { withChatLock } from '../../conversation/lock.js';
 import { findTeacher, teacherHasAccess } from '../../teachers/repository.js';
+import { CALLBACK, encodeCallback } from '../callback-data.js';
+import { MENU_ACTION } from '../keyboards.js';
 import { route, type InboundUpdate, type RouterOutcome } from '../router.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
@@ -184,6 +186,30 @@ describe.skipIf(!TEST_DATABASE_URL)('/revoke and /restore', () => {
       await teacherTypes('/start');
       await teacherTypes(IDENTIFIER);
 
+      expect(await canUseBot(TEACHER)).toBe(false);
+    });
+
+    it('does not let the Sign in button fake one either', async () => {
+      /**
+       * Part 5F put a Sign in button on the menu, which is a **fourth** door into
+       * the same place — after `/start`, `requireSignIn` and `verifyIdentifier`.
+       * It is refused by routing through `requireSignIn` itself rather than by a
+       * fourth copy of the rule, and this is what holds that.
+       *
+       * The tap is made rather than the button's absence checked. A revoked
+       * teacher is not shown the button, but yesterday's menu is still in their
+       * scrollback and every button in it is still live.
+       */
+      await run(`/revoke ${TEACHER}`);
+
+      const outcome = await send({
+        chatId: TEACHER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.MENU, MENU_ACTION.SIGN_IN),
+      });
+      await teacherTypes(IDENTIFIER);
+
+      expect(outcome.messages[0]?.text ?? '').toMatch(/access.*has ended/i);
       expect(await canUseBot(TEACHER)).toBe(false);
     });
 

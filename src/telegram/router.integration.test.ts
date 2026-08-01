@@ -50,8 +50,21 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
 
   const firstText = (outcome: RouterOutcome): string => outcome.messages[0]?.text ?? '';
 
+  /** Every callback payload on the reply's keyboard, rows flattened. */
+  const buttons = (outcome: RouterOutcome): string[] =>
+    (outcome.messages[0]?.keyboard ?? []).flatMap((row) => row.map((b) => b.callback_data));
+
+  const SIGN_IN = encodeCallback(CALLBACK.MENU, MENU_ACTION.SIGN_IN);
+  const MAIN_MENU = encodeCallback(CALLBACK.MENU, MENU_ACTION.MAIN);
+
+  /**
+   * `/start` no longer asks for an address — Part 5F. It opens the menu, and the
+   * Sign in button on it is what asks. Every test that needs a signed-in teacher
+   * goes through the same three steps a real one does.
+   */
   const verify = async (chatId = CHAT): Promise<void> => {
     await text('/start', chatId);
+    await tap(SIGN_IN, chatId);
     await text(IDENTIFIER, chatId);
   };
 
@@ -82,19 +95,177 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
     await pool?.end();
   });
 
-  describe('signing in', () => {
-    it('shows the privacy notice before asking for anything', async () => {
+  /**
+   * Part 5F. The front door used to be a sign-in prompt with no way past, which
+   * closed the FAQ to the one person who most needs it — somebody who cannot
+   * sign in and has a question. `/start` now opens the menu for everybody.
+   *
+   * The head of project chose the *reduced* menu: an unsigned chat is shown only
+   * what works without an account, rather than the whole menu with a Sign in
+   * button added. Hiding a button is on top of the gate behind it, never instead
+   * of it — a button lives in a scrollback for ever — so the four gated actions
+   * are still refused on tap, and `describe('opening a case')` proves it.
+   */
+  describe('the front door', () => {
+    const CONTACT_SUPPORT = encodeCallback(CALLBACK.MENU, MENU_ACTION.CONTACT_SUPPORT);
+
+    it('opens the menu for a chat that has never signed in, and asks for nothing', async () => {
       const outcome = await text('/start');
+
+      expect(buttons(outcome)).toContain(SIGN_IN);
+      expect(firstText(outcome)).toContain('without signing in');
+      // The defect itself: they used to be held here, and everything they typed
+      // afterwards was read as a failed email address.
+      expect(await loadState(db, CHAT)).toBeNull();
+    });
+
+    it('offers an unsigned chat nothing that would stop and ask for an address', async () => {
+      const shown = buttons(await text('/start'));
+
+      for (const gated of [
+        MENU_ACTION.CONTACT_SUPPORT,
+        MENU_ACTION.URGENT_CASE,
+        MENU_ACTION.CHECK_CASE,
+        MENU_ACTION.SUBMIT_DOCS,
+      ]) {
+        expect(shown).not.toContain(encodeCallback(CALLBACK.MENU, gated));
+      }
+      // And what it does offer is the whole point of the part.
+      expect(shown).toContain(encodeCallback(CALLBACK.MENU, MENU_ACTION.FAQ));
+      expect(shown).toContain(encodeCallback(CALLBACK.MENU, MENU_ACTION.MY_MANAGER));
+    });
+
+    it('gives the same reduced menu from the Home button, not just from /start', async () => {
+      /**
+       * The trap this part is likeliest to fall into. 🏠 Main Menu draws the menu
+       * through `MENU_ACTION.MAIN`, a different path from `/start`, so changing
+       * only `/start` would show the reduced menu once and the full one from the
+       * teacher's first Home tap onwards.
+       */
+      await text('/start');
+      const home = await tap(MAIN_MENU);
+
+      expect(buttons(home)).toContain(SIGN_IN);
+      expect(buttons(home)).not.toContain(CONTACT_SUPPORT);
+    });
+
+    it('reaches the answer bank without signing in', async () => {
+      await text('/start');
+      const answer = await tap(encodeCallback(CALLBACK.ANSWER, 'VISA-001'));
+
+      expect(firstText(answer)).toContain('fourteen working days');
+      expect(await loadState(db, CHAT)).toBeNull();
+    });
+
+    it('asks for the address only when the Sign in button is tapped', async () => {
+      await text('/start');
+      const outcome = await tap(SIGN_IN);
+
       // The notice and the prompt are one message on purpose: replying with an
       // identifier is the acknowledgement, so a teacher cannot scroll past one
-      // and answer the other.
+      // and answer the other. Moving the notice off the first screen must not
+      // move it off the acceptance.
       expect(firstText(outcome)).toContain('recruited with');
       expect(firstText(outcome).toLowerCase()).toContain('privacy');
       expect((await loadState(db, CHAT))?.kind).toBe('AwaitingIdentifier');
     });
 
+    it('opens the full menu once they have signed in', async () => {
+      await verify();
+      const outcome = await text('/start');
+
+      expect(buttons(outcome)).toContain(CONTACT_SUPPORT);
+      expect(buttons(outcome)).not.toContain(SIGN_IN);
+      expect(firstText(outcome)).not.toContain('without signing in');
+    });
+
+    it('lands a teacher on the full menu when they sign in from the button', async () => {
+      await text('/start');
+      await tap(SIGN_IN);
+      const outcome = await text(IDENTIFIER);
+
+      expect(firstText(outcome)).toContain('Signed in as Router Tester');
+      expect(buttons(outcome)).toContain(CONTACT_SUPPORT);
+    });
+
+    it('shows a signed-in teacher the Sign in button on nothing', async () => {
+      // A stale Sign in button from before they signed in still works: it lands
+      // them on the menu rather than asking them to sign in twice.
+      await verify();
+      expect(buttons(await tap(SIGN_IN))).not.toContain(SIGN_IN);
+    });
+
+    describe('a teacher whose access has ended', () => {
+      const revoke = async (): Promise<void> => {
+        await verify();
+        await db.execute(
+          sql`UPDATE teachers SET verification_state = 'Revoked', revoked_at = now()
+              WHERE chat_id = ${CHAT}`,
+        );
+      };
+
+      const isRevoked = async (): Promise<boolean> => {
+        const rows = await db.execute<{ revoked: boolean }>(
+          sql`SELECT revoked_at IS NOT NULL AS revoked FROM teachers WHERE chat_id = ${CHAT}`,
+        );
+        return rows.rows[0]?.revoked === true;
+      };
+
+      it('tells them their access ended rather than prompting, on /start', async () => {
+        await revoke();
+        expect(firstText(await text('/start'))).toMatch(/access.*has ended/i);
+      });
+
+      it('REFUSES the Sign in button, and leaves the revocation standing', async () => {
+        /**
+         * The assertion that matters most in this part. `bindTeacher` clears
+         * `revoked_at`, so a revoked teacher who reaches the sign-in prompt
+         * undoes a staff member's decision by typing an email address, silently.
+         * That hole existed on `/start` and was closed at `a37fef8`; the Sign in
+         * button is a fourth door into the same place.
+         *
+         * This asserts the refusal rather than the button's absence on purpose.
+         * A button a revoked teacher is never shown is still sitting in their
+         * scrollback from yesterday, and it is still tappable.
+         */
+        await revoke();
+
+        const outcome = await tap(SIGN_IN);
+
+        expect(firstText(outcome)).toMatch(/access.*has ended/i);
+        expect(await loadState(db, CHAT)).toBeNull();
+        expect(await isRevoked()).toBe(true);
+      });
+
+      it('does not put the Sign in button on their menu either', async () => {
+        await revoke();
+        const menu = await tap(MAIN_MENU);
+
+        expect(buttons(menu)).not.toContain(SIGN_IN);
+        expect(buttons(menu)).not.toContain(CONTACT_SUPPORT);
+        // Still not a dead end: the answer bank stays open to them.
+        expect(buttons(menu)).toContain(encodeCallback(CALLBACK.MENU, MENU_ACTION.FAQ));
+      });
+
+      it('treats a deactivated roster row the same way, not as a new teacher', async () => {
+        // Removing a row from the sheet is what every administrator assumes
+        // revokes access. The state stays `Verified`, so a test for `Revoked`
+        // alone would offer this teacher the prompt.
+        await verify();
+        await db.execute(
+          sql`UPDATE roster_entries SET active = false WHERE identifier = ${IDENTIFIER}`,
+        );
+
+        expect(firstText(await tap(SIGN_IN))).toMatch(/access.*has ended/i);
+        expect(buttons(await tap(MAIN_MENU))).not.toContain(SIGN_IN);
+      });
+    });
+  });
+
+  describe('signing in', () => {
     it('signs a teacher in and shows them the menu', async () => {
       await text('/start');
+      await tap(SIGN_IN);
       const outcome = await text(IDENTIFIER);
 
       expect(firstText(outcome)).toContain('Signed in as Router Tester');
@@ -122,6 +293,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
 
     it('refuses an address that is not on the roster and counts the attempt', async () => {
       await text('/start');
+      await tap(SIGN_IN);
       const outcome = await text('someone.else@example.com');
 
       expect(firstText(outcome)).toContain('could not find that address');
@@ -134,11 +306,13 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       // revokes access. The sync only deactivates, so sign-in must read the flag.
       await db.execute(sql`UPDATE roster_entries SET active = false WHERE identifier = ${IDENTIFIER}`);
       await text('/start');
+      await tap(SIGN_IN);
       expect(firstText(await text(IDENTIFIER))).toContain('could not find that address');
     });
 
     it('logs the address masked, never in full', async () => {
       await text('/start');
+      await tap(SIGN_IN);
       await text(IDENTIFIER);
 
       const rows = await db.execute<{ detail: string }>(
@@ -157,6 +331,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
        */
       await verify(CHAT);
       await text('/start', SECOND_CHAT);
+      await tap(SIGN_IN, SECOND_CHAT);
       const outcome = await text(IDENTIFIER, SECOND_CHAT);
 
       expect(firstText(outcome)).toContain('Signed in');
@@ -172,6 +347,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       // The reply to the sender carries no purpose: it is always messages[0].
       await verify(CHAT);
       await text('/start', SECOND_CHAT);
+      await tap(SIGN_IN, SECOND_CHAT);
       const outcome = await text(IDENTIFIER, SECOND_CHAT);
 
       expect(outcome.messages[0]?.purpose).toBeUndefined();

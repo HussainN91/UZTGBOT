@@ -36,7 +36,9 @@ describe('the byte ceiling is enforced in one place', () => {
       faqRow(`PLACEMENT-${String(i).padStart(3, '0')}`),
     );
     const all = [
-      ...payloads(mainMenuKeyboard()),
+      ...payloads(mainMenuKeyboard('signedIn')),
+      ...payloads(mainMenuKeyboard('signInOffered')),
+      ...payloads(mainMenuKeyboard('accessEnded')),
       ...payloads(faqHubKeyboard()),
       ...payloads(caseTopicKeyboard()),
       ...payloads(backToMenuKeyboard()),
@@ -105,18 +107,64 @@ describe('paging', () => {
 
 describe('the main menu', () => {
   it('shortcuts only the topics flagged for it, not all eleven', () => {
-    const shortcuts = payloads(mainMenuKeyboard()).filter((p) => p.startsWith('CAT:'));
+    const shortcuts = payloads(mainMenuKeyboard('signedIn')).filter((p) => p.startsWith('CAT:'));
     const expected = FAQ_TOPICS.filter((t) => t.onMainMenu).map((t) => `CAT:${t.code}`);
     expect(shortcuts).toEqual(expected);
   });
 
   it('always offers the full FAQ hub, so nothing is unreachable', () => {
-    expect(payloads(mainMenuKeyboard())).toContain('MENU:FAQ');
+    expect(payloads(mainMenuKeyboard('signedIn'))).toContain('MENU:FAQ');
   });
 
   it('lists every topic in the hub', () => {
     const hub = payloads(faqHubKeyboard()).filter((p) => p.startsWith('CAT:'));
     expect(hub).toHaveLength(FAQ_TOPICS.length);
+  });
+
+  /**
+   * Part 5F. The three menus differ only in what they add to a common core, and
+   * the core is the answer bank — which is open to everybody, because somebody
+   * who *cannot* sign in and needs an answer is exactly who needs it most.
+   */
+  describe('in its three forms', () => {
+    const GATED = [
+      'MENU:CONTACT_SUPPORT',
+      'MENU:URGENT_CASE',
+      'MENU:CHECK_CASE',
+      'MENU:SUBMIT_DOCS',
+    ];
+
+    it('offers the four gated actions only to a teacher who is signed in', () => {
+      const shown = payloads(mainMenuKeyboard('signedIn'));
+      for (const gated of GATED) expect(shown).toContain(gated);
+      expect(shown).not.toContain('MENU:SIGN_IN');
+    });
+
+    it('offers a stranger the way in, and nothing that would refuse them', () => {
+      const shown = payloads(mainMenuKeyboard('signInOffered'));
+      expect(shown).toContain('MENU:SIGN_IN');
+      for (const gated of GATED) expect(shown).not.toContain(gated);
+    });
+
+    it('offers a teacher whose access has ended no way back in', () => {
+      /**
+       * The load-bearing one. `bindTeacher` clears `revoked_at`, so a Sign in
+       * button in front of a revoked teacher is a self-service undo of a staff
+       * member's decision. The refusal on tap is what actually protects this —
+       * `router.integration.test.ts` holds that — but the button should not be
+       * drawn either, and this is what says so.
+       */
+      const shown = payloads(mainMenuKeyboard('accessEnded'));
+      expect(shown).not.toContain('MENU:SIGN_IN');
+      for (const gated of GATED) expect(shown).not.toContain(gated);
+    });
+
+    it('keeps the answer bank on all three, which is the point of the part', () => {
+      for (const access of ['signedIn', 'signInOffered', 'accessEnded'] as const) {
+        expect(payloads(mainMenuKeyboard(access))).toContain('MENU:FAQ');
+        expect(payloads(mainMenuKeyboard(access))).toContain('MENU:MY_MANAGER');
+      }
+    });
   });
 });
 

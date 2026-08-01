@@ -103,7 +103,13 @@ import {
   urgentStillPendingReply,
   urgentUnavailableReply,
 } from './handlers/urgent.js';
-import { MENU_ACTION, backToMenuKeyboard, formsKeyboard, mainMenuKeyboard } from './keyboards.js';
+import {
+  MENU_ACTION,
+  backToMenuKeyboard,
+  formsKeyboard,
+  mainMenuKeyboard,
+  type MenuAccess,
+} from './keyboards.js';
 import type { Reply } from './reply.js';
 
 /** One update, reduced to the only things routing depends on. */
@@ -291,13 +297,25 @@ async function routeText(
    */
   if (text === '/start') {
     await clearState(db, update.chatId);
-    const start = await startReply(db, update.chatId, deps);
-    // A verified teacher gets the menu, and the region question with it when one
-    // is due. Anybody else is being asked to sign in, and must not be asked
-    // anything else on top of that.
-    return start.signedIn
-      ? menuWithRegionCheck(db, update.chatId)
-      : only(update.chatId, start.reply);
+    /**
+     * The menu, for everybody — Part 5F.
+     *
+     * This used to hand a chat we did not know a sign-in prompt and hold them in
+     * `AwaitingIdentifier`, which meant the answer bank — deliberately open to
+     * everybody, and most needed by somebody who *cannot* sign in — was
+     * unreachable through the front door. A door that is open and unreachable is
+     * closed.
+     *
+     * A teacher whose access has ended is the one exception, and is told so
+     * rather than shown a menu with nothing on it they came for.
+     * `accessEndedReply` carries a Main Menu button, so the answer bank is still
+     * one tap away for them.
+     */
+    const access = await menuAccessFor(db, update.chatId);
+    if (access === 'accessEnded') {
+      return only(update.chatId, accessEndedReply(deps.supportContact));
+    }
+    return menuWithRegionCheck(db, update.chatId, access);
   }
   if (text === '/privacy') {
     // Read here rather than held in `deps`: a period changed with /retention
@@ -356,7 +374,7 @@ async function routeText(
     // then, say what the bot can do rather than ignoring them.
     return only(update.chatId, {
       text: 'I can only read text messages at the moment.',
-      keyboard: mainMenuKeyboard(),
+      keyboard: mainMenuKeyboard(await menuAccessFor(db, update.chatId)),
     });
   }
 
@@ -395,8 +413,24 @@ async function routeText(
  *
  * The stamp is written when the question is shown. See `teachers.region_asked_at`.
  */
-async function menuWithRegionCheck(db: Database, chatId: string): Promise<RouterOutcome> {
-  const menu = only(chatId, mainMenuReply());
+async function menuWithRegionCheck(
+  db: Database,
+  chatId: string,
+  access: MenuAccess,
+): Promise<RouterOutcome> {
+  const menu = only(chatId, mainMenuReply(access));
+
+  /**
+   * Only a teacher who can actually use the bot is asked to maintain our record
+   * of them — Part 5F.
+   *
+   * `regionCheckDue` filters on `Verified`, which already excludes a chat that
+   * has never signed in. It does **not** exclude a revoked one: revocation
+   * leaves a row that was `Verified` an hour ago with a stale `region_asked_at`,
+   * and asking that teacher to confirm which region covers them is asking them
+   * to keep tidy a record for a bot they have just been told they cannot use.
+   */
+  if (access !== 'signedIn') return menu;
 
   const region = await regionCheckDue(db, chatId, REGION_CONFIRM_AFTER_DAYS);
   if (region === null) return menu;
@@ -419,40 +453,49 @@ async function menuWithRegionCheck(db: Database, chatId: string): Promise<Router
 }
 
 /**
- * `/start`: the menu for a teacher we know, the notice and prompt for one we do not.
+ * Which of the three menus this chat is owed, and — the same question — whether
+ * it may be let into sign-in.
  *
- * `signedIn` is reported rather than re-derived by the caller, so that the
- * teacher lookup happens once. It is what decides whether the region question may
- * be asked alongside the menu: somebody being asked to sign in must not be asked
- * anything else on top of it.
+ * **This is the one place the rule lives.** Sign-in can now be reached from four
+ * directions: `/start`, the Sign in button, any of the four gated actions, and
+ * `verifyIdentifier` itself at the end. Every one of them has to refuse a chat
+ * whose access has ended, because sign-in reaches `bindTeacher`, which clears
+ * `revoked_at` — so a teacher who is let in undoes a staff member's deliberate
+ * revocation by typing an email address, and nothing announces that it happened.
+ * That exact hole existed on `/start`, was closed at `a37fef8`, and is the
+ * reason `/restore` has to exist at all.
  *
- * **A revoked chat is refused here, not prompted.** `requireSignIn` has always
- * refused one, for the reason set out at `accessEndedReply` — sign-in reaches
- * `bindTeacher`, which clears `revoked_at`. This path did not, and that made
- * `/start` followed by an email address a complete self-service undo of a
- * revocation. Found by Task 36's own test for exactly that (`does not let a
- * restore be faked by signing in again`), in code committed three tasks earlier.
- * The two doors into sign-in now behave the same way, and `verifyIdentifier`
- * refuses a revoked chat as well, so a third door added later inherits the rule
- * instead of reopening the hole.
+ * Four doors sharing one expression of the rule cannot drift apart. Four doors
+ * with four copies of it eventually will, and the copy that drifts will be the
+ * one nobody was looking at.
+ *
+ * **There are two ways to have lost access and only one of them is `Revoked`.**
+ * A teacher whose roster row was deactivated — which is what every administrator
+ * assumes removing a row from the sheet does — keeps `verificationState =
+ * 'Verified'` and fails `teacherHasAccess` on the roster flag. Testing for
+ * `Revoked` alone would hand that teacher the sign-in prompt, which is the loop
+ * `accessEndedReply` exists to avoid.
  */
-async function startReply(
-  db: Database,
-  chatId: string,
-  deps: RouterDeps,
-): Promise<{ readonly signedIn: boolean; readonly reply: Reply }> {
+async function menuAccessFor(db: Database, chatId: string): Promise<MenuAccess> {
   const teacher = await findTeacher(db, chatId);
-  if (teacher?.verificationState === 'Verified') return { signedIn: true, reply: mainMenuReply() };
+  if (teacherHasAccess(teacher)) return 'signedIn';
 
-  if (teacher?.verificationState === 'Revoked') {
-    return { signedIn: false, reply: accessEndedReply(deps.supportContact) };
-  }
+  const hadAccess =
+    teacher !== null &&
+    (teacher.verificationState === 'Revoked' || teacher.verificationState === 'Verified');
+  return hadAccess ? 'accessEnded' : 'signInOffered';
+}
 
-  await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0 });
-  return {
-    signedIn: false,
-    reply: signInPromptReply(deps.supportContact, await retentionPeriods(db)),
-  };
+/**
+ * The menu, for a caller that has not already resolved who is asking.
+ *
+ * Used on the recovery paths — an unreadable payload, a stale button, a
+ * conversation state from a build that no longer exists. `mainMenuReply` itself
+ * stays pure and cannot fail; this is the one lookup in front of it, and it is
+ * the same indexed read every gated action already makes.
+ */
+async function menuReplyFor(db: Database, chatId: string): Promise<Reply> {
+  return mainMenuReply(await menuAccessFor(db, chatId));
 }
 
 async function handleIdentifier(
@@ -588,7 +631,10 @@ async function resumeAfterSignIn(
   if (resumeAction === MENU_ACTION.CHECK_CASE) {
     return checkMyCaseReply(db, chatId);
   }
-  return mainMenuReply();
+  // No lookup: this runs in the same transaction as a `verifyIdentifier` that
+  // has just succeeded, so the answer is known and re-reading it would only
+  // create a way for the two to disagree.
+  return mainMenuReply('signedIn');
 }
 
 async function handleCaseDetail(
@@ -770,7 +816,7 @@ async function routeCallback(
    * sent, so it can simply be from a build that no longer exists. Both land on
    * the main menu rather than an error.
    */
-  if (decoded === null) return only(update.chatId, mainMenuReply());
+  if (decoded === null) return only(update.chatId, await menuReplyFor(db, update.chatId));
 
   const [first = '', second = ''] = decoded.parts;
 
@@ -778,14 +824,29 @@ async function routeCallback(
     case CALLBACK.MENU:
       return routeMenu(db, update.chatId, first, deps);
 
+    /**
+     * The four answer-bank taps carry `access` for one reason — Part 5F. Each
+     * has a path that lands on the **main menu** when what was tapped no longer
+     * exists, and browsing is open to chats that have never signed in, so the
+     * menu drawn there has to be the one that chat is owed. See the note on
+     * `unknownTopicReply`.
+     */
     case CALLBACK.TOPIC:
-      return only(update.chatId, await topicListingReply(db, first));
+      return only(
+        update.chatId,
+        await topicListingReply(db, first, await menuAccessFor(db, update.chatId)),
+      );
 
     case CALLBACK.TOPIC_PAGE: {
       const page = Number.parseInt(second, 10);
       return only(
         update.chatId,
-        await topicListingReply(db, first, Number.isFinite(page) ? page : 1),
+        await topicListingReply(
+          db,
+          first,
+          await menuAccessFor(db, update.chatId),
+          Number.isFinite(page) ? page : 1,
+        ),
       );
     }
 
@@ -795,15 +856,19 @@ async function routeCallback(
        * teacher left this button sitting for half an hour — there is nothing to
        * answer, so they get the topic's questions instead of a shrug.
        */
+      const access = await menuAccessFor(db, update.chatId);
       if (state?.kind !== 'AwaitingQuestionTopic') {
-        return only(update.chatId, await topicListingReply(db, first));
+        return only(update.chatId, await topicListingReply(db, first, access));
       }
       await clearState(db, update.chatId);
-      return only(update.chatId, await questionReply(db, first, state.query));
+      return only(update.chatId, await questionReply(db, first, state.query, access));
     }
 
     case CALLBACK.ANSWER:
-      return only(update.chatId, await answerReply(db, first));
+      return only(
+        update.chatId,
+        await answerReply(db, first, await menuAccessFor(db, update.chatId)),
+      );
 
     case CALLBACK.ANSWER_HELPFUL:
     case CALLBACK.ANSWER_UNHELPFUL:
@@ -884,7 +949,7 @@ async function routeCallback(
       return confirmUrgent(db, update.chatId, first, state, deps);
 
     default:
-      return only(update.chatId, mainMenuReply());
+      return only(update.chatId, await menuReplyFor(db, update.chatId));
   }
 }
 
@@ -923,7 +988,7 @@ async function confirmUrgent(
   const member = await findStaff(db, chatId);
   if (member === null) {
     await logInteraction(db, chatId, STAFF_DENIED, `urgent confirm ${reference}`, state);
-    return only(chatId, mainMenuReply());
+    return only(chatId, await menuReplyFor(db, chatId));
   }
 
   if (!can(member, CAPABILITY.URGENT_ISSUE)) {
@@ -1012,10 +1077,33 @@ async function routeMenu(
   switch (action) {
     case MENU_ACTION.MAIN:
       await clearState(db, chatId);
-      return menuWithRegionCheck(db, chatId);
+      return menuWithRegionCheck(db, chatId, await menuAccessFor(db, chatId));
 
     case MENU_ACTION.FAQ:
       return only(chatId, faqHubReply());
+
+    /**
+     * The Sign in button — Part 5F, and the fourth door into sign-in.
+     *
+     * **It is the same door.** `requireSignIn` is the function standing in front
+     * of the four gated actions, and routing this through it rather than writing
+     * a fourth prompt is the entire safety argument for putting a sign-in
+     * control on a menu at all: a revoked chat is refused here because it is
+     * refused there, not because somebody remembered to check again.
+     *
+     * `null` means they are already signed in, which is what a stale button from
+     * before they signed in looks like. They get the menu rather than being
+     * asked to do a thing they have done — and the region question with it, on
+     * the same footing as the Main Menu button above.
+     *
+     * The resume is `MAIN`: they asked to sign in, not to do something that
+     * required it, so the menu is what they were after.
+     */
+    case MENU_ACTION.SIGN_IN:
+      return (
+        (await requireSignIn(db, chatId, MENU_ACTION.MAIN, deps))
+        ?? (await menuWithRegionCheck(db, chatId, 'signedIn'))
+      );
 
     /**
      * Deliberately behind neither gate — Q2, step 7.
@@ -1070,7 +1158,7 @@ async function routeMenu(
         ?? only(chatId, await submitDocsReply(db, deps));
 
     default:
-      return only(chatId, mainMenuReply());
+      return only(chatId, await menuReplyFor(db, chatId));
   }
 }
 
@@ -1087,8 +1175,8 @@ async function requireSignIn(
   resumeAction: string,
   deps: RouterDeps,
 ): Promise<RouterOutcome | null> {
-  const teacher = await findTeacher(db, chatId);
-  if (teacherHasAccess(teacher)) return null;
+  const access = await menuAccessFor(db, chatId);
+  if (access === 'signedIn') return null;
 
   /**
    * Access that has been taken away is not re-offered as a sign-in prompt.
@@ -1099,11 +1187,12 @@ async function requireSignIn(
    * loop that `verifyIdentifier` refuses at the end, telling them nothing about
    * why. It would also let somebody undo a deliberate revocation simply by
    * signing in again, on the one path where `bindTeacher` clears `revoked_at`.
+   *
+   * The condition itself lives in `menuAccessFor` and is deliberately not
+   * restated here — see its note. This function is now the *only* way into the
+   * prompt, which is what lets the Sign in button be safe by construction.
    */
-  const hadAccess =
-    teacher !== null &&
-    (teacher.verificationState === 'Revoked' || teacher.verificationState === 'Verified');
-  if (hadAccess) return only(chatId, accessEndedReply(deps.supportContact));
+  if (access === 'accessEnded') return only(chatId, accessEndedReply(deps.supportContact));
 
   await saveState(db, chatId, { kind: 'AwaitingIdentifier', attempts: 0, resumeAction });
   return only(chatId, signInPromptReply(deps.supportContact, await retentionPeriods(db)));
@@ -1216,7 +1305,7 @@ async function acceptPrivacyNotice(
    */
   if (!(await recordAcceptance(db, chatId, PRIVACY_NOTICE_VERSION, periods))) {
     await clearState(db, chatId);
-    return only(chatId, mainMenuReply());
+    return only(chatId, await menuReplyFor(db, chatId));
   }
 
   await clearState(db, chatId);
@@ -1427,7 +1516,7 @@ async function recordFeedback(
       ? 'Thank you — that helps us keep the answers useful.'
       : 'Thank you for saying so. Someone reviews these.\n\n' +
         'If you still need help, tap Contact Support and a person will take it on.',
-    keyboard: mainMenuKeyboard(),
+    keyboard: mainMenuKeyboard(await menuAccessFor(db, chatId)),
   });
 }
 

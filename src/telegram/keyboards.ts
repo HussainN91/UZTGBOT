@@ -55,7 +55,44 @@ export const MENU_ACTION = {
   MY_MANAGER: 'MY_MANAGER',
   /** The document forms — D24. Stage 6. */
   SUBMIT_DOCS: 'SUBMIT_DOCS',
+  /**
+   * Sign in — Part 5F, and the only menu action that exists to *start* a gate
+   * rather than to pass one.
+   *
+   * It is routed through `requireSignIn` in `router.ts`, which is the same
+   * function standing in front of the four gated actions. That is deliberate and
+   * it is the whole safety argument for this button: sign-in is reached from
+   * `/start`, from `requireSignIn`, from `verifyIdentifier` and now from here,
+   * and a revoked chat has to be refused at every one of them because
+   * `bindTeacher` clears `revoked_at`. Four doors with one rule between them
+   * cannot drift; four doors with four copies of the rule eventually will.
+   */
+  SIGN_IN: 'SIGN_IN',
 } as const;
+
+/**
+ * Which of the three main menus to draw — Part 5F.
+ *
+ * "Not signed in" turned out to be two different people, and the difference
+ * matters more than it looks. Somebody brand new should be invited to sign in.
+ * Somebody whose access a staff member has just ended must **not** be, because
+ * the invitation is a route to `bindTeacher`, which would hand them their access
+ * back for the price of typing an email address.
+ *
+ * `router.ts` decides which of these a chat is. This module only draws it.
+ */
+export type MenuAccess =
+  /** Verified, with a live roster row. The menu as it has always been. */
+  | 'signedIn'
+  /** No teacher row, or one that never got through sign-in. */
+  | 'signInOffered'
+  /** Revoked, or verified with the roster row gone. Reduced, and no way in. */
+  | 'accessEnded';
+
+const SIGN_IN_BUTTON: InlineButton = {
+  text: '🔐 Sign in',
+  callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.SIGN_IN),
+};
 
 const HOME_BUTTON: InlineButton = {
   text: '🏠 Main Menu',
@@ -86,47 +123,67 @@ function topicButton(code: string, emoji: string, label: string): InlineButton {
  *
  * Change Language is still absent, for the original reason: the translations are
  * promised, not written.
+ *
+ * **`access` is required, with no default** — Part 5F. A default would be a
+ * decision made by whichever call site forgot to think, and the wrong answer
+ * here either offers a revoked teacher a way back in or shows a stranger four
+ * buttons that stop and ask for their email address. The compiler asks instead.
+ *
+ * Hiding the four gated buttons is **in addition to** the gates behind them and
+ * never instead of them. Every one is still refused on tap by `requireSignIn`,
+ * because a keyboard sits in a teacher's scrollback for ever and a button drawn
+ * last year is as live as one drawn this morning.
  */
-export function mainMenuKeyboard(): InlineKeyboard {
-  const rows: InlineKeyboardRow[] = FAQ_TOPICS.filter((t) => t.onMainMenu).map((t) => [
-    topicButton(t.code, t.emoji, t.label),
-  ]);
+export function mainMenuKeyboard(access: MenuAccess): InlineKeyboard {
+  const rows: InlineKeyboardRow[] = [];
+
+  // First, and above the answer bank, because a recruited teacher arriving for
+  // the first time came here to be known, not to browse.
+  if (access === 'signInOffered') rows.push([SIGN_IN_BUTTON]);
+
+  for (const topic of FAQ_TOPICS.filter((t) => t.onMainMenu)) {
+    rows.push([topicButton(topic.code, topic.emoji, topic.label)]);
+  }
   rows.push([
     { text: '❓ All FAQ topics', callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.FAQ) },
   ]);
-  rows.push([
-    {
-      text: '🔍 Check My Case',
-      callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.CHECK_CASE),
-    },
-  ]);
-  rows.push([
-    {
-      text: '📄 Submit Documents',
-      callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.SUBMIT_DOCS),
-    },
-  ]);
-  rows.push([CONTACT_SUPPORT_BUTTON]);
-  /**
-   * "Ask for Priority", and **not** "🚨 Urgent Case", which is what this said
-   * until 1 August 2026.
-   *
-   * The label is the feature. A siren and the word *urgent* invite a teacher to
-   * decide whether their situation is an emergency, which is both the wrong
-   * question and one the bot cannot answer — it is not a crisis line and must
-   * never read as one. What the button actually does is ask a regional
-   * coordinator to move a case ahead of the others, so it says that.
-   *
-   * The wording also sets an expectation the system can keep. "Urgent Case"
-   * promises the case *is* urgent; asking for priority promises only that
-   * somebody will read the request, which is all that happens until they tap.
-   */
-  rows.push([
-    {
-      text: '⏫ Ask for Priority',
-      callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE),
-    },
-  ]);
+
+  if (access === 'signedIn') {
+    rows.push([
+      {
+        text: '🔍 Check My Case',
+        callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.CHECK_CASE),
+      },
+    ]);
+    rows.push([
+      {
+        text: '📄 Submit Documents',
+        callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.SUBMIT_DOCS),
+      },
+    ]);
+    rows.push([CONTACT_SUPPORT_BUTTON]);
+    /**
+     * "Ask for Priority", and **not** "🚨 Urgent Case", which is what this said
+     * until 1 August 2026.
+     *
+     * The label is the feature. A siren and the word *urgent* invite a teacher to
+     * decide whether their situation is an emergency, which is both the wrong
+     * question and one the bot cannot answer — it is not a crisis line and must
+     * never read as one. What the button actually does is ask a regional
+     * coordinator to move a case ahead of the others, so it says that.
+     *
+     * The wording also sets an expectation the system can keep. "Urgent Case"
+     * promises the case *is* urgent; asking for priority promises only that
+     * somebody will read the request, which is all that happens until they tap.
+     */
+    rows.push([
+      {
+        text: '⏫ Ask for Priority',
+        callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE),
+      },
+    ]);
+  }
+
   /**
    * Last, and below Ask for Priority, on purpose (Q2, step 7).
    *

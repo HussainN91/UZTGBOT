@@ -20,11 +20,40 @@ import {
   mainMenuKeyboard,
   privacyAcceptKeyboard,
   regionCheckKeyboard,
+  type MenuAccess,
 } from '../keyboards.js';
 import type { Reply } from '../reply.js';
 
-export function mainMenuReply(): Reply {
-  return { text: 'What would you like to do?', keyboard: mainMenuKeyboard() };
+const MENU_PROMPT = 'What would you like to do?';
+
+/**
+ * The menu, in whichever of its three forms this chat is owed — Part 5F.
+ *
+ * **The second paragraph exists because the reduced menu is short enough to
+ * mislead.** A teacher recruited by the Ministry arrives expecting to be able to
+ * report a problem; shown four FAQ shortcuts and nothing else, the honest
+ * conclusion is that this bot only answers questions, and they leave rather than
+ * sign in. The head of project asked for it in those terms on 1 August 2026.
+ *
+ * **It is not shown to a teacher whose access has ended.** Every verb in it —
+ * report, ask, send, check — is something they can no longer do, and the line
+ * would read as the bot advertising what was just taken away. They get the plain
+ * prompt and a menu with no way in; `accessEndedReply` is what explains.
+ *
+ * Still pure, and still the one thing in the bot that cannot itself fail:
+ * `access` is decided by the router, which has the database, and arrives here
+ * already answered.
+ */
+export function mainMenuReply(access: MenuAccess): Reply {
+  return {
+    text:
+      access === 'signInOffered'
+        ? `${MENU_PROMPT}\n\n` +
+          'You can read the answers below without signing in. Sign in to report a ' +
+          'problem, ask for priority, send documents, or check a case you have already sent.'
+        : MENU_PROMPT,
+    keyboard: mainMenuKeyboard(access),
+  };
 }
 
 /**
