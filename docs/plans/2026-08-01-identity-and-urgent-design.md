@@ -461,16 +461,16 @@ member still sees the case, through the bypass, exactly as before.
 
 ### What remains of Part 5H
 
-**H.1 and H.2 are built — `cb045b9` and `f67914d`. H.3 is not**, and it is the
-largest remaining piece of this part at roughly two days: `/staff` as a list of
-buttons, a menu of actions per person, and a submenu per action. It subsumes
-Feature C.
+**All three are built — `cb045b9`, `f67914d`, `0ab48f7`, all on 1 August 2026.**
+Part 5H is complete.
 
-Its design question is settled in H.3 below and should be read before starting:
-**carry the subject in the callback payload rather than building staff-facing
-conversation state.** The second is the harder thing and is not needed for
-menus — it is needed for the free-text staff actions (`/reply`, `/note`, `/due`,
-`/snooze`), and that is its own piece of work.
+**What it deliberately did not build**, and the note is for whoever wants it
+next: staff-facing conversation state. The menus do not need it, because every
+tap carries what it needs. The free-text staff actions do — `/reply`, `/note`,
+`/due` and `/snooze` all require the bot to remember *"this staff member is now
+writing a reply to case X"*, and that is why Part 5G left them as commands. It
+should be built once, deliberately, as its own piece of work, and not smuggled in
+behind a button.
 
 ### Two faults, found by running it
 
@@ -554,8 +554,62 @@ because "what am I allowed to do" and "may I do this" were two lists.
            [ Accommodation ]  [ All ]  [ None ]
 ```
 
+> ### ✅ BUILT — 1 August 2026, commit `0ab48f7`
+>
+> Roughly the two days estimated. **Part 5H is complete**, and with it everything
+> the head of project asked for on 1 August.
+
 **This subsumes Feature C** (interactive `/staff_add`), which was the same idea
-for one command. Build them together.
+for one command.
+
+### ⚠️ A gap found before the buttons could be built
+
+**A staff member's queue could only ever be set once, by `/staff_add`.** There
+was no way to move somebody from Visa to Accommodation short of a database
+session over the SSH tunnel — even though `/staff_role` and `/staff_region` have
+existed since Stage 4 for the other two axes of the very same model.
+
+It went unnoticed because until Part 5H.1 a queue only decided what somebody
+*saw*. It now decides what they are **given**, so a stale queue no longer means
+reading a list you do not need — it means work routed to you, sitting there with
+your name on it.
+
+`setStaffQueue` and `/staff_queue` were built first, and the queue button drives
+them. `/staff_queue` deliberately does **not** reactivate a deactivated member,
+which is the one place it differs from `setStaffRole`: `/staff_role` is the
+documented way back from `/staff_remove`, and a queue change quietly restoring
+access would be a second, undocumented door into being staff again.
+
+**`/staff_region` was also missing from the `staff.manage` capability listing**
+that `/whoami` prints — the one list in that file maintained by hand rather than
+derived. Both are in it now.
+
+### The property that matters, and the two tests that hold it
+
+**Nothing in the menu decides anything.** Every acting tap is turned back into
+the typed command it is equivalent to and handed to `routeStaffCommand`. So
+`/staff_role` remains the only place that knows a rank may not come off the last
+active System member, and `/staff_remove` the only place that refuses
+self-removal.
+
+Two tests **tap those buttons** and assert the command's own refusal comes back.
+If the menu ever grows its own path to `setStaffRole`, those are what fail.
+
+### Two things the build settled
+
+**The dispatcher owns the tap, not the module that draws the menus.** `staff.ts`
+cannot call `routeStaffCommand` — the dispatcher already imports its commands, so
+it would be a cycle. **The cycle was telling the truth**: `staff.ts` decides what
+should happen and `commands/index.ts` carries it out, which is also what
+guarantees the acting taps go through the identical function a typed command
+does.
+
+**Regions toggle rather than choose**, because they are a list rather than one
+value. It is the only menu here built up over several taps, and each tap is still
+a complete instruction on its own. A region name comes from the spreadsheet
+rather than from this repository, so unlike every other payload its length is not
+ours to guarantee — the region keyboard skips a button that will not fit, exactly
+as the FAQ listing does with an over-long answer code.
 
 **The real cost is not the menus.** Conversation state is a *teacher-facing*
 machine today — `AwaitingIdentifier`, `AwaitingCaseDetail`, `AwaitingCaseTopic`.
@@ -996,11 +1050,9 @@ conversation state and belongs with 5H.3, not before it.
    plan proposed are **not** built and mostly will not be: "take it" was ruled
    out by the head of project (Part 5H.2), and close, reopen and mark-urgent are
    worth revisiting only alongside 5H's menus rather than as a separate pass
-5. **Part 5H — staff management by button, and automatic ownership.** Moved ahead
-   of Feature A on 1 August by Part 9.1.A. **H.1 ✅ built at `cb045b9`, H.2 ✅
-   built at `f67914d`.** What remains is **H.3 — staff management by button**,
-   ~2 days and the largest remaining piece. Subsumes Feature C. **Nothing blocks
-   it**; its one design question is answered in Part 5H.3
+5. ~~**Part 5H — staff management by button, and automatic ownership**~~ — ✅
+   **COMPLETE.** H.1 `cb045b9`, H.2 `f67914d`, H.3 `0ab48f7`, all 1 August.
+   Feature C is subsumed and needs no separate step
 6. **The privacy notice, settled** — the head of project's, not engineering's,
    and it gates Feature A. Part 9.1.E. Runs in parallel with step 5; it needs no
    engineering time at all

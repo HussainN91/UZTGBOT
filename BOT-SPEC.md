@@ -556,7 +556,7 @@ was the only thing that ever set an owner.
 | `urgent.issue` — `/urgent_pending`, the confirm-urgent button | | ✅ | ✅ | ✅ | ✅ |
 | `teacher.region` — `/region` `/regions` | | | ✅ | ✅ | ✅ |
 | `teacher.revoke` — `/revoke` `/restore` | | | | ✅ | ✅ |
-| `staff.manage` — `/staff` `/staff_add` `/staff_role` `/staff_region` `/staff_remove` | | | | | ✅ |
+| `staff.manage` — `/staff` `/staff_add` `/staff_role` **`/staff_queue`** `/staff_region` `/staff_remove`, and the staff menu buttons | | | | | ✅ |
 | `maintenance` — `/maintenance` `/retention` | | | | | ✅ |
 | `teacher.forget` — `/forget` | | | | | ✅ |
 | `announce` — `/announce` `/announce_send` `/announce_cancel` `/announcements` | | | | ✅ | ✅ |
@@ -694,6 +694,17 @@ names, so the rename costs nothing now and could not be made cheaply later.
 - **`/staff_role <chat id> <rank>`** — changes a rank, and **reactivates** a
   deactivated member, which is the one obvious way back from `/staff_remove`. It
   refuses to demote the last active System member (§6.3). The target is notified.
+- **`/staff_queue <chat id> <queue>`** — changes which kinds of case somebody
+  works, and **does not reactivate**, for `/staff_region`'s reason below. The
+  target is notified, because their `/cases` list changes underneath them.
+  > **Added 1 August 2026 with Part 5H.3, and it closed the same shape of gap the
+  > note below describes.** A queue was written by `/staff_add` and by nothing
+  > else, so it could be set once and never changed — the third axis of the
+  > visibility model with no writer, while the other two had one. It went
+  > unnoticed while a queue only decided what somebody *saw*. Since automatic
+  > assignment it decides what they are **given**, so a stale queue no longer
+  > means reading a list you do not need; it means work routed to you and sitting
+  > there under your name.
 - **`/staff_region <chat id> <regions|clear>`** — changes which regions somebody
   covers, and **does not reactivate**, unlike `/staff_role` one line above. Moving
   where a person works is not a decision to bring them back, and restoring access
@@ -776,7 +787,7 @@ and no command behind them.
 | `/revoke` | `/revoke <chat id>` | `teacher.revoke` |
 | `/restore` | `/restore <chat id>` | `teacher.revoke` — the same rank as `/revoke`, deliberately |
 | `/urgent_pending` | `/urgent_pending` | `urgent.issue` — priority requests nobody has decided. Deliberately **not** scoped to your queue and regions: a supervisor filtered to their own region cannot see that another region has stopped answering |
-| `/staff` `/staff_add` `/staff_role` `/staff_region` `/staff_remove` | §6.4 | `staff.manage` |
+| `/staff` `/staff_add` `/staff_role` `/staff_queue` `/staff_region` `/staff_remove` | §6.4 | `staff.manage` |
 | `/maintenance` | `/maintenance on\|off` · `/maintenance` to ask | `maintenance` |
 | `/retention` | `/retention` to read all three · `/retention case\|urgent\|message <days>` | `maintenance`, which floors at **System** — a period governs deletion with no undo. With no argument it prints the periods **and the notice's own retention paragraph**, rather than describing them in its own words |
 | `/forget` | `/forget <chat id> FORGET` | `teacher.forget`, floored at **System**. The confirmation word is typed, not tapped |
@@ -1262,6 +1273,39 @@ the *acceptance*.
 Both are generated from `FAQ_TOPICS`. Adding a topic there makes it appear in the
 hub, become valid in `isKnownCategory_`, and route correctly — no other edit.
 
+### Staff management by button — Part 5H.3, 1 August 2026
+
+`/staff` lists everybody as text **and** puts a button under each person. The
+journey is three taps:
+
+```
+/staff  →  [ Nodira K. — Lead · Visa ]      choose a person
+        →  [ 🎖 Change rank ] [ 📁 Change queue ]
+           [ 📍 Change regions ] [ 🚫 Remove from staff ]
+        →  [ Observer ] [ Support ] [ ✅ Lead ] [ Program ] [ System ]
+```
+
+A tick marks what they hold now. **Regions toggle rather than choose**, because
+they are a list — a tap adds one they do not hold and removes one they do, and
+removing the last means every region.
+
+**Nothing in the menu decides anything.** An acting tap is turned back into the
+typed command it is equivalent to and run through the ordinary dispatcher, so
+every refusal, notice and audit row comes from the one place that has ever had
+them: the last active System member keeps their rank, nobody removes themselves,
+and the person whose access changed is told. **A tap that changes a rank is not
+merely as authorised as `/staff_role`; it is `/staff_role`.**
+
+**The subject travels in the button, not in the bot's memory.** There is no
+staff-facing conversation state in this system and this part deliberately did not
+add one — a menu left for an hour would otherwise act on whoever was chosen an
+hour ago. Every tap is a complete instruction, re-authorised and re-read from the
+database when it arrives.
+
+**Deactivate and reactivate share one slot**, showing opposite words, because
+they are one question. `/staff` still lists deactivated rows so they can be
+reached.
+
 ### 8.3 Callback protocol
 
 Every prefix in this table changed in the rebuild — the ones below are the ones
@@ -1272,6 +1316,7 @@ against the byte ceiling with real values rather than trusting an estimate.
 |---|---|
 | `MENU:MAIN` / `MENU:FAQ` | Main menu / topic hub |
 | `MENU:<ACTION>` | `CHECK_CASE`, `CONTACT_SUPPORT`, `URGENT_CASE`, `SUBMIT_DOCS`, `MY_MANAGER` |
+| `SM:<chat id>[:<action>[:<value>]]` | Staff management by button (§8.2). Three depths in one prefix: a person, an action, a value. Re-authorised on every tap, and an acting tap runs the equivalent typed command rather than a copy of it |
 | `MENU:SIGN_IN` | Start sign-in — routed through the same `requireSignIn` that guards the gated actions, so a revoked chat is refused here too (§8.2) |
 | `CAT:<CODE>` | Enter an FAQ topic (`VISA`, `LIVING`, …) |
 | `PG:<CODE>:<page>` | Paged topic browsing |
