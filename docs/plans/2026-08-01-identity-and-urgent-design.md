@@ -413,10 +413,80 @@ owner has somebody accountable for it, and `/mycases` becomes the list a staff
 member works from rather than a permanently empty command.
 
 **And it raises the question that stopped this being built in Part 5D: who owns
-it when two people hold the same queue and region?** That is not a technical
-problem, it is a staffing one, and it needs an answer before code. The options
-are round-robin, fewest-open-cases, or a named default per queue-and-region.
-**Needs the head of project's answer.**
+it when two people hold the same queue and region?**
+
+> ### ✅ ANSWERED 1 August 2026 — **the one with the fewest open cases.**
+>
+> **✅ BUILT the same day at `cb045b9`**, in `src/staff/assignment.ts`. About half a
+> day rather than the day and a half estimated, because the head of project was
+> right that most of it already existed: `staffCovering` has answered "who can
+> work this case" since Feature B, and it is the inverse of the visibility
+> predicate rather than a second copy of it. The only new query is a count.
+
+**Open cases only.** The question is who has capacity now, not who has ever been
+busy — counting finished work would push new cases away from whoever has been
+clearing theirs, which is exactly backwards.
+
+**Ties are broken by who has waited longest for work**, and then by id. Both
+steps are deliberate. Without the first, the lowest id wins every tie and keeps
+taking cases until it is no longer tied, which on a two-person queue is a queue
+with one person on it. Without the second, the answer would depend on how
+PostgreSQL happened to group the rows — and `createCase` can be retried, because
+Telegram resends anything it thinks failed, so a picker that answered differently
+on two runs would put one case in two people's names depending on which attempt
+committed.
+
+**Candidates must hold `case.update`**, which floors at Support — the capability
+for *working* a case. Deliberately not `case.assign`, which H.2 raises to
+Program: assigning is a senior action, being assigned is what every ordinary
+staff member is for. **An Observer may read a case and may never own one.**
+
+### ⚠️ The System bypass, and how it resolved Part 9.1.B
+
+`staffCovering` returns every active System member **unconditionally**. That is
+the bypass, it is correct, and it is why a case in a region nobody covers still
+reaches somebody. **Reused unchanged for assignment it would have been quietly
+wrong**: every case in the country would have been handed to a System
+administrator, who is the person of last resort rather than the person who works
+the queue.
+
+So `staffWorking` is `staffCovering` minus anybody who is only in the set through
+the bypass, and **the answer is allowed to be nobody**.
+
+**That is what saves `/cases unassigned`**, which Part 9.1.B flagged as being
+emptied by construction. The list does not die — it gets sharper. It used to mean
+*nobody has picked this up*; it now means **no active staff member holds this
+queue in this region**, which is a staffing gap somebody has to close. A System
+member still sees the case, through the bypass, exactly as before.
+
+### What remains of Part 5H
+
+**H.1 is built. H.2 and H.3 are not**, and H.2 is now unblocked — its caution was
+that raising `case.assign` to Program before automatic assignment existed would
+leave almost every case unowned. Automatic assignment exists, so the floor can
+move. It is a one-line change in `src/staff/roles.ts` plus its ripples: the
+`/assign` tests (which run as a Lead and would need a Program actor), the
+capability table in `BOT-SPEC.md` §12, and `roles.test.ts`.
+
+### Two faults, found by running it
+
+**1. `max(created_at)` typed as a `Date` compiles perfectly and throws at run
+time** — drizzle installs its own pg type parsers, so a `timestamptz` selected
+through raw SQL arrives as a string. It is the first of the three traps written
+down in `CLAUDE.md`, and it was walked into while writing the comment warning
+about its sibling two fields below. The conversion is now done in PostgreSQL
+(`extract(epoch …)::float8`), where there is no second place to forget it.
+
+**2. `urgent.integration.test.ts` never truncated `staff`**, and a row left
+behind by `queries.integration.test.ts` leaked into it. Harmless for as long as
+nothing on that path read the staff table — and the moment automatic assignment
+made staff rows load-bearing inside `createCase`, the leaked row was chosen as
+the owner of a case that file believed nobody covered. A test asserting "no
+owner" failed against a person it had never heard of.
+
+**Worth generalising: a feature that starts reading a table can break every test
+file that does not clean it.** The other integration files truncate `staff`
+already; this one predated any need to.
 
 ### H.2 — ✅ Decided: nobody "takes" a case except Program and System
 
@@ -773,10 +843,9 @@ work.** Ordered by how much they cost to leave.
    `case.assign` floor is lowered**~~ — ✅ **answered 1 August: neither.** Nobody
    takes a case. Assignment is restricted to Program and System, and the system
    assigns automatically. See Part 5H.2.
-7. **Part 5H.1: who owns a case when two staff hold the same queue and region?**
-   Round-robin, fewest open cases, or a named default per queue-and-region. This
-   is a staffing question rather than a technical one, and **automatic assignment
-   cannot be built without an answer.** It is the only thing blocking Part 5H.
+7. ~~**Part 5H.1: who owns a case when two staff hold the same queue and
+   region?**~~ — ✅ **answered 1 August: the one with the fewest open cases**, and
+   built the same day. See Part 5H.1.
 
 # PART 9 — Execution order, and what breaks if it is ignored
 
@@ -896,13 +965,14 @@ conversation state and belongs with 5H.3, not before it.
    plan proposed are **not** built and mostly will not be: "take it" was ruled
    out by the head of project (Part 5H.2), and close, reopen and mark-urgent are
    worth revisiting only alongside 5H's menus rather than as a separate pass
-5. **Part 5H — staff management by button, and automatic ownership.** ~3.5 days.
-   **Moved ahead of Feature A on 1 August** — Part 9.1.A: both need "who is
-   responsible for this region" and building them the other way round leaves the
-   bot holding two answers to it. Also the only remaining part no teacher sees,
-   so it is the safe thing to build while the privacy notice is settled.
-   **Blocked on one answer:** who owns a case when two staff hold the same queue
-   and region
+5. **Part 5H — staff management by button, and automatic ownership.** Moved ahead
+   of Feature A on 1 August by Part 9.1.A. **H.1, automatic ownership, is ✅ built
+   at `cb045b9`.** What remains:
+   - **H.2** — raise `case.assign` from Lead to Program. **Now unblocked**, since
+     its caution was that the floor must not move before automatic assignment
+     existed. One line plus its ripples; half a day at most
+   - **H.3** — staff management by button. ~2 days, and the largest remaining
+     piece. Subsumes Feature C
 6. **The privacy notice, settled** — the head of project's, not engineering's,
    and it gates Feature A. Part 9.1.E. Runs in parallel with step 5; it needs no
    engineering time at all
