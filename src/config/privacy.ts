@@ -29,10 +29,17 @@ import type { RetentionPeriods } from './retention.js';
  * the whole notice is the mistake that would let a lengthened period go out
  * without anybody being asked (R17, R20).
  *
- * `2026-07-30.1` is the stage 5 rewrite: the retention paragraph now states real
- * periods, which is what the previous wording promised would happen.
+ * `2026-07-30.1` was the stage 5 rewrite: the retention paragraph began stating
+ * real periods, which is what the wording before it promised would happen.
+ *
+ * `2026-08-01.1` names identity disputes, ahead of Feature A building them. Two
+ * sentences, approved by the head of project on 1 August 2026, and deliberately
+ * made **before** the feature: a wording change asks every teacher who has
+ * already signed in to accept again, and doing it now costs one round from a
+ * pilot of eight rather than one round from everybody after launch — on top of
+ * the round the change would have needed anyway.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-07-30.1';
+export const PRIVACY_NOTICE_VERSION = '2026-08-01.1';
 
 /**
  * One line of the retention paragraph.
@@ -96,12 +103,37 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
     '*Who can see it*',
     'Ministry support staff working your case. It is not shared outside the',
     'Ministry, and it is held on a server located in Uzbekistan.',
+    /**
+     * Added 1 August 2026, before Feature A rather than after it.
+     *
+     * A dispute over who an account belongs to is **not a case**, so "staff
+     * working your case" did not cover it — and what staff are shown to settle
+     * one is the other chat's Telegram id and display name, which is one
+     * teacher's data being read by somebody working on another's claim.
+     *
+     * Written before the feature exists, and that is the whole point of the
+     * timing: a wording change asks every teacher who has already signed in to
+     * accept again, which is one round now against one round afterwards on top
+     * of the one this would have needed anyway.
+     */
+    'If someone else tries to sign in as you, our staff will see both accounts’',
+    'Telegram details so they can decide which account is yours.',
     '',
     '*How long it is kept*',
     ...retentionParagraph(periods),
     '',
-    'A record of decisions our staff make about access — not your messages — is',
-    'kept permanently, so we can always answer who did what.',
+    /**
+     * "including any dispute over who an account belongs to" — added 1 August
+     * 2026 with the sentence above.
+     *
+     * The retention paragraph states three periods, and a dispute record is none
+     * of them. This line nearly covered it already, since a dispute *is* a
+     * decision about access — but "nearly" is not a thing to leave in a legal
+     * statement, and naming it costs eleven words.
+     */
+    'A record of decisions our staff make about access — including any dispute',
+    'over who an account belongs to, and not your messages — is kept permanently,',
+    'so we can always answer who did what.',
     '',
     '*Access and removal*',
     `To ask what is held about you, or to ask for it to be removed, contact ${supportContact}.`,
