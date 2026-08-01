@@ -147,6 +147,27 @@ export function formatTashkent(when: Date): string {
  * `updated_at`, `closed_at`, the dedup window — is written by `now()` inside
  * PostgreSQL and never by this process.
  */
+/**
+ * The date alone, with no time on it — Part 5G, and the head of project's
+ * choice for a list row.
+ *
+ * `formatTashkent` carries the time because the places that use it are answering
+ * "exactly when did this happen", and a case that moved twice this morning needs
+ * the hours. A list row is answering "how long has this been sitting there",
+ * where the minutes are noise across twenty rows.
+ *
+ * Same timezone as everything else a staff member reads. A row rendered in UTC
+ * would put a case filed on Tuesday evening in Tashkent under Wednesday.
+ */
+export function formatDateTashkent(when: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIMEZONE,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(when);
+}
+
 export function ageInDays(since: Date): string {
   const days = Math.floor((Date.now() - since.getTime()) / 86_400_000);
   if (days <= 0) return 'today';

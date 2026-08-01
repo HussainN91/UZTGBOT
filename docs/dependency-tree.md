@@ -108,6 +108,7 @@ Erased at compile time. These may point up the layers without it being a violati
 - src/telegram/bot.ts → src/telegram/keyboards.ts
 - src/telegram/commands/announce.integration.test.ts → src/db/index.ts
 - src/telegram/commands/cases.integration.test.ts → src/db/index.ts
+- src/telegram/commands/cases.ts → src/telegram/keyboards.ts
 - src/telegram/commands/cases.ts → src/telegram/router.ts
 - src/telegram/commands/context.ts → src/db/index.ts
 - src/telegram/commands/context.ts → src/staff/roles.ts
@@ -428,7 +429,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/telegram/callback-data.ts
 
 - imports: src/config/constants.ts
-- imported by: src/cases/notify.ts, src/sheets/parse.ts, src/telegram/keyboards.ts, src/telegram/router.ts
+- imported by: src/cases/notify.ts, src/sheets/parse.ts, src/telegram/commands/cases.ts, src/telegram/keyboards.ts, src/telegram/router.ts
 
 ### src/telegram/chat-gate.ts
 
@@ -442,7 +443,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/telegram/commands/cases.ts
 
-- imports: src/config/constants.ts, src/cases/importance.ts, src/cases/notes.ts, src/cases/queries.ts, src/cases/service.ts, src/cases/status.ts, src/log/audit.ts, src/staff/roles.ts, src/staff/repository.ts, src/teachers/repository.ts, src/telegram/router.ts *(type only)*, src/telegram/commands/context.ts, src/telegram/commands/parse.ts
+- imports: src/config/constants.ts, src/telegram/callback-data.ts, src/telegram/keyboards.ts *(type only)*, src/cases/importance.ts, src/cases/notes.ts, src/cases/queries.ts, src/cases/service.ts, src/cases/status.ts, src/log/audit.ts, src/staff/roles.ts, src/staff/repository.ts, src/teachers/repository.ts, src/telegram/router.ts *(type only)*, src/telegram/commands/context.ts, src/telegram/commands/parse.ts
 - imported by: src/telegram/commands/index.ts
 
 ### src/telegram/commands/context.ts
@@ -498,7 +499,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/telegram/keyboards.ts
 
 - imports: src/config/constants.ts, src/telegram/callback-data.ts
-- imported by: src/telegram/bot.ts, src/telegram/commands/context.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/handlers/menu.ts, src/telegram/handlers/urgent.ts, src/telegram/reply.ts, src/telegram/router.ts
+- imported by: src/telegram/bot.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/handlers/menu.ts, src/telegram/handlers/urgent.ts, src/telegram/reply.ts, src/telegram/router.ts
 
 ### src/telegram/reply.ts
 

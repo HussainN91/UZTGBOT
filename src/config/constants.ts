@@ -272,6 +272,21 @@ export const CHECK_MY_CASE_CAP = 10;
 export const STAFF_CASE_LIST_CAP = 20;
 
 /**
+ * How many of those rows get a button under them — Part 5G.
+ *
+ * **Deliberately well below `STAFF_CASE_LIST_CAP`.** Twenty rows of buttons is a
+ * wall a staff member has to scroll past to reach anything else in their chat,
+ * and the buttons are a convenience rather than the list: the text is still
+ * there to scan, and `/case <reference>` still works for everything below the
+ * cut. Eight covers the top of a queue, which is where somebody is working.
+ *
+ * The text list is **not** shortened to match. A row without a button is still a
+ * row, and hiding work because it did not fit on a keyboard would be the same
+ * fault as a list that silently loses its tail.
+ */
+export const CASE_LIST_BUTTON_CAP = 8;
+
+/**
  * The most staff members one new case may notify.
  *
  * A latency bound, not a policy. `deliver` sends sequentially inside the webhook

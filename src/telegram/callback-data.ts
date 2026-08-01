@@ -99,6 +99,26 @@ export const CALLBACK = {
    * measures it with real values rather than trusting the arithmetic here.
    */
   URGENT_CONFIRM: 'UC',
+  /**
+   * "Open this case", e.g. `CO:VISA-2026-00311` — Part 5G.
+   *
+   * Every list command printed plain text and no buttons, so reading a case
+   * meant retyping a nineteen-character reference by hand out of a list. This is
+   * the button under each row.
+   *
+   * **It is routed by synthesising `/case <reference>` and handing it to
+   * `routeStaffCommand`**, rather than by a handler of its own. The button is
+   * therefore not merely *as* authorized as the command — it **is** the command,
+   * and it cannot acquire a different answer to "may this person see this case"
+   * because there is no second place for that answer to be computed. The scope
+   * check, the refusal wording, the silence for a chat with no staff row and the
+   * `messages` row recording who read which case all come free and stay in step.
+   *
+   * `CO:CONTRACT-2026-99999` is 22 bytes against the 64-byte limit, and that is
+   * the longest reference this system can build. A test measures it with a real
+   * value rather than trusting the arithmetic here.
+   */
+  CASE_OPEN: 'CO',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];

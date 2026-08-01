@@ -19,6 +19,8 @@ import { clearSettingsCache } from '../../config/settings.js';
 import { withChatLock } from '../../conversation/lock.js';
 import type { Database } from '../../db/index.js';
 import * as schema from '../../db/schema.js';
+import { CALLBACK, byteLength, encodeCallback } from '../callback-data.js';
+import { CALLBACK_DATA_MAX_BYTES, CASE_LIST_BUTTON_CAP } from '../../config/constants.js';
 import { route, type InboundUpdate, type RouterOutcome } from '../router.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
@@ -80,25 +82,44 @@ describe.skipIf(!TEST_DATABASE_URL)('the case-reading commands', () => {
     detail?: string;
     publicUpdate?: string;
     updatedDaysAgo?: number;
+    createdDaysAgo?: number;
   }): Promise<void> => {
     const updatedAt =
       fields.updatedDaysAgo === undefined
         ? sql`now()`
         : sql`now() - make_interval(days => ${fields.updatedDaysAgo})`;
+    const createdAt =
+      fields.createdDaysAgo === undefined
+        ? sql`now()`
+        : sql`now() - make_interval(days => ${fields.createdDaysAgo})`;
 
     await db.execute(sql`
       INSERT INTO cases (reference, category, teacher_chat_id, status, importance,
-                         owner, detail, public_update, updated_at)
+                         owner, detail, public_update, updated_at, created_at)
       VALUES (
         ${fields.reference}, ${fields.category}, ${fields.teacher},
         ${fields.status ?? 'New'}::case_status,
         ${fields.importance ?? 'Normal'}::case_importance,
         ${fields.owner ?? null},
         ${fields.detail ?? ''}, ${fields.publicUpdate ?? ''},
-        ${updatedAt}
+        ${updatedAt}, ${createdAt}
       )
     `);
   };
+
+  /** What a staff member is shown, and what they can tap on it. */
+  const buttonsOn = async (text: string, chatId = VISA_TASHKENT): Promise<string[]> => {
+    const outcome = await send({ chatId, kind: 'text', text });
+    return (outcome.messages[0]?.keyboard ?? []).flatMap((row) =>
+      row.map((b) => b.callback_data),
+    );
+  };
+
+  const tap = async (data: string, chatId = VISA_TASHKENT): Promise<string> =>
+    (await send({ chatId, kind: 'callback', text: data })).messages[0]?.text ?? '';
+
+  const openButtonFor = (reference: string): string =>
+    encodeCallback(CALLBACK.CASE_OPEN, reference);
 
   beforeEach(async () => {
     pool ??= new pg.Pool({ connectionString: TEST_DATABASE_URL });
@@ -221,6 +242,163 @@ describe.skipIf(!TEST_DATABASE_URL)('the case-reading commands', () => {
 
     it('says plainly when there is nothing, rather than showing an empty heading', async () => {
       expect(await run('/cases')).toMatch(/nothing is open/i);
+    });
+  });
+
+  /**
+   * Part 5G. Every list command printed plain text and no buttons, so reading a
+   * case meant retyping a nineteen-character reference by hand out of a list.
+   *
+   * Newly possible because Feature B built the staff-callback machinery: a
+   * prefix, a staff authorization path, and a scope check through `findCase`.
+   */
+  describe('buttons on the lists', () => {
+    it('puts one button per case under the list, carrying the reference', async () => {
+      await givenCase({ reference: 'VISA-2026-00001', teacher: TASHKENT_TEACHER, category: CASE_CATEGORY.VISA });
+      await givenCase({ reference: 'VISA-2026-00002', teacher: TASHKENT_TEACHER, category: CASE_CATEGORY.VISA });
+
+      expect(await buttonsOn('/cases')).toEqual([
+        openButtonFor('VISA-2026-00002'),
+        openButtonFor('VISA-2026-00001'),
+      ]);
+    });
+
+    it('offers no buttons when the list is empty', async () => {
+      // A keyboard under "nothing is open" is a row of nothing to tap.
+      expect(await buttonsOn('/cases')).toEqual([]);
+    });
+
+    it('opens the case, showing exactly what /case shows', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00001',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+        detail: VISA_DETAIL,
+      });
+
+      const tapped = await tap(openButtonFor('VISA-2026-00001'));
+      const typed = await run('/case VISA-2026-00001');
+
+      expect(tapped).toBe(typed);
+      expect(tapped).toContain(VISA_DETAIL);
+    });
+
+    it('applies the visibility scope on the tap, not only on the list', async () => {
+      /**
+       * The button carries a bare reference and it arrives from the network, so
+       * it can be hand-crafted — and a real one sits in a scrollback for ever
+       * while the person who holds it can be moved to another queue tomorrow.
+       * "No such case" and "not yours" stay the same answer, because confirming
+       * a reference exists tells the asker a teacher filed something.
+       */
+      await givenCase({ reference: 'ACCOM-2026-00001', teacher: TASHKENT_TEACHER, category: CASE_CATEGORY.ACCOMMODATION });
+
+      expect(await tap(openButtonFor('ACCOM-2026-00001'))).toContain('that you can see');
+    });
+
+    it('answers a tap from somebody with no staff row with the menu, not a refusal', async () => {
+      // The dispatcher's rule: an answer saying "you are not staff" tells a
+      // stranger that the button they guessed at is real.
+      await givenCase({ reference: 'VISA-2026-00001', teacher: TASHKENT_TEACHER, category: CASE_CATEGORY.VISA });
+
+      expect(await tap(openButtonFor('VISA-2026-00001'), TASHKENT_TEACHER)).toContain(
+        'What would you like to do?',
+      );
+    });
+
+    it('caps the buttons well below the text list, which still shows everything', async () => {
+      /**
+       * `STAFF_CASE_LIST_CAP` is 20. Twenty rows of buttons is a wall, and the
+       * text list is still there to scan — so the buttons cover the top of the
+       * list and the rest is read and typed as before.
+       */
+      for (let i = 1; i <= CASE_LIST_BUTTON_CAP + 4; i++) {
+        await givenCase({
+          reference: `VISA-2026-${String(i).padStart(5, '0')}`,
+          teacher: TASHKENT_TEACHER,
+          category: CASE_CATEGORY.VISA,
+        });
+      }
+
+      const shown = await run('/cases');
+      const taps = await buttonsOn('/cases');
+
+      expect(taps).toHaveLength(CASE_LIST_BUTTON_CAP);
+      expect(shown).toContain(`VISA-2026-${String(CASE_LIST_BUTTON_CAP + 4).padStart(5, '0')}`);
+      expect(shown).toContain('VISA-2026-00001');
+    });
+
+    it('carries the longest reference this bot can build inside the byte ceiling', () => {
+      // A reference is ~19 bytes and the limit is 64. Measured with a real value
+      // rather than trusted to arithmetic, as every other payload here is.
+      const longest = openButtonFor('CONTRACT-2026-99999');
+      expect(byteLength(longest)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+    });
+
+    it('puts them under /mycases, /urgent and /search as well', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00001',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+        owner: VISA_TASHKENT,
+        status: 'Escalated',
+        detail: 'the embassy appointment was cancelled',
+      });
+
+      expect(await buttonsOn('/mycases')).toContain(openButtonFor('VISA-2026-00001'));
+      expect(await buttonsOn('/urgent')).toContain(openButtonFor('VISA-2026-00001'));
+      expect(await buttonsOn('/search embassy')).toContain(openButtonFor('VISA-2026-00001'));
+    });
+  });
+
+  /**
+   * Part 5G, and both answers are the head of project's — 1 August 2026.
+   * See Part 5G of the plan of record for the reasoning behind each.
+   */
+  describe('what a list row says', () => {
+    it('gives the submitted date, not the age', async () => {
+      // "12 days" is what makes somebody act and a date says when. The date was
+      // chosen knowingly; if old cases stop standing out the answer is a marker
+      // on the row, not reopening this.
+      await givenCase({
+        reference: 'VISA-2026-00001',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+        createdDaysAgo: 20,
+      });
+
+      const body = await run('/cases');
+
+      expect(body).toMatch(/submitted \d{2} \w{3} \d{4}/);
+      expect(body).not.toContain('20 days');
+    });
+
+    it('never names the teacher, which /case still does', async () => {
+      /**
+       * The row is the reader's own queue and their name is not their words —
+       * but putting it here parks every teacher's name permanently in the chat
+       * history of everybody who runs /cases, and opening the case is one tap.
+       */
+      await givenCase({ reference: 'VISA-2026-00001', teacher: TASHKENT_TEACHER, category: CASE_CATEGORY.VISA });
+
+      expect(await run('/cases')).not.toContain('Tashkent Teacher');
+      expect(await run('/case VISA-2026-00001')).toContain('Tashkent Teacher');
+    });
+
+    it('still says the region, the status and whether anybody owns it', async () => {
+      // Losing the age must not quietly lose the rest of the row with it.
+      await givenCase({
+        reference: 'VISA-2026-00001',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+        status: 'Under review',
+      });
+
+      const body = await run('/cases');
+
+      expect(body).toContain('Tashkent');
+      expect(body).toContain('Under review');
+      expect(body).toContain('unassigned');
     });
   });
 

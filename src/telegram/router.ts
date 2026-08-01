@@ -948,6 +948,34 @@ async function routeCallback(
     case CALLBACK.URGENT_CONFIRM:
       return confirmUrgent(db, update.chatId, first, state, deps);
 
+    /**
+     * "Open this case" from a list — Part 5G.
+     *
+     * **It is handed to the command dispatcher as `/case <reference>`, and that
+     * is the whole implementation.** Not a shortcut: the button is not merely
+     * *as* authorized as the command, it **is** the command, so there is no
+     * second place for "may this person see this case" to be computed and
+     * therefore no second place for it to drift. The active-staff check, the
+     * `case.view` capability, the scope through `findCase`, the identical answer
+     * for "no such case" and "not yours", and the `messages` row recording who
+     * read which case all come free.
+     *
+     * `null` means the tapper has no active staff row. They get the menu, the
+     * same answer an unreadable payload gets and for `confirmUrgent`'s reason:
+     * a reply saying "you are not staff" tells a stranger that the button they
+     * guessed at is real.
+     *
+     * `first` is untrusted — it arrives from the network and can be
+     * hand-crafted. It is not validated here because it does not need to be:
+     * `findCase` takes it as a value to match, never as a lookup key, and an
+     * unmatched reference is an ordinary "no case you can see".
+     */
+    case CALLBACK.CASE_OPEN:
+      return (
+        (await routeStaffCommand(db, update.chatId, `/case ${first}`, state, deps))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
     default:
       return only(update.chatId, await menuReplyFor(db, update.chatId));
   }
