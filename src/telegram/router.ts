@@ -59,7 +59,12 @@ import type { Alert } from '../sync/alerts.js';
 import { findCase } from '../cases/queries.js';
 import { CAPABILITY, can, floorFor } from '../staff/roles.js';
 import { CALLBACK, decodeCallback } from './callback-data.js';
-import { STAFF_DENIED, routeStaffCommand, staffHelpSection } from './commands/index.js';
+import {
+  STAFF_DENIED,
+  routeStaffCommand,
+  routeStaffMenu,
+  staffHelpSection,
+} from './commands/index.js';
 import { scopeOf } from './commands/context.js';
 import {
   answerReply,
@@ -973,6 +978,21 @@ async function routeCallback(
     case CALLBACK.CASE_OPEN:
       return (
         (await routeStaffCommand(db, update.chatId, `/case ${first}`, state, deps))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
+    /**
+     * Staff management by button — Part 5H.3.
+     *
+     * The whole payload is handed over rather than picked apart here: this is a
+     * three-level menu and the router has no business knowing its levels. What
+     * it does know is the same thing it knows about every other staff tap —
+     * `null` means the tapper is not staff, and gets the ordinary menu rather
+     * than an answer confirming the button is real.
+     */
+    case CALLBACK.STAFF_MENU:
+      return (
+        (await routeStaffMenu(db, update.chatId, decoded.parts, state, deps))
         ?? only(update.chatId, await menuReplyFor(db, update.chatId))
       );
 

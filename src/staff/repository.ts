@@ -204,6 +204,46 @@ export async function setStaffRegions(
   return true;
 }
 
+/**
+ * Change which kinds of case somebody works — Part 5H.3, and it fills a gap.
+ *
+ * **Until 1 August 2026 a queue could only ever be set once**, by `/staff_add`.
+ * There was no way to move somebody from Visa to Accommodation short of a
+ * database session, which meant the one axis of the visibility model most likely
+ * to change with a staffing decision was the one axis nothing could change.
+ * `setStaffRegions` and `setStaffRole` have existed since Stage 4; this is their
+ * missing third.
+ *
+ * It is more load-bearing now than it would have been then. A queue decides who
+ * a case is *assigned* to (Part 5H.1), not only who may see it, so a stale queue
+ * no longer means somebody reads a list they do not need — it means work is
+ * routed to the wrong person and sits there with their name on it.
+ *
+ * **It does not reactivate**, and that is the difference from `setStaffRole`.
+ * Rank is how somebody is brought back (`/staff_role` is the documented way back
+ * from `/staff_remove`), and a queue change quietly restoring access would be a
+ * second, undocumented door into being staff again.
+ */
+export async function setStaffQueue(
+  db: Database,
+  telegramId: string,
+  queue: string,
+  actor: string,
+): Promise<boolean> {
+  const existing = await findAnyStaff(db, telegramId);
+  if (existing === null) return false;
+
+  await db.update(staff).set({ queue }).where(eq(staff.telegramId, telegramId));
+
+  await recordAudit(db, {
+    actor,
+    action: 'STAFF_QUEUE_SET',
+    subject: telegramId,
+    detail: { from: existing.queue, to: queue },
+  });
+  return true;
+}
+
 export async function setStaffRole(
   db: Database,
   telegramId: string,

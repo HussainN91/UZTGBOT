@@ -20,6 +20,8 @@ import type { Database } from '../../db/index.js';
 import * as schema from '../../db/schema.js';
 import { withChatLock } from '../../conversation/lock.js';
 import { findAnyStaff, findStaff } from '../../staff/repository.js';
+import { CALLBACK, encodeCallback } from '../callback-data.js';
+import { ALL_QUEUES } from '../../staff/queues.js';
 import { route, type InboundUpdate, type RouterOutcome } from '../router.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
@@ -54,6 +56,25 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
     );
     return rows.rows.map((r) => r.action);
   };
+
+  /** One tap on a staff menu, as the button carries it. */
+  const tapMenu = (parts: readonly string[], chatId = SYSTEM): Promise<RouterOutcome> =>
+    send({ chatId, kind: 'callback', text: encodeCallback(CALLBACK.STAFF_MENU, ...parts) });
+
+  const tapText = async (parts: readonly string[], chatId = SYSTEM): Promise<string> =>
+    (await tapMenu(parts, chatId)).messages[0]?.text ?? '';
+
+  const buttonsOf = (outcome: RouterOutcome, index = 0): string[] =>
+    (outcome.messages[index]?.keyboard ?? []).flatMap((row) => row.map((b) => b.callback_data));
+
+  const labelsOf = (outcome: RouterOutcome, index = 0): string[] =>
+    (outcome.messages[index]?.keyboard ?? []).flatMap((row) => row.map((b) => b.text));
+
+  const queueOf = async (chatId: string): Promise<string | undefined> =>
+    (await findAnyStaff(db, chatId))?.queue;
+
+  const regionsOf = async (chatId: string): Promise<readonly string[]> =>
+    (await findAnyStaff(db, chatId))?.regions ?? [];
 
   const addSecondSystem = (): Promise<unknown> =>
     db.execute(sql`
@@ -379,6 +400,208 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
     it('is not available below System', async () => {
       expect(await run(`/staff_remove ${SUPPORT_MEMBER}`, PROGRAM)).toMatch(/rank/i);
       expect(await findStaff(db, SUPPORT_MEMBER)).not.toBeNull();
+    });
+  });
+
+  /**
+   * `/staff_queue` — new on 1 August 2026, and it closes a gap rather than
+   * adding a feature: a queue could only ever be set once, by `/staff_add`.
+   * `/staff_role` and `/staff_region` have always existed for the other two axes
+   * of the same model.
+   */
+  describe('/staff_queue', () => {
+    it('moves somebody to another queue and tells them', async () => {
+      const outcome = await outcomeOf(`/staff_queue ${SUPPORT_MEMBER} Accommodation`);
+
+      expect(await queueOf(SUPPORT_MEMBER)).toBe('Accommodation');
+      expect(outcome.messages[1]?.chatId).toBe(SUPPORT_MEMBER);
+      expect(await auditActions(SUPPORT_MEMBER)).toContain('STAFF_QUEUE_SET');
+    });
+
+    it('refuses a queue this build does not have, and names the ones it does', async () => {
+      // The same rule /staff_region applies to a region. A queue written happily
+      // and never matched leaves somebody with a silently empty list, and since
+      // Part 5H.1 it also stops work being routed to them — with nothing to say so.
+      const body = await run(`/staff_queue ${SUPPORT_MEMBER} Medical`);
+
+      expect(body).toContain('Visa');
+      expect(await queueOf(SUPPORT_MEMBER)).toBe('Visa');
+    });
+
+    it('does not bring a deactivated person back, which is what a rank is for', async () => {
+      /**
+       * The one difference from `setStaffRole`, which does reactivate.
+       * `/staff_role` is the documented way back from `/staff_remove`, and a
+       * queue change restoring access would be a second, undocumented door into
+       * being staff again.
+       */
+      await run(`/staff_remove ${SUPPORT_MEMBER}`);
+      await run(`/staff_queue ${SUPPORT_MEMBER} Travel`);
+
+      expect(await queueOf(SUPPORT_MEMBER)).toBe('Travel');
+      expect(await findStaff(db, SUPPORT_MEMBER)).toBeNull();
+    });
+
+    it('says nothing changed rather than writing an audit row for nothing', async () => {
+      await db.execute(sql`DELETE FROM audit_log`);
+      const body = await run(`/staff_queue ${SUPPORT_MEMBER} Visa`);
+
+      expect(body).toMatch(/already holds/i);
+      expect(await auditActions(SUPPORT_MEMBER)).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Part 5H.3, asked for directly: *"i do /staff, i see a list of staff listed
+   * as buttons, i choose the staff, then bot prompts me, what to do with them
+   * … i need it button based PLEASE."*
+   *
+   * The property worth protecting is not that the buttons work. It is that they
+   * do not know anything the commands do not — every acting tap is turned back
+   * into the typed command it is equivalent to, so there is no second copy of
+   * "the last System member keeps their rank" to drift from the first.
+   */
+  describe('managing staff by button', () => {
+    it('puts a button for each person under /staff', async () => {
+      const outcome = await outcomeOf('/staff');
+
+      expect(buttonsOf(outcome)).toContain(encodeCallback(CALLBACK.STAFF_MENU, SUPPORT_MEMBER));
+      expect(buttonsOf(outcome)).toContain(encodeCallback(CALLBACK.STAFF_MENU, PROGRAM));
+    });
+
+    it('shows what can be done with the person who was tapped', async () => {
+      const outcome = await tapMenu([SUPPORT_MEMBER]);
+
+      expect(outcome.messages[0]?.text).toContain('Support Person');
+      expect(buttonsOf(outcome)).toEqual([
+        encodeCallback(CALLBACK.STAFF_MENU, SUPPORT_MEMBER, 'ROLE'),
+        encodeCallback(CALLBACK.STAFF_MENU, SUPPORT_MEMBER, 'Q'),
+        encodeCallback(CALLBACK.STAFF_MENU, SUPPORT_MEMBER, 'R'),
+        encodeCallback(CALLBACK.STAFF_MENU, SUPPORT_MEMBER, 'OFF'),
+        encodeCallback(CALLBACK.STAFF_MENU),
+      ]);
+    });
+
+    it('offers every rank, ticking the one they hold', async () => {
+      const outcome = await tapMenu([SUPPORT_MEMBER, 'ROLE']);
+
+      expect(labelsOf(outcome)).toContain('✅ Support');
+      expect(labelsOf(outcome)).toContain('Lead');
+    });
+
+    it('changes a rank in one tap, and tells the person', async () => {
+      const outcome = await tapMenu([SUPPORT_MEMBER, 'ROLE', 'Lead']);
+
+      expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Lead');
+      // messages[1] is the notice to the person whose access changed; the list
+      // follows it, so the next change needs no command retyped.
+      expect(outcome.messages.some((m) => m.chatId === SUPPORT_MEMBER)).toBe(true);
+      expect(await auditActions(SUPPORT_MEMBER)).toContain('STAFF_ROLE_SET');
+    });
+
+    it('offers every queue, and changes it in one tap', async () => {
+      const offered = labelsOf(await tapMenu([SUPPORT_MEMBER, 'Q']));
+      for (const queue of ALL_QUEUES) {
+        expect(offered.some((l) => l.endsWith(queue))).toBe(true);
+      }
+
+      await tapMenu([SUPPORT_MEMBER, 'Q', 'Accommodation']);
+      expect(await queueOf(SUPPORT_MEMBER)).toBe('Accommodation');
+    });
+
+    describe('regions, which are a list rather than a choice', () => {
+      it('adds one that is not held, and removes one that is', async () => {
+        // Every other menu here picks one value out of a fixed set. This one is
+        // built up over several taps, and each tap is still a whole instruction.
+        await tapMenu([SUPPORT_MEMBER, 'R', 'Tashkent']);
+        expect(await regionsOf(SUPPORT_MEMBER)).toEqual([]);
+
+        await tapMenu([SUPPORT_MEMBER, 'R', 'Tashkent']);
+        expect(await regionsOf(SUPPORT_MEMBER)).toEqual(['Tashkent']);
+      });
+
+      it('ticks the regions they already hold', async () => {
+        expect(labelsOf(await tapMenu([SUPPORT_MEMBER, 'R']))).toContain('✅ Tashkent');
+      });
+
+      it('says so rather than showing an empty picker before the roster syncs', async () => {
+        // The teacher goes first: their identifier is a foreign key into the
+        // roster, which is the schema saying a teacher cannot outlive their row.
+        await db.execute(sql`DELETE FROM teachers`);
+        await db.execute(sql`DELETE FROM roster_entries`);
+
+        expect(await tapText([SUPPORT_MEMBER, 'R'])).toContain('no regions at all');
+      });
+    });
+
+    it('removes somebody from staff, and offers to put them back afterwards', async () => {
+      await tapMenu([SUPPORT_MEMBER, 'OFF']);
+      expect(await findStaff(db, SUPPORT_MEMBER)).toBeNull();
+
+      // The row stays, so the menu can still reach them — and the slot that said
+      // Remove now says the opposite, because it is one question with two words.
+      expect(buttonsOf(await tapMenu([SUPPORT_MEMBER]))).toContain(
+        encodeCallback(CALLBACK.STAFF_MENU, SUPPORT_MEMBER, 'ON'),
+      );
+
+      await tapMenu([SUPPORT_MEMBER, 'ON']);
+      expect(await findStaff(db, SUPPORT_MEMBER)).not.toBeNull();
+    });
+
+    describe('the buttons know nothing the commands do not', () => {
+      it('refuses to demote the last active System member, through the button', async () => {
+        /**
+         * **The test this whole part turns on.** That refusal lives in
+         * `/staff_role` and nowhere else, and the button reaches it by being
+         * retyped as that command rather than by re-implementing it. If the menu
+         * ever grows its own path to `setStaffRole`, this is what fails.
+         */
+        const body = await tapText([SYSTEM, 'ROLE', 'Support']);
+
+        expect(body).toMatch(/last active System member/i);
+        expect((await findAnyStaff(db, SYSTEM))?.role).toBe('System');
+      });
+
+      it('refuses to remove yourself, through the button', async () => {
+        /**
+         * A *different* refusal from the one above, and it fires first: the
+         * last active System member is also the person tapping, and
+         * `/staff_remove` stops self-removal before it counts Systems at all.
+         *
+         * Which one answers is not the point. The point is that neither lives
+         * anywhere near this menu, and both reached it anyway.
+         */
+        const body = await tapText([SYSTEM, 'OFF']);
+
+        expect(body).toMatch(/cannot remove yourself/i);
+        expect(await findStaff(db, SYSTEM)).not.toBeNull();
+      });
+    });
+
+    describe('who may tap', () => {
+      it('answers a teacher with the main menu, never with a refusal', async () => {
+        // The dispatcher's rule. "You are not staff" tells a stranger that the
+        // button they guessed at is real.
+        expect(await tapText([SUPPORT_MEMBER, 'ROLE', 'System'], TEACHER)).toContain(
+          'What would you like to do?',
+        );
+        expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
+      });
+
+      it('tells a Program admin plainly that this needs System', async () => {
+        // They can see the button, so silence would leave them tapping it.
+        const body = await tapText([SUPPORT_MEMBER, 'ROLE', 'Lead'], PROGRAM);
+
+        expect(body).toMatch(/System/);
+        expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
+      });
+
+      it('re-reads the subject on every tap, not only when the menu was drawn', async () => {
+        // A menu sits in a chat for ever. The person it names may be gone.
+        await db.execute(sql`DELETE FROM staff WHERE telegram_id = ${SUPPORT_MEMBER}`);
+
+        expect(await tapText([SUPPORT_MEMBER])).toContain('no staff row any more');
+      });
     });
   });
 });

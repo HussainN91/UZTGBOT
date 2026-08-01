@@ -240,8 +240,21 @@ export const CAPABILITY_INTERFACE: Readonly<Record<Capability, CapabilityInterfa
     commands: ['/forget'],
   },
   'staff.manage': {
-    summary: 'Add, rank and remove staff',
-    commands: ['/staff', '/staff_add', '/staff_role', '/staff_remove'],
+    summary: 'Add staff, and set their rank, queue and regions',
+    /**
+     * `/staff_region` was missing from this list and `/staff_queue` is new on
+     * 1 August 2026. Both are worth noting: this is the one list in the file
+     * that is maintained by hand rather than derived, so it is the one place a
+     * capability and its commands can drift apart.
+     */
+    commands: [
+      '/staff',
+      '/staff_add',
+      '/staff_role',
+      '/staff_queue',
+      '/staff_region',
+      '/staff_remove',
+    ],
   },
   maintenance: {
     summary: 'Pause new cases, and set how long records are kept',

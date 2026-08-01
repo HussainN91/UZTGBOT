@@ -127,6 +127,9 @@ Erased at compile time. These may point up the layers without it being a violati
 - src/telegram/commands/region.integration.test.ts → src/db/index.ts
 - src/telegram/commands/revoke.integration.test.ts → src/db/index.ts
 - src/telegram/commands/staff.integration.test.ts → src/db/index.ts
+- src/telegram/commands/staff.ts → src/telegram/keyboards.ts
+- src/telegram/commands/staff.ts → src/db/index.ts
+- src/telegram/commands/staff.ts → src/telegram/router.ts
 - src/telegram/dedup.integration.test.ts → src/db/index.ts
 - src/telegram/dedup.ts → src/db/index.ts
 - src/telegram/handlers/cases.ts → src/db/index.ts
@@ -266,7 +269,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/db/index.ts
 
 - imports: src/db/client.ts, src/db/schema.ts
-- imported by: src/announcements/store.ts, src/cases/notes.ts, src/cases/notify.ts, src/cases/queries.ts, src/cases/reference.ts, src/cases/service.ts, src/cases/urgent.ts, src/config/settings.ts, src/conversation/lock.ts, src/conversation/state.ts, src/db/migrate.ts, src/faq/repository.ts, src/forms/repository.ts, src/log/audit.ts, src/log/interactions.ts, src/retention/purge.ts, src/scripts/sync-sheets.ts, src/staff/assignment.ts, src/staff/recipients.ts, src/staff/repository.ts, src/staff/visibility.ts, src/sync/form-responses.ts, src/sync/sheets-sync.ts, src/teachers/forget.ts, src/teachers/privacy.ts, src/teachers/region.ts, src/teachers/repository.ts, src/teachers/verify.ts, src/telegram/alerter.ts, src/telegram/bot.ts, src/telegram/bot.ts, src/telegram/commands/context.ts, src/telegram/commands/index.ts, src/telegram/dedup.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/router.ts, src/worker/job-run.ts, src/worker/tasks/announcements.ts, src/worker/tasks/announcements.ts, src/worker/tasks/digest.ts, src/worker/tasks/digest.ts, src/worker/tasks/heartbeat.ts, src/worker/tasks/retention.ts, src/worker/tasks/retention.ts, src/worker/tasks/sync-sheets.ts
+- imported by: src/announcements/store.ts, src/cases/notes.ts, src/cases/notify.ts, src/cases/queries.ts, src/cases/reference.ts, src/cases/service.ts, src/cases/urgent.ts, src/config/settings.ts, src/conversation/lock.ts, src/conversation/state.ts, src/db/migrate.ts, src/faq/repository.ts, src/forms/repository.ts, src/log/audit.ts, src/log/interactions.ts, src/retention/purge.ts, src/scripts/sync-sheets.ts, src/staff/assignment.ts, src/staff/recipients.ts, src/staff/repository.ts, src/staff/visibility.ts, src/sync/form-responses.ts, src/sync/sheets-sync.ts, src/teachers/forget.ts, src/teachers/privacy.ts, src/teachers/region.ts, src/teachers/repository.ts, src/teachers/verify.ts, src/telegram/alerter.ts, src/telegram/bot.ts, src/telegram/bot.ts, src/telegram/commands/context.ts, src/telegram/commands/index.ts, src/telegram/commands/staff.ts, src/telegram/dedup.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/router.ts, src/worker/job-run.ts, src/worker/tasks/announcements.ts, src/worker/tasks/announcements.ts, src/worker/tasks/digest.ts, src/worker/tasks/digest.ts, src/worker/tasks/heartbeat.ts, src/worker/tasks/retention.ts, src/worker/tasks/retention.ts, src/worker/tasks/sync-sheets.ts
 
 ### src/db/migrate.ts
 
@@ -436,7 +439,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/telegram/callback-data.ts
 
 - imports: src/config/constants.ts
-- imported by: src/cases/notify.ts, src/sheets/parse.ts, src/telegram/commands/cases.ts, src/telegram/keyboards.ts, src/telegram/router.ts
+- imported by: src/cases/notify.ts, src/sheets/parse.ts, src/telegram/commands/cases.ts, src/telegram/commands/staff.ts, src/telegram/keyboards.ts, src/telegram/router.ts
 
 ### src/telegram/chat-gate.ts
 
@@ -475,7 +478,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/telegram/commands/staff.ts
 
-- imports: src/config/constants.ts, src/cases/queries.ts, src/db/schema.ts, src/staff/queues.ts, src/staff/roles.ts, src/staff/repository.ts, src/teachers/region.ts, src/teachers/forget.ts, src/teachers/repository.ts, src/telegram/commands/context.ts, src/telegram/commands/parse.ts
+- imports: src/config/constants.ts, src/telegram/callback-data.ts, src/telegram/keyboards.ts *(type only)*, src/db/index.ts *(type only)*, src/telegram/router.ts *(type only)*, src/cases/queries.ts, src/db/schema.ts, src/staff/queues.ts, src/staff/roles.ts, src/staff/repository.ts, src/teachers/region.ts, src/teachers/forget.ts, src/teachers/repository.ts, src/telegram/commands/context.ts, src/telegram/commands/parse.ts
 - imported by: src/telegram/commands/index.ts
 
 ### src/telegram/dedup.ts
@@ -506,7 +509,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/telegram/keyboards.ts
 
 - imports: src/config/constants.ts, src/telegram/callback-data.ts
-- imported by: src/telegram/bot.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/handlers/menu.ts, src/telegram/handlers/urgent.ts, src/telegram/reply.ts, src/telegram/router.ts
+- imported by: src/telegram/bot.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/commands/staff.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/handlers/menu.ts, src/telegram/handlers/urgent.ts, src/telegram/reply.ts, src/telegram/router.ts
 
 ### src/telegram/reply.ts
 
@@ -516,7 +519,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/telegram/router.ts
 
 - imports: src/config/constants.ts, src/config/privacy.ts, src/config/retention.ts, src/config/settings.ts, src/cases/urgent.ts, src/cases/service.ts, src/cases/notify.ts, src/conversation/state.ts, src/db/index.ts *(type only)*, src/forms/repository.ts, src/log/interactions.ts, src/teachers/privacy.ts, src/teachers/repository.ts, src/teachers/verify.ts, src/sync/alerts.ts *(type only)*, src/cases/queries.ts, src/staff/roles.ts, src/telegram/callback-data.ts, src/telegram/commands/index.ts, src/telegram/commands/context.ts, src/telegram/handlers/faq.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/menu.ts, src/staff/repository.ts, src/teachers/region.ts, src/telegram/handlers/urgent.ts, src/telegram/keyboards.ts, src/telegram/reply.ts *(type only)*
-- imported by: src/cases/notify.ts, src/telegram/bot.ts, src/telegram/bot.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/commands/index.ts
+- imported by: src/cases/notify.ts, src/telegram/bot.ts, src/telegram/bot.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/commands/index.ts, src/telegram/commands/staff.ts
 
 ### src/telegram/send.ts
 

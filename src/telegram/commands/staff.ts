@@ -8,7 +8,15 @@
  * `/regions` sit between them, correcting the other axis that decides who sees
  * whose case.
  */
-import { STAFF_CASE_LIST_CAP } from '../../config/constants.js';
+import { STAFF_BUTTON_CAP, STAFF_CASE_LIST_CAP } from '../../config/constants.js';
+import { CALLBACK, callbackPartProblem, encodeCallback } from '../callback-data.js';
+import type { InlineButton, InlineKeyboard, InlineKeyboardRow } from '../keyboards.js';
+import type { Database } from '../../db/index.js';
+/**
+ * Type-only, and pointing at the layer above — permitted, checked, and erased at
+ * compile time. `cases/notify.ts` carries the same note for the same reason.
+ */
+import type { RouterOutcome } from '../router.js';
 import { casesOwnedBy, listCases } from '../../cases/queries.js';
 import { STAFF_ROLE_ORDER, type StaffRole } from '../../db/schema.js';
 import { ALL_QUEUES, QUEUE, type Queue } from '../../staff/queues.js';
@@ -23,6 +31,7 @@ import {
   listStaff,
   normaliseHandle,
   setStaffRegions,
+  setStaffQueue,
   setStaffRole,
   setUsername,
   type StaffRecord,
@@ -402,7 +411,17 @@ export const staffList: StaffCommand = {
       );
     }
 
-    return reply(ctx.member.telegramId, lines.join('\n'));
+    /**
+     * The text list keeps everything it always had, and gains buttons — Part
+     * 5H.3. Both, not one: the text carries chat ids, deactivated rows and the
+     * counts, which a row of buttons cannot; the buttons are what turn "I want
+     * to change this person" from four commands into three taps.
+     */
+    return reply(
+      ctx.member.telegramId,
+      [...lines, '', 'Or tap somebody below to change their rank, queue or regions.'].join('\n'),
+      staffListKeyboard(everybody),
+    );
   },
 };
 
@@ -691,6 +710,102 @@ export const staffRole: StaffCommand = {
           `Changed by: ${describeStaff(ctx.member)}`,
           '',
           '/whoami — everything you can do now',
+        ]),
+      ],
+    );
+  },
+};
+
+/**
+ * `/staff_queue <chat id> <queue>` — which kinds of case somebody works.
+ *
+ * **New on 1 August 2026, and it closes a gap rather than adding a feature.** A
+ * queue could only ever be set once, by `/staff_add`; moving somebody from Visa
+ * to Accommodation needed a database session over the SSH tunnel. `/staff_role`
+ * and `/staff_region` have always existed for the other two axes.
+ *
+ * It matters more now than it would have in July. Since Part 5H.1 a queue
+ * decides who a new case is **assigned** to, not merely who may see it — so a
+ * queue left wrong no longer means somebody reads a list they do not need, it
+ * means work is routed to them and sits there with their name on it.
+ *
+ * The holder is told, for `accessChangedNotice`'s reason: somebody whose queue
+ * moved without their knowing will keep working from a `/cases` list that has
+ * quietly changed underneath them.
+ */
+export const staffQueue: StaffCommand = {
+  name: '/staff_queue',
+  capability: CAPABILITY.STAFF_MANAGE,
+  handle: async (ctx) => {
+    const usage = [`/staff_queue 991001 Visa`, '', `The queues are: ${queueList()}.`].join('\n');
+
+    const split = splitChatId(ctx.rest);
+    if (split === null) {
+      return reply(ctx.member.telegramId, `Whose queue? I need their chat id.\n\n${usage}`);
+    }
+
+    const wanted = split.rest.trim();
+    if (wanted === '') return reply(ctx.member.telegramId, `Which queue?\n\n${usage}`);
+
+    const queue = parseQueue(wanted);
+    if (queue === null) {
+      return reply(
+        ctx.member.telegramId,
+        [`I do not know a queue called “${wanted}”.`, '', `The queues are: ${queueList()}.`].join('\n'),
+      );
+    }
+
+    const existing = await findAnyStaff(ctx.db, split.chatId);
+    if (existing === null) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          `${split.chatId} has no staff row, so there is no queue to change.`,
+          '',
+          `/staff_add ${split.chatId} Support ${queue} — adds them.`,
+        ].join('\n'),
+      );
+    }
+
+    if (existing.queue === queue) {
+      return reply(
+        ctx.member.telegramId,
+        `${describeStaff(existing)} already holds the ${queue} queue. Nothing changed.`,
+      );
+    }
+
+    const written = await setStaffQueue(ctx.db, split.chatId, queue, ctx.member.telegramId);
+    if (!written) return reply(ctx.member.telegramId, `${split.chatId} has gone. Nothing was changed.`);
+
+    /**
+     * Said plainly rather than left to be discovered. `None` is a real choice —
+     * it is how somebody keeps a rank and stops receiving case work — but a
+     * queue of `None` and a queue nobody has got round to setting look identical
+     * from the outside, so the one that was chosen says so.
+     */
+    const consequence =
+      queue === QUEUE.NONE
+        ? 'They will see no cases and be assigned none.'
+        : queue === QUEUE.ALL
+          ? 'They will see every kind of case in the regions they hold.'
+          : `They will see ${queue} cases in the regions they hold, and new ones may be assigned to them.`;
+
+    return replyAndTell(
+      ctx.member.telegramId,
+      [
+        `${describeStaff(existing)} now holds the ${queue} queue, was ${existing.queue}.`,
+        consequence,
+        '',
+        'They have been told.',
+      ].join('\n'),
+      [
+        accessChangedNotice(split.chatId, [
+          '👤 The kind of case you handle on the MoPSE support bot has changed.',
+          '',
+          `Queue: ${queue}`,
+          `Changed by: ${describeStaff(ctx.member)}`,
+          '',
+          '/cases — what you can see now',
         ]),
       ],
     );
@@ -1366,6 +1481,310 @@ export const staffRegion: StaffCommand = {
 };
 
 /** Every command in this file, so registering one is a single edit. */
+// ---------------------------------------------------------------------------
+// Staff management by button — Part 5H.3
+// ---------------------------------------------------------------------------
+
+/**
+ * The whole of `/staff` as buttons, asked for directly on 1 August 2026:
+ * *"i do /staff, i see a list of staff listed as buttons, i choose the staff,
+ * then bot prompts me, what to do with them … i need it button based PLEASE."*
+ *
+ * **Nothing below decides anything.** Every acting tap is turned back into the
+ * typed command it is equivalent to and handed to `routeStaffCommand` — so
+ * `/staff_role` remains the single place that knows a rank may not be taken off
+ * the last active System member, `/staff_queue` the single place that knows what
+ * a queue means, and `/staff_remove` the single place that counts somebody's
+ * open cases before deactivating them. **A second copy of any of those rules is
+ * the thing this part must not create**, and copying the case-list button's
+ * approach is how it avoids one.
+ *
+ * The subject travels in the payload, never in conversation state — see
+ * `CALLBACK.STAFF_MENU` for why.
+ */
+const staffButton = (member: StaffRecord): InlineButton => ({
+  text: `${member.active ? '' : '🚫 '}${member.name ?? member.telegramId} — ${member.role} · ${member.queue}`,
+  callback_data: encodeCallback(CALLBACK.STAFF_MENU, member.telegramId),
+});
+
+/** One button per person, capped for the same reason the case lists are. */
+function staffListKeyboard(members: readonly StaffRecord[]): InlineKeyboard {
+  return members.slice(0, STAFF_BUTTON_CAP).map((m) => [staffButton(m)]);
+}
+
+const backToStaffButton: InlineButton = {
+  text: '⬅️ All staff',
+  callback_data: encodeCallback(CALLBACK.STAFF_MENU),
+};
+
+/**
+ * What can be done to one person.
+ *
+ * Deactivate and reactivate are the same slot showing opposite words, because
+ * they are one question — is this person staff — and two buttons would let
+ * somebody tap "deactivate" on a row that already is.
+ */
+function staffActionsKeyboard(member: StaffRecord): InlineKeyboard {
+  const forThem = (action: string): string =>
+    encodeCallback(CALLBACK.STAFF_MENU, member.telegramId, action);
+
+  return [
+    [{ text: '🎖 Change rank', callback_data: forThem(ACTION.ROLE) }],
+    [{ text: '📁 Change queue', callback_data: forThem(ACTION.QUEUE) }],
+    [{ text: '📍 Change regions', callback_data: forThem(ACTION.REGION) }],
+    [
+      member.active
+        ? { text: '🚫 Remove from staff', callback_data: forThem(ACTION.OFF) }
+        : { text: '♻️ Put back as ' + member.role, callback_data: forThem(ACTION.ON) },
+    ],
+    [backToStaffButton],
+  ];
+}
+
+/** The actions a payload may name. Matched exactly; anything else is ignored. */
+const ACTION = {
+  ROLE: 'ROLE',
+  QUEUE: 'Q',
+  REGION: 'R',
+  OFF: 'OFF',
+  ON: 'ON',
+} as const;
+
+function choiceKeyboard(
+  telegramId: string,
+  action: string,
+  choices: readonly { readonly value: string; readonly label: string }[],
+): InlineKeyboard {
+  const rows: InlineKeyboardRow[] = [];
+  for (const choice of choices) {
+    /**
+     * A choice that will not fit is skipped rather than thrown, and only the
+     * region list can reach this: ranks and queues are constants in this
+     * repository, while a region is a spreadsheet cell somebody typed. One
+     * over-long region must hide one button, not take the whole menu away —
+     * the rule `answerButtons` already applies to FAQ codes.
+     */
+    if (callbackPartProblem(CALLBACK.STAFF_MENU, choice.value) !== null) continue;
+    rows.push([
+      {
+        text: choice.label,
+        callback_data: encodeCallback(CALLBACK.STAFF_MENU, telegramId, action, choice.value),
+      },
+    ]);
+  }
+  rows.push([
+    {
+      text: '⬅️ Back',
+      callback_data: encodeCallback(CALLBACK.STAFF_MENU, telegramId),
+    },
+  ]);
+  return rows;
+}
+
+const describeMember = (m: StaffRecord): string =>
+  [
+    `${m.name ?? 'name not recorded'} — ${m.telegramId}`,
+    `${m.role} · ${m.queue} queue · ${describeRegions(m.regions)}`,
+    m.active ? '' : '🚫 Not currently staff.',
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+
+/**
+ * What one tap on a staff menu should produce — either something to show, or a
+ * command to run.
+ *
+ * **The split exists to avoid an import cycle, and the cycle was telling the
+ * truth.** This module cannot call `routeStaffCommand`, because the dispatcher
+ * that holds it already imports the commands in here. So this decides *what*
+ * should happen and the dispatcher does it — which also means the acting taps
+ * are executed by exactly the same function that executes a typed command,
+ * rather than by something that resembles it.
+ */
+export type StaffMenuStep =
+  | { readonly kind: 'show'; readonly outcome: RouterOutcome }
+  | { readonly kind: 'run'; readonly command: string };
+
+const show = (outcome: RouterOutcome): StaffMenuStep => ({ kind: 'show', outcome });
+const run = (command: string): StaffMenuStep => ({ kind: 'run', command });
+
+/**
+ * One tap on a staff menu, resolved.
+ *
+ * **The subject is re-read from the database on every tap**, never trusted from
+ * the payload beyond being an id to look up. A menu sits in a chat for ever, and
+ * the person it is about may have been removed since it was drawn.
+ *
+ * Authorisation is not done here — the dispatcher does it before calling, and
+ * again inside `routeStaffCommand` for anything that acts.
+ */
+export async function staffMenuView(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+): Promise<StaffMenuStep> {
+  const [subject = '', action = '', value = ''] = parts;
+
+  // No subject: the list itself, which is also where every Back button leads.
+  if (subject === '') return show(await staffMenuList(db, chatId));
+
+  const target = await findAnyStaff(db, subject);
+  if (target === null) {
+    return show(
+      reply(
+        chatId,
+        [`${subject} has no staff row any more.`, '', 'The list below is current.'].join('\n'),
+        staffListKeyboard(await listStaff(db, { includeInactive: true })),
+      ),
+    );
+  }
+
+  if (action === '') {
+    return show(
+      reply(
+        chatId,
+        [describeMember(target), '', 'What would you like to do?'].join('\n'),
+        staffActionsKeyboard(target),
+      ),
+    );
+  }
+
+  /**
+   * A chosen value acts, and it acts by being retyped as the command it is.
+   *
+   * `/staff_remove` and the reactivation both take no value, so their menu tap
+   * *is* the action — there is nothing left to choose. Everything else shows its
+   * choices first.
+   */
+  if (action === ACTION.OFF) return run(`/staff_remove ${subject}`);
+  if (action === ACTION.ON) return run(`/staff_role ${subject} ${target.role}`);
+
+  if (value === '') return show(await choicesFor(db, chatId, target, action));
+
+  if (action === ACTION.ROLE) return run(`/staff_role ${subject} ${value}`);
+  if (action === ACTION.QUEUE) return run(`/staff_queue ${subject} ${value}`);
+  if (action === ACTION.REGION) {
+    return run(`/staff_region ${subject} ${toggledRegions(target, value)}`);
+  }
+
+  // An action this build does not have: a hand-crafted payload, or a menu from
+  // an older build. The list is the safe landing, as it is everywhere else here.
+  return show(await staffMenuList(db, chatId));
+}
+
+export async function staffMenuList(db: Database, chatId: string): Promise<RouterOutcome> {
+  const everybody = await listStaff(db, { includeInactive: true });
+  if (everybody.length === 0) {
+    return reply(chatId, 'Nobody has a staff row. That should be impossible.');
+  }
+
+  const shown = Math.min(everybody.length, STAFF_BUTTON_CAP);
+  return reply(
+    chatId,
+    [
+      shown < everybody.length
+        ? `Staff — the first ${String(shown)} of ${String(everybody.length)}`
+        : `Staff (${String(everybody.length)})`,
+      '',
+      'Tap somebody to change their rank, queue or regions.',
+      ...(shown < everybody.length ? ['', '/staff lists everybody as text.'] : []),
+    ].join('\n'),
+    staffListKeyboard(everybody),
+  );
+}
+
+async function choicesFor(
+  db: Database,
+  chatId: string,
+  target: StaffRecord,
+  action: string,
+): Promise<RouterOutcome> {
+  if (action === ACTION.ROLE) {
+    return reply(
+      chatId,
+      `Which rank for ${describeStaff(target)}?\n\nThey are ${target.role} now.`,
+      choiceKeyboard(
+        target.telegramId,
+        ACTION.ROLE,
+        STAFF_ROLE_ORDER.map((role) => ({
+          value: role,
+          label: role === target.role ? `✅ ${role}` : role,
+        })),
+      ),
+    );
+  }
+
+  if (action === ACTION.QUEUE) {
+    return reply(
+      chatId,
+      `Which queue for ${describeStaff(target)}?\n\nThey hold ${target.queue} now.`,
+      choiceKeyboard(
+        target.telegramId,
+        ACTION.QUEUE,
+        ALL_QUEUES.map((queue) => ({
+          value: queue,
+          label: queue === target.queue ? `✅ ${queue}` : queue,
+        })),
+      ),
+    );
+  }
+
+  /**
+   * Regions are a *list*, so these buttons toggle rather than choose — a tap
+   * adds a region if they do not hold it and removes it if they do, and the tick
+   * shows which is which. Everything else in this part is a single choice out of
+   * a fixed set; this is the one place the answer is built up over several taps,
+   * and each tap is still a complete instruction on its own.
+   */
+  const known = await knownRegions(db);
+  if (known.length === 0) {
+    return reply(
+      chatId,
+      [
+        'I know of no regions at all yet — the roster has none recorded.',
+        '',
+        'Everybody covers every region until it has synced, which is the safe default.',
+      ].join('\n'),
+      staffActionsKeyboard(target),
+    );
+  }
+
+  return reply(
+    chatId,
+    [
+      `Which regions for ${describeStaff(target)}?`,
+      '',
+      `They cover ${describeRegions(target.regions)}.`,
+      'Tap to add or remove. Removing the last one means every region.',
+    ].join('\n'),
+    choiceKeyboard(
+      target.telegramId,
+      ACTION.REGION,
+      known.map((region) => ({
+        value: region,
+        label: holdsRegion(target, region) ? `✅ ${region}` : region,
+      })),
+    ),
+  );
+}
+
+const holdsRegion = (member: StaffRecord, region: string): boolean =>
+  member.regions.some((r) => r.toLowerCase() === region.toLowerCase());
+
+/**
+ * The region list this tap produces, as `/staff_region` would be typed.
+ *
+ * `clear` rather than an empty string, because that is the word the command
+ * takes for "every region" — and an empty argument is refused by it as a missing
+ * one, which is the right answer for somebody typing and the wrong one here.
+ */
+function toggledRegions(member: StaffRecord, region: string): string {
+  const next = holdsRegion(member, region)
+    ? member.regions.filter((r) => r.toLowerCase() !== region.toLowerCase())
+    : [...member.regions, region];
+  return next.length === 0 ? 'clear' : next.join(', ');
+}
+
 export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   whoami,
   region,
@@ -1373,6 +1792,7 @@ export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   staffList,
   staffAdd,
   staffRole,
+  staffQueue,
   staffRegion,
   staffRemove,
   revoke,

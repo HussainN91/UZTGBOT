@@ -27,7 +27,7 @@ import type { ConversationState } from '../../conversation/state.js';
 import type { Database } from '../../db/index.js';
 import { logInteraction } from '../../log/interactions.js';
 import { findStaff } from '../../staff/repository.js';
-import { type Capability, can, capabilitiesFor, floorFor } from '../../staff/roles.js';
+import { CAPABILITY, type Capability, can, capabilitiesFor, floorFor } from '../../staff/roles.js';
 import type { RouterDeps, RouterOutcome } from '../router.js';
 import {
   type StaffCommand,
@@ -40,7 +40,7 @@ import { ANNOUNCE_COMMANDS } from './announce.js';
 import { CASE_COMMANDS } from './cases.js';
 import { OPS_COMMANDS } from './ops.js';
 import { parseCommand } from './parse.js';
-import { PEOPLE_COMMANDS } from './staff.js';
+import { PEOPLE_COMMANDS, staffMenuList, staffMenuView } from './staff.js';
 
 export type { StaffCommand, StaffContext };
 
@@ -126,6 +126,67 @@ export async function routeStaffCommand(
     rest: parsed.rest,
     deps,
   });
+}
+
+/**
+ * One tap on a staff-management menu — Part 5H.3.
+ *
+ * It lives here rather than beside the menus it draws, and the reason is worth
+ * keeping: the acting taps run by handing the equivalent typed command to
+ * `routeStaffCommand` **above**, and `staff.ts` cannot call that without a cycle
+ * — this file already imports its commands. The cycle was telling the truth, so
+ * `staff.ts` decides what should happen and this decides nothing except how to
+ * carry it out.
+ *
+ * **The consequence is the safety argument for the whole part.** A tap that
+ * changes somebody's rank is not merely *as* authorised as `/staff_role`; it
+ * **is** `/staff_role`, so the refusal that protects the last active System
+ * member, the notice sent to the person whose access changed, and the audit row
+ * written in the same transaction all come from the one place that has ever had
+ * them. There is no second implementation to drift.
+ *
+ * The gate here is the same shape as the dispatcher's above: no active staff row
+ * is answered with silence, because a reply saying "you are not staff" tells a
+ * stranger the button they guessed at is real; a rank too low is answered
+ * plainly, because they can see the button and would otherwise keep tapping it.
+ */
+export async function routeStaffMenu(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'staff menu', state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.STAFF_MANAGE)) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'staff menu', state);
+    return reply(chatId, refusalText('/staff', CAPABILITY.STAFF_MANAGE, member.role));
+  }
+
+  const step = await staffMenuView(db, chatId, parts);
+  if (step.kind === 'show') return step.outcome;
+
+  const done = await routeStaffCommand(db, chatId, step.command, state, deps);
+  if (done === null) return null;
+
+  /**
+   * The command's own answer first, then the list again.
+   *
+   * The first message is the one that says what changed, or refuses with a
+   * reason — including the refusals only the command knows, like the last active
+   * System member keeping their rank. The list follows so the next change does
+   * not need `/staff` retyped, which is the entire point of the part.
+   */
+  const list = await staffMenuList(db, chatId);
+  return {
+    messages: [...done.messages, ...list.messages],
+    alerts: [...done.alerts, ...list.alerts],
+  };
 }
 
 /**

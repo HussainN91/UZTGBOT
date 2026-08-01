@@ -287,6 +287,20 @@ export const STAFF_CASE_LIST_CAP = 20;
 export const CASE_LIST_BUTTON_CAP = 8;
 
 /**
+ * How many staff get a button on the `/staff` menu — Part 5H.3.
+ *
+ * Larger than the case cap, because the two lists are read differently. A case
+ * list is a queue somebody works from the top of, so eight covers what they are
+ * doing now and the rest is scrolled past. A staff list is a directory, and the
+ * person being looked for is as likely to be at the bottom of it as the top —
+ * a cap that hid them would mean the buttons could not do the job at all.
+ *
+ * A ministry with more staff than this still has `/staff`, which lists everybody
+ * as text, and the menu says so rather than pretending the list ends here.
+ */
+export const STAFF_BUTTON_CAP = 20;
+
+/**
  * The most staff members one new case may notify.
  *
  * A latency bound, not a policy. `deliver` sends sequentially inside the webhook

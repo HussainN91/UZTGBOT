@@ -10,7 +10,7 @@ import {
   FAQ_PAGE_SIZE,
   FAQ_TOPICS,
 } from '../config/constants.js';
-import { byteLength } from './callback-data.js';
+import { CALLBACK, byteLength, encodeCallback } from './callback-data.js';
 import {
   type ButtonableFaqRow,
   answerKeyboard,
@@ -45,6 +45,19 @@ describe('the byte ceiling is enforced in one place', () => {
       ...payloads(answerKeyboard('PLACEMENT-999', 'PLACEMENT')),
       ...payloads(topicListingKeyboard(rows, 'PLACEMENT', 1).keyboard),
       ...payloads(pickerKeyboard(rows.slice(0, 3), 'PLACEMENT', true).keyboard),
+      /**
+       * The two staff payloads, measured with the worst real values rather than
+       * built by their own modules — the ceiling is one number and this is where
+       * it is checked, whichever file happens to construct the button.
+       *
+       * `CONTRACT-2026-99999` is the longest reference this system can build.
+       * The staff menu's worst case is a fifteen-digit chat id, the longest
+       * action word, and a region name — and a region comes from the
+       * spreadsheet, so `choiceKeyboard` skips any that will not fit rather than
+       * trusting this.
+       */
+      encodeCallback(CALLBACK.CASE_OPEN, 'CONTRACT-2026-99999'),
+      encodeCallback(CALLBACK.STAFF_MENU, '123456789012345', 'ROLE', 'Qashqadaryo'),
     ];
     expect(all.length).toBeGreaterThan(0);
     for (const payload of all) {

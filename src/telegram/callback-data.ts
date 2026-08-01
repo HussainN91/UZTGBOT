@@ -119,6 +119,37 @@ export const CALLBACK = {
    * value rather than trusting the arithmetic here.
    */
   CASE_OPEN: 'CO',
+  /**
+   * Staff management by button — Part 5H.3. `SM:<chat id>[:<action>[:<value>]]`.
+   *
+   * Three depths in one prefix, because they are one journey:
+   *
+   * ```
+   * SM:991001              → what would you like to do with this person?
+   * SM:991001:ROLE         → which rank?
+   * SM:991001:ROLE:Lead    → do it
+   * ```
+   *
+   * **The subject travels in the payload rather than in conversation state, and
+   * that is the design decision of this part.** Conversation state is a
+   * teacher-facing machine here — `AwaitingIdentifier`, `AwaitingCaseDetail` —
+   * and there has never been a staff-facing one. Building it to hold "which
+   * person are we talking about between two taps" would be the harder thing
+   * solving the easier problem, and it would introduce something that can go
+   * stale: a menu left for an hour would act on whoever was chosen an hour ago.
+   * A self-contained payload cannot.
+   *
+   * It is not a permission and carries none. Every tap is re-authorised from the
+   * database, and the acting taps are executed by handing the equivalent typed
+   * command to the same dispatcher, so a payload replayed by somebody demoted
+   * last week buys exactly nothing.
+   *
+   * `SM:991001:R:Qashqadaryo` is 24 bytes against the 64-byte limit. Region
+   * names come from the spreadsheet rather than from this code, so unlike every
+   * other payload here their length is not ours to guarantee — the region
+   * keyboard skips any button that will not fit, the way the FAQ listing does.
+   */
+  STAFF_MENU: 'SM',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];
