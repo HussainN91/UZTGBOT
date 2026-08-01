@@ -53,8 +53,9 @@ There is nothing to migrate and no switch-over window.
 escalate an emergency; a staff member can now see that case, answer it, ask the
 teacher for something, close it, reopen it, note it, assign it, judge how serious
 it is, put a date on it, correct the teacher's region, end and return a teacher's
-access, manage who is staff at all, pause new cases and issue an urgent code. A
-new case now reaches the people who can work it, which it never did before.
+access, manage who is staff at all, pause new cases and decide whether a case is
+treated as urgent. A new case now reaches the people who can work it, which it
+never did before.
 
 So the sentence that used to be here — *"nobody can reply to that case through the
 bot"* — is no longer true, and the launch gate has moved off engineering.
@@ -212,8 +213,8 @@ Everything here blocks launch. None of it is engineering work.
 - **Receive an announcement** from the Ministry
 
 They will also, once, **be asked to read the privacy notice again** before Contact
-Support, Urgent Case or Check My Case. One tap, and it puts them back on what they
-were doing. The answer bank and `/privacy` are left open deliberately.
+Support, Ask for Priority or Check My Case. One tap, and it puts them back on what
+they were doing. The answer bank and `/privacy` are left open deliberately.
 
 They can **submit documents**, through Submit Documents on the menu. It gives them
 a link to a Google Form; the bot never receives the file itself. What comes back
@@ -228,8 +229,9 @@ is refused with a message pointing at Submit Documents.
 ## 1.6 Honest risk summary
 
 **Genuinely better than the old system.** A case cannot be filed twice by a double
-tap. A teacher's conversation survives a restart. An urgent code cannot be spent
-twice, and is no longer lost by a teacher who takes their time. A scheduled job
+tap. A teacher's conversation survives a restart. A teacher who needs their case
+looked at quickly no longer has to telephone for a code before they may speak. A
+scheduled job
 that stops running raises an alarm instead of being silently absent. Revoking a
 teacher takes effect on their next message rather than up to half an hour later.
 A filed case reaches the staff who can work it, and a case nobody can see raises
@@ -551,37 +553,46 @@ Now type the description. **The case must file correctly.** This is what proves
 conversations no longer live in memory — under the old system this teacher was
 simply lost, and there was no way to test it.
 
-### 7. An urgent code is spent exactly once
+### 7. A priority request is granted by a person, and only by a person
 
-From a **System or Support** account, type:
+Tap **⏫ Ask for Priority** from the test account. **You should be asked to
+describe the problem immediately** — there is no code to type, and if you are
+asked for one, the deploy is running old code.
 
-```
-/generate_urgent_code
-```
-
-Expect a six-character code and an expiry. Write it down — it is shown once and
-nothing can display it again.
-
-Tap **🚨 Urgent Case** from the test account and type `WRONG1`. Expect a refusal
-that does not say why.
-
-Type the code you were given. Expect "Code accepted" — and confirm it has **not**
-been spent:
+Type a description. Expect a reply that names a case reference and says a
+regional coordinator will decide. Then confirm the request has **not** granted
+itself:
 
 ```sql
-SELECT used_at FROM urgent_codes ORDER BY issued_at DESC LIMIT 1;   -- must be NULL
+SELECT importance, status, urgent_requested_at IS NOT NULL AS asked,
+       urgent_confirmed_at
+FROM cases ORDER BY created_at DESC LIMIT 1;
 ```
 
-Now type the emergency description. Expect a case marked urgent, and:
+`importance` must be **`Normal`**, `asked` must be true, and `urgent_confirmed_at`
+must be NULL. This is the check that matters most on this page: importance is
+what buys a case 180 days of retention instead of seven, so a request that marked
+itself urgent would hand every teacher six months of retention for one tap.
+
+Now switch to a **System or Support** account. You should have received a message
+naming the teacher, their identifier and their region, with a **⏫ Confirm
+urgent** button. Tap it. Expect:
 
 ```sql
-SELECT used_at, used_by, case_reference, issued_by
-FROM urgent_codes ORDER BY issued_at DESC LIMIT 1;
+SELECT importance, status, urgent_confirmed_by FROM cases ORDER BY created_at DESC LIMIT 1;
 ```
 
-All four must be set, and `issued_by` must be the staff member's chat id rather
-than `0`. A spent code always names the case it bought and the person who issued
-it.
+`Urgent`, `Escalated`, and your own chat id. The teacher should have been told
+separately.
+
+Tap the same button again. It must say the case is already urgent and name who
+confirmed it — **the teacher must not be told twice**, and:
+
+```sql
+SELECT count(*) FROM audit_log WHERE action = 'URGENT_CONFIRMED';  -- must be 1
+```
+
+Finally, `/urgent_pending` from the same account must now report nothing waiting.
 
 ### 7a. A staff member can actually answer the case
 
@@ -731,7 +742,6 @@ release and write down that you did.
 
 ```sql
 DELETE FROM cases WHERE teacher_chat_id = '<the test chat id>';
-DELETE FROM urgent_codes WHERE used_at IS NULL AND case_reference IS NULL;
 DELETE FROM announcement_recipients WHERE chat_id = '<the test chat id>';
 DELETE FROM form_submissions WHERE submitter_email = '<the test teacher's email>';
 ```
@@ -830,37 +840,80 @@ write down that you did.
 >
 > `/restore` on somebody who was never revoked at all says so and changes nothing.
 
-## 4.4 Issuing an urgent code
+## 4.4 Deciding whether a case is urgent
+
+> **This replaced `/generate_urgent_code` on 1 August 2026.** The old route made
+> a teacher telephone a Regional admin, be read a six-character code, and type it
+> correctly *before the bot would let them describe their problem at all*. The
+> codes, the command that issued them, the guess limit and the stranded-code
+> alarm are all gone. If you are looking for `/generate_urgent_code`, this
+> section is what it became.
+>
+> The change is one sentence: **the rationing moved from before the teacher may
+> speak to before priority is granted.**
+
+### What the teacher does
+
+They tap **⏫ Ask for Priority** and describe the problem. Nothing is in their
+way. Their case is filed — or their existing open case is added to — at **normal
+importance**, and it is stamped as having been asked about.
+
+They are told plainly that a regional coordinator will decide, and that until
+then it is being worked in the ordinary way. Nothing promises them anything.
+
+**"Urgent" here means high priority, not emergency.** The bot is not a crisis
+line and does not present itself as one.
+
+### What you do
+
+You receive a message naming the teacher, their roster identifier and their
+region, with one button: **⏫ Confirm urgent**. Check with them however you
+normally would — telephone, the school, whatever you already do. Nothing about
+this is automated and nothing chases you.
+
+Tap the button only if the case should genuinely come ahead of the other open
+cases. Then:
+
+- Its importance becomes **Urgent** and its status **Escalated**, so it appears
+  in `/urgent`
+- **The teacher is told**
+- Its owner, if it has one, is told
+- Program rank and above are told, because this is the only granting act in the
+  system with no second signature
+- An audit row is written naming you
+
+**Tapping it twice does nothing.** The second tap says who decided and tells
+nobody anything. That is deliberate: the button lives in your Telegram history
+for ever and will be tapped again by accident.
+
+**There is no decline button.** If a request should not be granted, simply do not
+tap. The request stays visible in `/urgent_pending` until somebody grants it —
+see the note in §4.4a.
+
+### Who may decide
+
+Support rank and above, deliberately, and for the same reason the old command
+was: the person a teacher reaches is whoever is on the support desk, and a
+decision that needs a manager is one that arrives after the thing it was about.
+
+## 4.4a Requests nobody has decided
 
 ```
-/generate_urgent_code
+/urgent_pending
 ```
 
-Available from Support rank upward, deliberately: the person a teacher telephones
-in an emergency is whoever is on the support desk, and a code that needs a manager
-to authorise is a code that arrives after the emergency.
+Lists every priority request with no decision against it, oldest first, with how
+long each has been waiting. It shows references and times and **never the
+teacher's words** — those stay behind `/case`, which records who read them.
 
-Give it to the teacher **by phone or in person**, never through the bot — sending
-it through the bot defeats the point.
+**Nothing escalates these on its own, by design.** Auto-escalation would push
+every frivolous request up to Program anyway, which defeats the gate. Visibility
+was chosen instead, which only works if somebody looks — so this command is worth
+running once a day.
 
-**It is shown once and nothing can display it again.** Issue another if it is
-lost; the first simply expires unused. There is no command to list codes, and
-that is on purpose — one would turn every staff account into a way of reading all
-of them.
-
-The code is recorded against your name, which matters more than it sounds: if a
-code is ever spent without producing a case, the alarm names whoever issued it so
-somebody can telephone that teacher.
-
-What the teacher gets for it: their case is filed as escalated, or — if they
-already have an open case — that case is escalated and their new words are added
-to it rather than a second case being opened.
-
-**The code is spent when their case is filed, not when they type it.** A teacher
-who starts and gives up keeps their code. It lasts 48 hours.
-
-Five wrong codes from one chat within an hour pauses that chat for an hour. It
-clears itself; nobody has to release it.
+It is deliberately **not** filtered to your own queue and region: a supervisor
+who can only see their own region cannot notice that another region has stopped
+answering.
 
 ## 4.5 Pausing new cases
 
@@ -879,8 +932,8 @@ told it is paused and given the support contact.
 
 > **Cases will keep arriving for a while afterwards, and that is correct.** A
 > teacher already part-way through writing one is deliberately not interrupted —
-> stopping them there would throw away what they had typed and an urgent code they
-> had already spent. The confirmation says so. Do not report the trickle as a
+> stopping them there would throw away everything they had typed. The
+> confirmation says so. Do not report the trickle as a
 > fault.
 
 ## 4.6 Watching that it is working
@@ -892,9 +945,8 @@ docker compose logs -f web worker
 
 **Most of the watching is done for you.** The operations chat receives an alarm
 when a scheduled job stops succeeding, a sync is refused by its damage limit, a
-teacher identity is claimed by a second chat, an urgent code is spent without
-producing a case, or a teacher was not told the outcome of something that
-succeeded.
+teacher identity is claimed by a second chat, a priority request reaches a region
+nobody covers, or a teacher was not told the outcome of something that succeeded.
 
 An alarm arriving is not a crisis. An alarm channel that has been silent for a
 week when you expected traffic **is** worth checking, because a broken alerter
@@ -999,7 +1051,7 @@ cannot describe access you do not have.
 | `/staff` `/staff_add` `/staff_role` `/staff_remove` | Who is staff — System only |
 | `/staff_region <chat id> <regions>` | Which regions somebody covers. `clear` means **every** region — §2.6. System only |
 | `/maintenance` | §4.5 — System only |
-| `/generate_urgent_code` | §4.4 |
+| `/urgent_pending` | Priority requests nobody has decided — §4.4a |
 
 **A case reference is always the first thing after the command.** `/reply` with no
 reference is refused rather than guessed at, because the recoverable outcome is
@@ -1574,8 +1626,7 @@ receive something not on this list, it did not come from the bot.
 | `Scheduled job "…" has stopped` | 🔴 | A job has not succeeded for longer than it should have. **This is the alarm that tells you the bot has gone quiet** | §5.5 |
 | `A teacher was not told what happened` | 🔴 | Staff replied, or closed a case, and the message did not reach the teacher. **The work happened; the teacher does not know** | §5.7 |
 | `Somebody was not told about something that happened` | 🟠 | As above, for a message that was not the first one | §5.7 |
-| `An urgent code was accepted and then would not spend` | 🔴 | A teacher used a valid urgent code and no case opened | §5.6 |
-| `… urgent code(s) spent without opening a case` | 🔴 | The nightly check found codes used with no case behind them | §5.6 |
+| `A teacher asked for priority and nobody can decide it` | 🔴 | A priority request arrived and no active staff member holds `urgent.issue` — not in that region and not at System either | §5.6 |
 | `A teacher identity is now held by more than one chat` | 🟠 | Two Telegram accounts signed in with the same recruitment email. Both can see that teacher's cases | Find out which is genuine — usually a new phone. Revoke the other with `/revoke`. §4.3 |
 | `A published Telegram handle stopped matching its owner` | 🔵 | A staff member changed or removed their Telegram username. The bot has **already cleared it** so no teacher is sent to the wrong person | Ask that person to run `/username` again. Until they do, teachers are shown their name and the support address. §4.17 |
 | `An FAQ answer could not be shown as a button` | 🟠 | An answer's button text is too long for Telegram, so that answer is unreachable for teachers | Shorten `BUTTON_TEXT` for the named row. §4.1 |
@@ -1663,13 +1714,24 @@ hourly while a job stays down. A job that fails is noisy and will be noticed; a
 job that stopped being scheduled at all is silent, which is exactly what this
 alarm exists to catch.
 
-## 5.6 An alarm says an urgent code was spent with no case
+## 5.6 An alarm says nobody can decide a priority request
 
-**Telephone that teacher.** Their emergency has not reached anyone.
+The teacher's case **is filed** and they have their reference — nothing has been
+lost. What has not happened is the decision: the case is sitting at normal
+importance and will stay there.
 
-Under the current design this cannot happen — the code and the case are written in
-one transaction — so if it has, something has written to `urgent_codes` outside
-the normal path. The alarm names the code and the chat.
+The alarm fires only when there is no active staff member holding `urgent.issue`
+at all — not covering that region, and not at System either, which is the
+fallback. So it is a staffing answer rather than a technical one:
+
+1. `/staff` to see who is active. If the list is short, somebody has been removed
+2. Add a Support member, or raise an Observer with `/staff_role`
+3. If people exist but cover the wrong regions, `/staff_region` — §2.6
+4. Then `/urgent_pending` and grant anything that should be granted
+
+**A System row being inactive is the most likely cause**, because System is what
+this falls back to. Two named System members exist by launch-checklist
+requirement precisely so this cannot happen from one person leaving.
 
 ## 5.7 An alarm says a teacher was not told what happened
 

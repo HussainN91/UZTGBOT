@@ -209,7 +209,7 @@ writes keep working. Semantics of the appended columns:
 
 | Key | Effect |
 |---|---|
-| `MAINTENANCE_MODE` | When truthy, pauses Contact Support, Urgent Case and Submit Documents. FAQ browsing **and Check My Case** stay live — pausing submissions is not the same as locking teachers out of their own case status |
+| `MAINTENANCE_MODE` | When truthy, pauses Contact Support, Ask for Priority and Submit Documents. FAQ browsing **and Check My Case** stay live — pausing submissions is not the same as locking teachers out of their own case status |
 | `OVERDUE_DAYS` | Enables the overdue half of `/urgent` **and** the daily digest (§7.1.2). **Unset, `/urgent` says the feature is switched off** rather than showing an empty list |
 | `CASE_RETENTION_DAYS` | Days a resolved ordinary case is kept (§7.1.3) |
 | `URGENT_CASE_RETENTION_DAYS` | Days a resolved Urgent or Critical case is kept |
@@ -267,7 +267,7 @@ exactly this signal, and locking them out would be worse than a false alarm a
 human can dismiss. This makes impersonation *visible*; only per-person one-time
 codes would prevent it (an open product decision).
 
-**Gated (requires verification):** Contact Support, Check My Case, Urgent Case,
+**Gated (requires verification):** Contact Support, Check My Case, Ask for Priority,
 Submit Documents.
 **Open to anyone:** all FAQ browsing and in-topic question matching (§9.0),
 `/start`, `/menu`, `/help`, Change Language.
@@ -350,7 +350,7 @@ records are kept until the Ministry sets one — which is exactly what the syste
 then doing.
 
 **Every teacher who signed in under the old wording is asked to accept the new
-one**, once, in front of Contact Support, Urgent Case and Check My Case. The FAQ,
+one**, once, in front of Contact Support, Ask for Priority and Check My Case. The FAQ,
 `/privacy`, `/help` and `/start` are untouched: the answer bank has always been
 open, maintenance mode deliberately leaves it running, and a teacher looking up a
 public answer is not somebody anything is being collected from. One tap, and the
@@ -395,7 +395,6 @@ where the message body is sensitive:
 |---|---|
 | `AWAITING_IDENTIFIER` | `(identifier withheld — the value is in the USERS row)` |
 | `AWAITING_CASE_DETAIL` | `(case detail withheld — the value is in the case DETAIL column)` |
-| `AWAITING_URGENT_CODE` | `(urgent code withheld)` |
 
 Without this the redaction above was decorative: the raw email was logged in full
 by the webhook a few lines before `attemptVerify_` redacted it, and the free-text
@@ -509,7 +508,7 @@ version drifted precisely because those were two lists.
 | `case.update` — `/reply` `/await` `/close` `/reopen` `/note` `/due` `/snooze` | | ✅ | ✅ | ✅ | ✅ |
 | `case.mark` — `/mark` | | ✅ | ✅ | ✅ | ✅ |
 | `case.assign` — `/assign` | | | ✅ | ✅ | ✅ |
-| `urgent.issue` — `/generate_urgent_code` | | ✅ | ✅ | ✅ | ✅ |
+| `urgent.issue` — `/urgent_pending`, the confirm-urgent button | | ✅ | ✅ | ✅ | ✅ |
 | `teacher.region` — `/region` `/regions` | | | ✅ | ✅ | ✅ |
 | `teacher.revoke` — `/revoke` `/restore` | | | | ✅ | ✅ |
 | `staff.manage` — `/staff` `/staff_add` `/staff_role` `/staff_region` `/staff_remove` | | | | | ✅ |
@@ -593,9 +592,9 @@ exists, otherwise the recruitment spreadsheet read **through a join** rather tha
 from the copy taken when the teacher signed in. See §5.2.
 
 Contact Support asks the teacher what their case is about, so cases file under
-real categories and queue-scoped staff see real traffic. Urgent Case skips the
-picker and files generic, routing to `All`, which is the correct destination for
-an emergency.
+real categories and queue-scoped staff see real traffic. Ask for Priority skips
+the picker and files generic, routing to `All`, which is the correct destination
+for something nobody has classified yet.
 
 > The seven FAQ-topic mappings the Apps Script version carried in
 > `queueForCategory_` are **deleted as structurally impossible**, not dropped. A
@@ -731,7 +730,7 @@ and no command behind them.
 | `/regions` | `/regions` | `teacher.region` — teachers who reported a wrong region, in regions you hold |
 | `/revoke` | `/revoke <chat id>` | `teacher.revoke` |
 | `/restore` | `/restore <chat id>` | `teacher.revoke` — the same rank as `/revoke`, deliberately |
-| `/generate_urgent_code` | `/generate_urgent_code` | `urgent.issue` |
+| `/urgent_pending` | `/urgent_pending` | `urgent.issue` — priority requests nobody has decided. Deliberately **not** scoped to your queue and regions: a supervisor filtered to their own region cannot see that another region has stopped answering |
 | `/staff` `/staff_add` `/staff_role` `/staff_region` `/staff_remove` | §6.4 | `staff.manage` |
 | `/maintenance` | `/maintenance on\|off` · `/maintenance` to ask | `maintenance` |
 | `/retention` | `/retention` to read all three · `/retention case\|urgent\|message <days>` | `maintenance`, which floors at **System** — a period governs deletion with no undo. With no argument it prints the periods **and the notice's own retention paragraph**, rather than describing them in its own words |
@@ -774,8 +773,8 @@ case is closed and how to raise it again, which is neither silence nor a blunt
 internal judgement.
 
 The four nobody types: `New` at filing, `Received` when a notification actually
-reaches a staff member, `Escalated` by the urgent-code path, `Duplicate` by the
-24-hour duplicate rule.
+reaches a staff member, `Escalated` by a confirmed priority request, `Duplicate`
+by the 24-hour duplicate rule.
 
 **Behaviour worth knowing:**
 
@@ -829,63 +828,83 @@ reaches a staff member, `Escalated` by the urgent-code path, `Duplicate` by the
   two staff acting on one case hold two different locks and any read-modify-write
   would race.
 
-### 6.6 Urgent code lifecycle — ✅ rebuilt
+### 6.6 The urgent gate — ✅ rebuilt, then replaced
 
-Every mechanism this section previously named has changed. The flow still spans
-an admin and a teacher:
+> **Withdrawn on 1 August 2026: the one-time code, in its entirety.** This
+> section previously described a six-character credential a teacher had to be
+> read over the telephone before the bot would let them describe an urgent
+> problem — issued by `/generate_urgent_code`, stored in `urgent_codes`, checked
+> without being spent, consumed in the same transaction as the case insert, and
+> guarded by a five-guess-per-hour cap in `urgent_code_attempts`.
+>
+> Every one of those mechanisms was correct and none of them is here any more.
+> The reason is not that the machinery failed; it is that it rationed **speech**.
+> A teacher could not report a problem at all until an admin answered the phone.
+>
+> The two tables remain in the database as history and nothing reads or writes
+> them.
 
-1. An admin with the **`urgent.issue`** capability runs the issuing command
-   (Stage 4 — until then codes are seeded by hand)
-2. A 6-character code is stored in **`urgent_codes`**, with its expiry as a
-   column rather than as a property that could be evicted
-3. The admin passes it to the teacher **by phone or in person** — never through
-   the bot
-4. The teacher taps **🚨 Urgent Case**, passes the verification gate, and types
-   the code
-5. The code is **checked, not consumed**. Wrong, spent and expired are one
-   outcome, deliberately: distinguishing them tells a guesser they have found a
-   real code
-6. The chat enters `AwaitingUrgentDetail` for **24 hours**, carrying the accepted
-   code
-7. When the case is filed, the code is spent **in the same transaction as the
-   case insert**:
-   `UPDATE urgent_codes SET used_at = now(), used_by = …, case_reference = …
-   WHERE code = … AND used_at IS NULL AND expires_at > now()`
+**"Urgent" means high priority, not emergency.** The bot is not a crisis line and
+does not present itself as one. This is the correction the whole redesign rests
+on, and it is why no message in this flow names emergency services.
 
-**Spending it is one statement that can succeed exactly once**, whoever runs it
-and however many run at the same moment. Two teachers cannot spend one code, and
-a redelivered update cannot spend it twice.
+The flow spans a teacher and a regional coordinator:
 
-**The code is spent at case creation, not at code entry.** The previous version
-of this section, and `CONCERNS-AND-IT-ACTIONS.md` B8, said the full fix "opens a
-double-use race" — against a real database it does not. So a teacher who gives up
-halfway keeps their code instead of telephoning a Regional admin for another.
+1. The teacher taps **⏫ Ask for Priority**, passes the verification and consent
+   gates, and is asked for the problem **immediately** — nothing stands between
+   the button and the writing
+2. The chat enters `AwaitingUrgentDetail` for **24 hours**. It carries no
+   credential; the state is a place, not a token
+3. The case is filed at **`New`/`Normal`**, with `urgent_requested_at` stamped
+4. The coordinators for the teacher's **roster region** are told, by name and
+   roster identifier, with one button
+5. They check however they normally would. Nothing is automated and nothing
+   chases them
+6. On **⏫ Confirm urgent**: importance → `Urgent`, status → `Escalated`,
+   `urgent_confirmed_by`/`_at` stamped, an audit row written **in the same
+   transaction**, and the teacher, the owner and Program upward all told
 
-**24 hours, not 6.** Six was `CacheService`'s ceiling, not a decision. A teacher
-who starts an urgent case in the evening can finish it the next morning.
+**A pending request is `Normal`, and that is the property the whole feature turns
+on.** Retention keys off `importance` and keeps urgent cases for 180 days against
+seven. A request that stamped the marker on the way in would let anybody grant
+themselves six months of retention by tapping a button, and the symptom would be
+invisible for six months. `importance` is raised in exactly one place —
+`confirmUrgentRequest` — and `createCase` lost the `escalate` flag that used to
+be able to open a case above `Normal`.
 
-**Guesses are capped.** New, and required by the change above: Apps Script
-destroyed a code whether the guess was right or wrong, so a wrong guess burned
-the thing it was guessing at. A conditional update leaves a wrong code untouched,
-which made guessing free against a six-character space. Five wrong codes per
-chat per hour, counted in `urgent_code_attempts`, rolling and self-healing —
-there is no command to release a lockout and none is needed.
+**Confirmation is one statement that can succeed exactly once.** The guard is
+`WHERE urgent_requested_at IS NOT NULL AND urgent_confirmed_at IS NULL`, which is
+the same shape of single-statement guarantee the code consumption used to rely
+on, and for the same reason: a staff command runs under the *sender's* chat lock,
+so two coordinators tapping one button hold two different locks. The second tap
+is a no-op that names who decided.
 
-**If the case deduplicates** (§7.3) the urgent detail is appended to the existing
-case, that case is escalated, and **the code is still spent**. This is the common
-path, not an edge case: urgent cases have no topic picker, so they file under the
-same general category as every ordinary Contact Support case.
+**Every tap re-validates.** A Telegram message sits in a chat for ever, so the
+payload is a promise about the world made when the message was built. The tapper
+is re-checked for an active staff row, for `urgent.issue`, and the case is
+resolved through `findCase` so the visibility scope applies — somebody demoted or
+moved to another region since cannot act on a button they still hold.
 
-**If the code will not spend, the case is still filed** — as an ordinary case,
-with the teacher told plainly that the escalation did not apply and an alarm
-raised. The only explanations are an expiry straddle or two chats holding one
-code, and both want a person. Throwing away an emergency a teacher has just
-typed, because of our timing, is not one of the options.
+**Nobody covering the region falls through to System**, and the message says so,
+because a System member deciding something *because nobody covers that region* is
+a staffing gap rather than a routing quirk. Nobody at all raises a critical alert.
 
-**A spent code always names its case.** `case_reference` is written in the same
-statement as `used_at`, so a code spent for nothing is a queryable condition —
-the heartbeat job alerts on any that appear, which under this design means
-something has consumed a code outside the one write path.
+**If the case deduplicates** (§7.3) the words are appended to the existing case
+and the request is stamped on **it**. This is the common path, not an edge case:
+priority requests have no topic picker, so they file under the same general
+category as every ordinary Contact Support case. The append deliberately does
+**not** escalate — an appending write that raised importance would grant the very
+thing it was asking a coordinator to decide.
+
+**A case that is already urgent asks nobody again.** The teacher's words are
+still kept; no second message goes out. Neither does a second request on a case
+whose first is still pending, and the original `urgent_requested_at` is not
+re-stamped — the gap between the two stamps is the only measure this system has
+of how long a teacher waited.
+
+**There is no decline button and no auto-escalation.** Auto-escalation would push
+every frivolous request up to Program anyway, which defeats the gate; visibility
+was chosen instead, and `/urgent_pending` is what makes it visible.
 
 ---
 
@@ -899,7 +918,7 @@ something has consumed a code outside the one write path.
 | `Received` | ✅ | the system, when notification reaches a staff member | Filed **and** seen — distinguishable from filed and seen by nobody |
 | `Under review` | ✅ | `/reply`, `/reopen` | Somebody has it and is working it |
 | `Action required` | ✅ | `/await` | **The teacher** must do something before it can move — §6.5 |
-| `Escalated` | ✅ | the urgent-code path | An emergency, while it is open |
+| `Escalated` | ✅ | a confirmed priority request | A case somebody has decided comes first, while it is open |
 | `Completed` | ❌ | `/close <ref> <message>` | Resolved |
 | `Closed` | ❌ | `/close <ref> unresolved <reason>` | Shut without being resolved |
 | `Duplicate` | ❌ | the 24-hour duplicate rule | Merged into an existing case |
@@ -1014,12 +1033,12 @@ document.
 | `case_notes` | Cascades from the case | Staff writing about teachers must not outlive it |
 | `messages` | `MESSAGE_RETENTION_DAYS` | The interaction log |
 | `conversation_states` | The same period, measured after `expires_at` | Holds **a teacher's typed question** on the abandoned path. An expired state is already treated as absent, so deleting one changes no behaviour |
-| `urgent_code_attempts` | The same period | A chat id per wrong guess, meaningful only inside a 60-minute window. Nothing had ever deleted one |
+| `urgent_code_attempts` | The same period | A chat id per wrong guess of a one-time code. **The route was withdrawn on 1 August 2026**, so nothing writes here any more and the pruning runs against a table that can only shrink |
 | `processed_updates` | 24 hours | Far longer than Telegram retries for |
 | `sync_runs.rejections` | The jsonb is emptied after the same period; **the row stays** | Held **teacher email addresses**, every ten minutes, for ever. `rows_rejected` is a separate count, so the operational history survives the scrub |
 | `announcement_recipients` | 30 days after the announcement finished | After a month, per-person delivery state answers no question anybody asks |
 | `announcements` | **Never pruned** | The record of what the Ministry told teachers. Staff-written, no teacher's words |
-| `urgent_codes` | **Never pruned** | Audit-class: who authorised an emergency, and for whom. The schema has no foreign key precisely because it outlives the case |
+| `urgent_codes` | **Never pruned** | Audit-class: who authorised an escalation, and for whom. **The route was withdrawn on 1 August 2026** and nothing writes here any more; the rows are kept because they are the record of who issued what to whom |
 | `audit_log` | **Never pruned** | Who granted what |
 | `job_runs`, `case_sequences` | **Never pruned** | Bounded. `case_sequences` in particular *must* survive a deletion, or a reference could be reissued and two cases would share one number |
 
@@ -1032,7 +1051,7 @@ rather than left to return empty results that read like good news.
 
 ### 7.1.4 Importance — a permanent marker, separate from status
 
-`Normal` / `Urgent` / `Critical`, set by `/mark`, and the urgent-code path sets
+`Normal` / `Urgent` / `Critical`, set by `/mark`, and a confirmed priority request sets
 `Urgent` at creation.
 
 **It cannot be a status, and the reason is retention.** A status moves: an
@@ -1108,8 +1127,7 @@ never throw.
 | `AwaitingIdentifier` | Gated feature, unverified | A roster identifier (max 5 attempts) | 30 min |
 | `AwaitingCaseTopic` | Contact Support | *(buttons, not text — the prompt is repeated)* | 30 min |
 | `AwaitingCaseDetail` | A filing topic chosen | The case description — carries `category` | 30 min |
-| `AwaitingUrgentCode` | Urgent Case | A single-use urgent code | 30 min |
-| `AwaitingUrgentDetail` | A code accepted | The emergency description — carries the accepted code | **24 h** |
+| `AwaitingUrgentDetail` | Ask for Priority | The problem, and why it cannot wait its turn. Carries nothing — the `AwaitingUrgentCode` state above it, and the accepted code this one used to hold, went on 1 August 2026 | **24 h** |
 
 **Expiry is enforced when the state is read, never by a sweeper.** The read
 filters on the stored deadline, so an expired state is indistinguishable from no
@@ -1159,7 +1177,7 @@ the original leak came back.
 
 **Main menu:** 4 topic shortcuts (Visa, Travel and Arrival, Contract Signing,
 Accommodation) + All FAQ topics · Submit Documents · Check My Case · Contact
-Support · Change Language · Urgent Case · **Who covers my region?**
+Support · Change Language · Ask for Priority · **Who covers my region?**
 
 The last of those is the newest and is deliberately **not** behind the sign-in
 gate or the re-consent gate — §5.3.
@@ -1521,7 +1539,7 @@ busiest — which is when you most want to read them back.
 | Update replay | `update_id` claimed in `processed_updates` with one statement, before the chat lock, and kept for 24 hours — Telegram gives up retrying long before that |
 | Identity | Roster match required before any case action, checked in the program as well as by the foreign key: the key proves a `teachers` row exists, not that its state is `Verified` |
 | Brute force — sign-in | 5 attempts, counted in the conversation state so they expire with it. Deliberately self-healing: no Stage 3 command exists to release a teacher, so a durable counter would strand one |
-| Brute force — urgent codes | 5 wrong codes per chat per rolling hour, counted in `urgent_code_attempts`. Durable against clearing the conversation state, which tapping Main Menu does. Required because making a code genuinely single-use also made guessing free |
+| Brute force — urgent codes | **No longer applicable.** The credential this defended was withdrawn on 1 August 2026, so there is nothing left to guess. Priority is now rationed by a coordinator's decision after the fact, which cannot be brute-forced because asking for it is free and being granted it is not automatic |
 | Group exposure | Non-private chats rejected; the bot actively leaves groups it is added to. **Built in this stage** — this row described the control for two versions of this document while nothing implemented it, the same class of loss as `update_id` deduplication before it. `OPS_ALERT_CHAT_ID` is exempt from leaving, by chat id, read from one function shared with the ignore path so the two cannot disagree; an unset value exempts nothing |
 | Injection | No `parse_mode` is ever sent, so teacher text cannot break message formatting |
 | Callback forgery | `CAT:`, `PG:` and `QT:` codes resolved through a fixed map, never used as a lookup key on an object; `CASE:` keys likewise; `ANS:` codes resolve to a real active row or a clean "no longer available" reply; unknown and malformed callbacks fall back to the main menu |
@@ -1622,8 +1640,10 @@ and §11.0 the schedule.
 - **A command to read the audit trail** (§13). It is read during an investigation
   by somebody with database access, and a command would need its own permission
   model to avoid becoming the thing it audits.
-- **A command to list issued urgent codes.** One would turn every staff account
-  into a way of reading all of them. A lost code is reissued; the first expires.
+- **A button to decline a priority request.** Not tapping is the decline. A
+  request nobody grants stays in `/urgent_pending`, which is where somebody
+  notices it — a decline button would let a request be closed with no record of
+  who judged it and no way for a teacher to be told anything at all.
 - **Dedicated queues for the seven newer FAQ topics.** Not deferred — impossible.
   A case's category is one of six values because nothing else can produce one.
 
