@@ -461,12 +461,16 @@ member still sees the case, through the bypass, exactly as before.
 
 ### What remains of Part 5H
 
-**H.1 is built. H.2 and H.3 are not**, and H.2 is now unblocked — its caution was
-that raising `case.assign` to Program before automatic assignment existed would
-leave almost every case unowned. Automatic assignment exists, so the floor can
-move. It is a one-line change in `src/staff/roles.ts` plus its ripples: the
-`/assign` tests (which run as a Lead and would need a Program actor), the
-capability table in `BOT-SPEC.md` §12, and `roles.test.ts`.
+**H.1 and H.2 are built — `cb045b9` and `f67914d`. H.3 is not**, and it is the
+largest remaining piece of this part at roughly two days: `/staff` as a list of
+buttons, a menu of actions per person, and a submenu per action. It subsumes
+Feature C.
+
+Its design question is settled in H.3 below and should be read before starting:
+**carry the subject in the callback payload rather than building staff-facing
+conversation state.** The second is the harder thing and is not needed for
+menus — it is needed for the free-text staff actions (`/reply`, `/note`, `/due`,
+`/snooze`), and that is its own piece of work.
 
 ### Two faults, found by running it
 
@@ -496,12 +500,39 @@ already; this one predated any need to.
 **So there is no "take it" button**, and `case.assign` moves from its current
 floor of `Lead` up to `Program`.
 
-> **Sequencing, and this is the one caution.** Raising the floor on its own makes
-> the present state worse, not better: manual `/assign` is the *only* way a case
-> gets an owner today, so restricting it to two ranks before H.1 exists would
-> leave almost every case unowned and `/mycases` emptier than it already is.
-> **Make the floor change in the same piece of work as automatic assignment**, so
-> that the moment humans stop assigning, the system starts.
+> **✅ BUILT 1 August 2026 at `f67914d`**, immediately after H.1 and for the
+> reason below.
+>
+> **Sequencing, and this was the one caution.** Raising the floor on its own
+> would have made the present state worse, not better: manual `/assign` was the
+> *only* way a case got an owner, so restricting it to two ranks before H.1
+> existed would have left almost every case unowned and `/mycases` emptier than
+> it already was. The floor moved the moment the system started assigning, and
+> not before.
+
+### Two messages had to change with it
+
+Both told a staff member to type a command most of them would now be refused
+for — the failure `handleWhoAmI_` was written to avoid, where somebody is offered
+a command and then refused by the bot that suggested it.
+
+- **`/case` said `Owner: nobody — /assign to take it`.** It now says *no active
+  staff member covers this queue and region*, which is what an empty owner
+  actually means once assignment is automatic.
+- **The morning digest's third list was headed "Waiting to be taken".** True when
+  people took cases; it now reads *Nobody covers these — no owner could be
+  found*. Nothing in that list is waiting for its reader to act, and a heading
+  implying otherwise asks somebody to fix a staffing gap they did not cause and
+  cannot reach.
+
+### One test changed by itself, and was kept for that reason
+
+A test asserted that `/whoami` lists `/assign` for a Lead. It failed on the run
+after the one-line floor change, **without `/whoami` being touched** — because
+that message is generated from the same table the gates read. It now asserts the
+opposite, with the demonstration recorded next to it: a permission cannot move in
+one place and stay put in the other. The Apps Script version drifted precisely
+because "what am I allowed to do" and "may I do this" were two lists.
 
 ### H.3 — Staff management, entirely by button
 
@@ -966,13 +997,10 @@ conversation state and belongs with 5H.3, not before it.
    out by the head of project (Part 5H.2), and close, reopen and mark-urgent are
    worth revisiting only alongside 5H's menus rather than as a separate pass
 5. **Part 5H — staff management by button, and automatic ownership.** Moved ahead
-   of Feature A on 1 August by Part 9.1.A. **H.1, automatic ownership, is ✅ built
-   at `cb045b9`.** What remains:
-   - **H.2** — raise `case.assign` from Lead to Program. **Now unblocked**, since
-     its caution was that the floor must not move before automatic assignment
-     existed. One line plus its ripples; half a day at most
-   - **H.3** — staff management by button. ~2 days, and the largest remaining
-     piece. Subsumes Feature C
+   of Feature A on 1 August by Part 9.1.A. **H.1 ✅ built at `cb045b9`, H.2 ✅
+   built at `f67914d`.** What remains is **H.3 — staff management by button**,
+   ~2 days and the largest remaining piece. Subsumes Feature C. **Nothing blocks
+   it**; its one design question is answered in Part 5H.3
 6. **The privacy notice, settled** — the head of project's, not engineering's,
    and it gates Feature A. Part 9.1.E. Runs in parallel with step 5; it needs no
    engineering time at all

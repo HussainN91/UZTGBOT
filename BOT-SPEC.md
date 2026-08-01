@@ -517,12 +517,42 @@ version drifted precisely because those were two lists.
 | `regions` | a list; **empty means every region**, never none | Which teachers' cases are visible (the other axis) |
 | `active` | true / false | A deactivated member is not staff; the row stays so history is readable |
 
+### Who a case belongs to — Part 5H, 1 August 2026
+
+**A case is given an owner as it is filed**, and the owner is **whoever has the
+fewest open cases** among the staff whose queue and region already reach it.
+Nobody claims work; the system distributes it.
+
+- **Open cases only.** The question is who has capacity now, not who has ever
+  been busy — counting finished work would push new cases away from whoever has
+  been clearing theirs.
+- **Ties go to whoever has waited longest for work**, then to the earliest id.
+  Both steps are deliberate: without the first, one person takes every case until
+  they are no longer tied; without the second the answer is not repeatable, and
+  a retried write could put one case in two names.
+- **Candidates must hold `case.update`** — the capability for *working* a case.
+  **An Observer may read a case and may never own one.**
+- **A System member is never given a case by this.** System sees every case in
+  the country, which is what stops one in an uncovered region reaching nobody —
+  but seeing everything is not the same as working it.
+
+**A case nobody covers is left unowned, deliberately.** That is what
+`/cases unassigned` and the digest's third section now report, and the meaning
+has changed with it: not *nobody has picked this up*, but **no active staff
+member holds this queue in this region** — a staffing gap somebody has to close.
+
+**Moving a case afterwards is `case.assign`, which floors at `Program`** — raised
+from `Lead` on 1 August 2026. Distribution is no longer what this command does;
+overriding the distribution is, and that is a rarer act. Raising the floor was
+only safe once assignment was automatic, because before that a manual `/assign`
+was the only thing that ever set an owner.
+
 | Capability | Observer | Support | Lead | Program | System |
 |---|---|---|---|---|---|
 | `case.view` — `/cases` `/mycases` `/urgent` `/case` `/search` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `case.update` — `/reply` `/await` `/close` `/reopen` `/note` `/due` `/snooze` | | ✅ | ✅ | ✅ | ✅ |
 | `case.mark` — `/mark` | | ✅ | ✅ | ✅ | ✅ |
-| `case.assign` — `/assign` | | | ✅ | ✅ | ✅ |
+| `case.assign` — `/assign` | | | | ✅ | ✅ |
 | `urgent.issue` — `/urgent_pending`, the confirm-urgent button | | ✅ | ✅ | ✅ | ✅ |
 | `teacher.region` — `/region` `/regions` | | | ✅ | ✅ | ✅ |
 | `teacher.revoke` — `/revoke` `/restore` | | | | ✅ | ✅ |
@@ -740,7 +770,7 @@ and no command behind them.
 | `/mark` | `/mark <ref> Normal\|Urgent\|Critical` | `case.mark` + visibility |
 | `/due` | `/due <ref> <date>` · `/due <ref> clear` | `case.update` + visibility |
 | `/snooze` | `/snooze <ref> <days>` · `/snooze <ref> clear` | `case.update` + visibility |
-| `/assign` | `/assign <ref> <chat id>` | `case.assign` + visibility; the assignee must be active staff who can **also** see the case |
+| `/assign` | `/assign <ref> <chat id>` | `case.assign` (**Program**, raised from Lead — §5.5) + visibility; the assignee must be active staff who can **also** see the case |
 | `/region` | `/region <chat id> <region>` · `/region <chat id> clear` | `teacher.region`, and coverage of **both** regions in the move |
 | `/regions` | `/regions` | `teacher.region` — teachers who reported a wrong region, in regions you hold |
 | `/revoke` | `/revoke <chat id>` | `teacher.revoke` |
