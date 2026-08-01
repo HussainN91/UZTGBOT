@@ -92,6 +92,35 @@ export async function staffCovering(db: Database, query: RecipientQuery): Promis
   return (await coveringRows(db, query)).map((r) => r.telegramId);
 }
 
+/**
+ * Active staff who could actually **work** this case — the covering set, minus
+ * anybody who is only in it through the System bypass. Part 5H.1.
+ *
+ * **The distinction is the whole reason this exists**, and reusing
+ * `staffCovering` for assignment would have been quietly wrong in a way nothing
+ * would report. A System member is returned by that function unconditionally, so
+ * that a case in a region nobody covers still *reaches* somebody — which is
+ * correct, and is what the bypass is for. But being able to see every case in
+ * the country is not the same as being the person who works it, and an assigner
+ * that could not tell the difference would hand every case to a System
+ * administrator.
+ *
+ * It would also destroy the one thing `/cases unassigned` is for. Every case
+ * would have an owner, so the intake backlog would read as empty while the
+ * staffing gap it exists to expose went on growing — R4, restored exactly as it
+ * was before this system was rebuilt.
+ *
+ * So the answer here is deliberately allowed to be **nobody**. A case no active
+ * staff member holds the queue and region for stays unowned, and that is the
+ * signal. It is still visible to System, through the bypass, exactly as before.
+ *
+ * The bypass flag is read from `coveringRows` rather than recomputed, so this
+ * cannot drift from what "System" means to the rest of the file.
+ */
+export async function staffWorking(db: Database, query: RecipientQuery): Promise<string[]> {
+  return (await coveringRows(db, query)).filter((r) => !r.bypassed).map((r) => r.telegramId);
+}
+
 interface CoveringRow {
   readonly telegramId: string;
   /**

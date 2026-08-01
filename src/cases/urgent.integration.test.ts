@@ -69,9 +69,20 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
   beforeEach(async () => {
     pool ??= new pg.Pool({ connectionString: TEST_DATABASE_URL });
     db ??= drizzle(pool, { schema }) as unknown as Database;
+    /**
+     * `staff` joined this list in Part 5H.1, and its absence was a real fault
+     * that only became visible when it did.
+     *
+     * A staff row left behind by another test file used to be harmless here,
+     * because nothing on this path read the staff table. Automatic assignment
+     * made staff rows load-bearing inside `createCase` — and the leaked row was
+     * promptly chosen as the owner of a case this file believed nobody covered,
+     * so a test asserting "no owner" failed against a person it had never heard
+     * of.
+     */
     await db.execute(sql`
       TRUNCATE cases, teachers, roster_entries, case_sequences,
-               conversation_states, audit_log CASCADE
+               conversation_states, audit_log, staff CASCADE
     `);
     await db.execute(sql`
       INSERT INTO roster_entries (identifier, name, region, active)
@@ -204,6 +215,9 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
       expect(outcome.kind).toBe('confirmed');
       if (outcome.kind !== 'confirmed') throw new Error('unreachable');
       expect(outcome.teacherChatId).toBe(CHAT);
+      // No staff row covers this case, so automatic assignment left it unowned —
+      // which is the answer that keeps `/cases unassigned` meaningful. The
+      // owned path is the next test down.
       expect(outcome.owner).toBeNull();
 
       const row = await caseRow(asked.reference);

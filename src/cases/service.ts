@@ -27,6 +27,8 @@ import {
   cases,
 } from '../db/schema.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
+import { regionFor } from '../teachers/region.js';
+import { chooseOwner } from '../staff/assignment.js';
 import { allocateReference } from './reference.js';
 import { isClosedStatus } from './status.js';
 
@@ -125,6 +127,29 @@ export async function createCase(
   if (found !== undefined) return { reference: found.reference, isNew: false };
 
   const reference = await allocateReference(db, request.category);
+
+  /**
+   * The case is given an owner as it is filed — Part 5H.1.
+   *
+   * **`null` is an ordinary answer here**, and it is the one that keeps
+   * `/cases unassigned` worth reading: it means no active staff member holds
+   * this queue in this region. Before automatic assignment that list meant
+   * "nobody has picked this up"; it now means a staffing gap, which is a
+   * sharper thing and the one R4 was written about.
+   *
+   * The region comes from `regionFor`, never from `teachers.region` — that
+   * column is the snapshot taken at sign-in (R12), and assigning on a year-old
+   * region would route work by where somebody used to live.
+   *
+   * Inside the caller's transaction, so a case and its owner are written
+   * together or not at all. `chooseOwner` reads and returns; it writes nothing
+   * and sends nothing.
+   */
+  const owner = await chooseOwner(db, {
+    category: request.category,
+    region: await regionFor(db, request.chatId),
+  });
+
   await db.insert(cases).values({
     reference,
     category: request.category,
@@ -141,6 +166,7 @@ export async function createCase(
     status: 'New',
     importance: 'Normal',
     lastActor: request.chatId,
+    ...(owner === null ? {} : { owner }),
   });
 
   return { reference, isNew: true };
