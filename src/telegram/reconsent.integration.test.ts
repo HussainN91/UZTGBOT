@@ -239,7 +239,9 @@ describe.skipIf(!TEST_DATABASE_URL)('the re-consent gate', () => {
       await menu(MENU_ACTION.URGENT_CASE);
       const body = await taps(await acceptButton());
 
-      expect(body).toContain('one-time code');
+      // The urgent prompt, which since 1 August 2026 asks for the problem
+      // rather than for a one-time code.
+      expect(body).toContain('Ask for priority');
     });
 
     it('returns them to the topic picker after Contact Support', async () => {

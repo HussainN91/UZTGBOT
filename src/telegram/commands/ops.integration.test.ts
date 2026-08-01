@@ -1,11 +1,12 @@
 /**
- * `/maintenance` and `/generate_urgent_code` — Task 37.
+ * `/maintenance`, `/urgent_pending` and `/retention` — Task 37, revised.
  *
- * The second of these drives both halves of a feature whose two ends have never
- * met. Urgent codes have only ever been inserted by hand through the runbook, so
- * nothing has ever proved that the format a person would issue is the format the
- * teacher flow accepts. That test runs the command and then the teacher path,
- * end to end, which is the only way to find out.
+ * The second of these was `/generate_urgent_code` until 1 August 2026, and its
+ * tests drove both halves of a feature whose two ends had never met: urgent
+ * codes had only ever been inserted by hand through the runbook, so nothing had
+ * ever proved that the format a person would issue was the format the teacher
+ * flow accepted. The route is gone, so there is nothing left to join up — what
+ * is tested now is that a request nobody has decided is findable.
  *
  *   docker compose -f docker-compose.test.yml up -d
  *   TEST_DATABASE_URL=postgres://mopse:mopse@localhost:5432/mopse_test npm test
@@ -14,8 +15,6 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { URGENT_CODE_ALPHABET, URGENT_CODE_LENGTH } from '../../config/constants.js';
-import { generateUrgentCode } from '../../cases/urgent.js';
 import { PRIVACY_NOTICE_VERSION, retentionParagraph } from '../../config/privacy.js';
 import { recordAcceptance } from '../../teachers/privacy.js';
 import { clearSettingsCache, isMaintenanceMode, retentionPeriods } from '../../config/settings.js';
@@ -50,8 +49,8 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
   const teacherTypes = async (text: string): Promise<string> =>
     (await send({ chatId: TEACHER, kind: 'text', text })).messages[0]?.text ?? '';
 
-  const teacherTaps = async (data: string): Promise<string> =>
-    (await send({ chatId: TEACHER, kind: 'callback', text: data })).messages[0]?.text ?? '';
+  const teacherTaps = async (data: string, chatId = TEACHER): Promise<string> =>
+    (await send({ chatId, kind: 'callback', text: data })).messages[0]?.text ?? '';
 
   beforeEach(async () => {
     pool ??= new pg.Pool({ connectionString: TEST_DATABASE_URL });
@@ -113,13 +112,12 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
     it('says plainly that cases already being written still arrive', async () => {
       // R6. The router checks maintenance when a case is started and when a topic
       // is chosen, not when the detail is submitted, because stopping a teacher
-      // there would throw away what they typed and an urgent code they had
-      // spent. Without this sentence the first System member to use it reports
-      // the trickle of cases as a bug.
+      // there would throw away what they had typed. Without this sentence the
+      // first System member to use it reports the trickle of cases as a bug.
       const body = await run('/maintenance on');
 
       expect(body).toMatch(/keep arriving/i);
-      expect(body).toMatch(/urgent code/i);
+      expect(body).toMatch(/not interrupted/i);
     });
 
     it('does not interrupt a teacher part-way through writing a case', async () => {
@@ -192,79 +190,177 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
     });
   });
 
-  describe('/generate_urgent_code', () => {
-    const codeFrom = (body: string): string => {
-      const match = /Urgent code: ([A-Z0-9]+)/.exec(body);
-      if (match === null) throw new Error(`no code in: ${body}`);
-      return match[1]!;
+  /**
+   * `/urgent_pending`, which replaced `/generate_urgent_code`.
+   *
+   * The command it replaced issued the six-character credential a teacher had to
+   * be read down the telephone before the bot would let them describe an urgent
+   * problem. Its tests drove both halves of that route end to end, because the
+   * two halves had never met — codes had only ever been inserted by hand through
+   * `RUNBOOK.md` §4.4. There is no route left to join up.
+   *
+   * What this covers instead is the property the plan bought with the change:
+   * the request is filed and **nobody has to remember it**, because it is
+   * listable.
+   */
+  describe('/urgent_pending', () => {
+    const askForPriority = async (): Promise<void> => {
+      await teacherTaps(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
+      await teacherTypes('my residence card appointment is on Tuesday');
     };
 
-    it('issues a code that the teacher flow will accept', async () => {
-      // The two halves have never met: codes have only ever been inserted by
-      // hand (RUNBOOK 4.4). This drives the issuing command and then the teacher
-      // path, end to end, which is the only way to prove the formats agree.
-      const code = codeFrom(await run('/generate_urgent_code', SUPPORT_MEMBER));
-
-      await teacherTaps(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
-      expect(await teacherTypes(code)).toContain('Code accepted');
-
-      const filed = await teacherTypes('the dormitory is locked and we are outside');
-      expect(filed).toContain('marked urgent');
-
-      const rows = await db.execute<{ status: string }>(sql`SELECT status FROM cases`);
-      expect(rows.rows[0]?.status).toBe('Escalated');
+    it('says plainly when nothing is waiting', async () => {
+      expect(await run('/urgent_pending', SUPPORT_MEMBER)).toMatch(/no priority requests/i);
     });
 
-    it('is accepted after being typed back in lower case', async () => {
-      // The code is read aloud down a telephone and typed on a phone keyboard
-      // that capitalises for you. `normaliseUrgentCode` upper-cases what arrives,
-      // and this is what keeps the generated alphabet on the right side of that.
-      const code = codeFrom(await run('/generate_urgent_code', SUPPORT_MEMBER));
+    it('lists a request a teacher has just made', async () => {
+      await askForPriority();
 
-      await teacherTaps(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
-      expect(await teacherTypes(code.toLowerCase())).toContain('Code accepted');
+      const body = await run('/urgent_pending', SUPPORT_MEMBER);
+
+      const rows = await db.execute<{ reference: string }>(sql`SELECT reference FROM cases`);
+      expect(body).toContain(rows.rows[0]?.reference);
+      expect(body).toMatch(/waiting for a decision/i);
     });
 
-    it('records who issued it', async () => {
-      // urgent_codes.issued_by is notNull and has held '0' for every hand-issued
-      // code. The stranded-code alarm names the issuer; '0' names nobody.
-      const code = codeFrom(await run('/generate_urgent_code', SUPPORT_MEMBER));
+    it('never prints the teacher’s own words', async () => {
+      // They stay behind /case, which checks permissions and records who read
+      // them. A supervision list is not a reading route.
+      await askForPriority();
 
-      const rows = await db.execute<{ issued_by: string }>(
-        sql`SELECT issued_by FROM urgent_codes WHERE code = ${code}`,
+      expect(await run('/urgent_pending', SUPPORT_MEMBER)).not.toContain('residence card');
+    });
+
+    it('drops a request once somebody has confirmed it', async () => {
+      await askForPriority();
+      const rows = await db.execute<{ reference: string }>(sql`SELECT reference FROM cases`);
+      await teacherTaps(
+        encodeCallback(CALLBACK.URGENT_CONFIRM, rows.rows[0]!.reference),
+        SUPPORT_MEMBER,
       );
-      expect(rows.rows[0]?.issued_by).toBe(SUPPORT_MEMBER);
 
-      const audit = await db.execute<{ actor: string; action: string; subject: string }>(
-        sql`SELECT actor, action, subject FROM audit_log`,
-      );
-      expect(audit.rows).toEqual([
-        { actor: SUPPORT_MEMBER, action: 'URGENT_CODE_ISSUED', subject: code },
-      ]);
-    });
-
-    it('shows an expiry a person can read, in Tashkent time', async () => {
-      const body = await run('/generate_urgent_code', SUPPORT_MEMBER);
-
-      // The failure this guards is a `timestamptz` read through db.execute
-      // arriving as a string rather than a Date, which formats as "Invalid Date"
-      // — or throws inside a command, which bot.catch turns into silence.
-      expect(body).not.toMatch(/invalid date/i);
-      expect(body).toMatch(/\d{2} \w{3} \d{4}/);
-    });
-
-    it('issues a different code every time', async () => {
-      const first = codeFrom(await run('/generate_urgent_code', SUPPORT_MEMBER));
-      const second = codeFrom(await run('/generate_urgent_code', SUPPORT_MEMBER));
-
-      expect(first).not.toBe(second);
+      expect(await run('/urgent_pending', SUPPORT_MEMBER)).toMatch(/no priority requests/i);
     });
 
     it('is not available to an Observer', async () => {
-      expect(await run('/generate_urgent_code', OBSERVER)).toMatch(/rank/i);
+      expect(await run('/urgent_pending', OBSERVER)).toMatch(/rank/i);
+    });
+  });
 
-      const rows = await db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM urgent_codes`);
-      expect(Number(rows.rows[0]?.n)).toBe(0);
+  /**
+   * The confirm-urgent button — the first callback in this system a staff member
+   * taps rather than a teacher.
+   *
+   * A Telegram message sits in a chat for ever, so every one of these is about
+   * the same thing: the payload is a promise about the world made when the
+   * message was built, and none of it may be trusted on the way back in.
+   */
+  describe('the confirm-urgent button', () => {
+    const askForPriority = async (): Promise<string> => {
+      await teacherTaps(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
+      await teacherTypes('my residence card appointment is on Tuesday');
+      const rows = await db.execute<{ reference: string }>(sql`SELECT reference FROM cases`);
+      return rows.rows[0]!.reference;
+    };
+
+    const importanceOf = async (reference: string): Promise<string> => {
+      const rows = await db.execute<{ importance: string; status: string }>(
+        sql`SELECT importance, status FROM cases WHERE reference = ${reference}`,
+      );
+      return `${rows.rows[0]?.importance}/${rows.rows[0]?.status}`;
+    };
+
+    it('raises the case, tells the teacher, and confirms to the tapper', async () => {
+      const reference = await askForPriority();
+
+      const outcome = await send({
+        chatId: SUPPORT_MEMBER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+      });
+
+      expect(await importanceOf(reference)).toBe('Urgent/Escalated');
+      // messages[0] is always the answer to whoever acted — `deliver` words its
+      // failure alarm from that position.
+      expect(outcome.messages[0]?.chatId).toBe(SUPPORT_MEMBER);
+      const toTeacher = outcome.messages.find((m) => m.chatId === TEACHER);
+      expect(toTeacher?.text.toLowerCase()).toContain('marked urgent');
+    });
+
+    it('says nothing useful to a chat with no staff row', async () => {
+      // The dispatcher's rule: an answer that says "you are not staff" tells a
+      // stranger that the button they guessed at is real.
+      const reference = await askForPriority();
+
+      const outcome = await send({
+        chatId: TEACHER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+      });
+
+      // `Received`, not `New` — the case reached its queue when it was filed.
+      // What must not have moved is the importance.
+      expect(await importanceOf(reference)).toBe('Normal/Received');
+      expect(outcome.messages[0]?.text ?? '').not.toMatch(/staff|rank|permission/i);
+    });
+
+    it('refuses an Observer plainly, because they can see the button', async () => {
+      const reference = await askForPriority();
+
+      const outcome = await send({
+        chatId: OBSERVER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+      });
+
+      expect(outcome.messages[0]?.text ?? '').toMatch(/rank/i);
+      // `Received`, not `New` — the case reached its queue when it was filed.
+      // What must not have moved is the importance.
+      expect(await importanceOf(reference)).toBe('Normal/Received');
+    });
+
+    it('does nothing twice, and names who decided the first time', async () => {
+      const reference = await askForPriority();
+      const data = encodeCallback(CALLBACK.URGENT_CONFIRM, reference);
+
+      await send({ chatId: SUPPORT_MEMBER, kind: 'callback', text: data });
+      const again = await send({ chatId: SYSTEM, kind: 'callback', text: data });
+
+      expect(again.messages[0]?.text ?? '').toContain('already marked urgent');
+      expect(again.messages[0]?.text ?? '').toContain(SUPPORT_MEMBER);
+      // Nobody is told a second time, least of all the teacher.
+      expect(again.messages.some((m) => m.chatId === TEACHER)).toBe(false);
+
+      const audit = await db.execute<{ count: number }>(
+        sql`SELECT count(*)::int AS count FROM audit_log WHERE action = 'URGENT_CONFIRMED'`,
+      );
+      expect(audit.rows[0]?.count).toBe(1);
+    });
+
+    it('refuses a case nobody asked about', async () => {
+      await teacherTaps(encodeCallback(CALLBACK.MENU, MENU_ACTION.CONTACT_SUPPORT));
+      await teacherTaps(encodeCallback(CALLBACK.CASE_TOPIC, 'OTHER'));
+      await teacherTypes('an ordinary question about my contract');
+      const rows = await db.execute<{ reference: string }>(sql`SELECT reference FROM cases`);
+
+      const outcome = await send({
+        chatId: SUPPORT_MEMBER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, rows.rows[0]!.reference),
+      });
+
+      expect(outcome.messages[0]?.text ?? '').toMatch(/nothing to confirm/i);
+      expect(await importanceOf(rows.rows[0]!.reference)).toBe('Normal/Received');
+    });
+
+    it('refuses a reference that no longer exists', async () => {
+      const outcome = await send({
+        chatId: SUPPORT_MEMBER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, 'SUPPORT-2026-99999'),
+      });
+
+      expect(outcome.messages[0]?.text ?? '').toMatch(/cannot find/i);
     });
   });
 
@@ -435,22 +531,14 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
     });
   });
 
-  describe('the generated code itself', () => {
-    it('is the agreed length and drawn only from the agreed alphabet', () => {
-      for (let i = 0; i < 200; i += 1) {
-        const code = generateUrgentCode();
-        expect(code).toHaveLength(URGENT_CODE_LENGTH);
-        // `for…of` rather than spreading the string: same characters, and it does
-        // not invite the question of what this would do to a surrogate pair.
-        for (const ch of code) expect(URGENT_CODE_ALPHABET).toContain(ch);
-      }
-    });
-
-    it('leaves out the characters people mishear down a telephone', () => {
-      // 0/O and 1/I. The code's whole job is to survive being read aloud and
-      // typed by somebody under stress; those two pairs are where that fails,
-      // and it fails as a rejected code with no explanation.
-      expect(URGENT_CODE_ALPHABET).not.toMatch(/[01OI]/);
-    });
-  });
+  /**
+   * A block tested "the generated code itself" — its length, its alphabet, and
+   * that it left out `0 O 1 I` because those are the characters people mishear
+   * when a code is read aloud down a bad telephone line.
+   *
+   * All of it went on 1 August 2026 with the code generator. It is recorded
+   * rather than deleted silently because the reasoning was good and would have
+   * to be rebuilt from scratch if anything in this system ever needs a string a
+   * person reads to another person over the telephone.
+   */
 });

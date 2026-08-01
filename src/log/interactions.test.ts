@@ -18,7 +18,6 @@ const CASE_DETAIL: ConversationState = {
   category: CASE_CATEGORY.VISA,
   attempts: 0,
 };
-const URGENT_CODE: ConversationState = { kind: 'AwaitingUrgentCode', attempts: 0 };
 
 describe('when the teacher is signing in', () => {
   it('redacts the identifier to a hint', () => {
@@ -48,23 +47,19 @@ describe('when the teacher is describing a case', () => {
     );
   });
 
-  it('withholds an urgent description too', () => {
-    const urgentDetail: ConversationState = {
-      kind: 'AwaitingUrgentDetail',
-      codeAccepted: 'AB12CD',
-      attempts: 0,
-    };
+  it('withholds a priority request’s description too', () => {
+    const urgentDetail: ConversationState = { kind: 'AwaitingUrgentDetail', attempts: 0 };
     expect(redactDetail('I am stranded at the airport', urgentDetail)).toBe(
       '(case detail withheld — 28 characters)',
     );
   });
 });
 
-describe('when the teacher is entering an urgent code', () => {
-  it('withholds the code', () => {
-    expect(redactDetail('AB12CD', URGENT_CODE)).toBe('(urgent code withheld)');
-  });
-});
+/**
+ * A block tested "when the teacher is entering an urgent code" and was removed
+ * on 1 August 2026 with the codes themselves. There is no state in which a
+ * teacher types a credential any more, so there is nothing left to withhold.
+ */
 
 describe('when there is no conversation state', () => {
   /**

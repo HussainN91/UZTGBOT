@@ -19,7 +19,12 @@ import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { route, type InboundUpdate, type RouterOutcome } from '../telegram/router.js';
 import { createCase } from './service.js';
-import { notifyNewCase, type NotificationOutcome } from './notify.js';
+import { requestUrgentCase } from './urgent.js';
+import {
+  notifyNewCase,
+  notifyUrgentRequestOnCase,
+  type NotificationOutcome,
+} from './notify.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
 
@@ -50,20 +55,17 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
   const fileAndNotify = async (
     chatId: string,
     category: string,
-    urgent = false,
   ): Promise<{ reference: string; outcome: NotificationOutcome }> =>
     withChatLock(db, chatId, async (tx) => {
       const created = await createCase(tx, {
         chatId,
         category: category as never,
         detail: DETAIL,
-        ...(urgent ? { escalate: true } : {}),
       });
       const outcome = await notifyNewCase(tx, {
         reference: created.reference,
         category,
         teacherChatId: chatId,
-        urgent,
       });
       return { reference: created.reference, outcome };
     });
@@ -220,15 +222,6 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       const ordinary = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
       expect(ordinary.outcome.messages.every((m) => m.purpose !== undefined)).toBe(true);
       expect(ordinary.outcome.messages[0]?.purpose).toMatch(/new case/i);
-
-      const urgent = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.TRAVEL, true);
-      expect(urgent.outcome.messages[0]?.purpose).toMatch(/urgent/i);
-    });
-
-    it('marks an urgent case as urgent where a person will see it', async () => {
-      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.TRAVEL, true);
-
-      expect(outcome.messages[0]?.text ?? '').toMatch(/urgent/i);
     });
   });
 
@@ -288,10 +281,29 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
     });
 
     it('never demotes an escalated case to Received', async () => {
-      // The urgent path files at Escalated, and Escalated is what puts a case in
-      // /urgent while it is open. Overwriting it here would take an emergency
-      // out of the list that exists to show emergencies.
-      const { reference } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.TRAVEL, true);
+      /**
+       * `Escalated` is what puts a case in `/urgent` while it is open, and
+       * overwriting it here would take a confirmed priority case out of the one
+       * list that exists to show them.
+       *
+       * The case is escalated by hand rather than through the request path: no
+       * caller can open a case at `Escalated` any more — `createCase` lost the
+       * flag that allowed it on 1 August 2026 — so the only way to reach this
+       * state in a test is the way the confirmation reaches it in production,
+       * which is a later write.
+       */
+      const { reference } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.TRAVEL);
+      await db.execute(
+        sql`UPDATE cases SET status = 'Escalated' WHERE reference = ${reference}`,
+      );
+
+      await withChatLock(db, TASHKENT_TEACHER, (tx) =>
+        notifyNewCase(tx, {
+          reference,
+          category: CASE_CATEGORY.TRAVEL,
+          teacherChatId: TASHKENT_TEACHER,
+        }),
+      );
 
       expect(await statusOf(reference)).toBe('Escalated');
     });
@@ -308,10 +320,29 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       expect(rows.some((r) => r.detail.includes(reference))).toBe(true);
     });
 
-    it('names an urgent fan-out differently', async () => {
-      await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.TRAVEL, true);
+    it('names an urgent-request fan-out differently from a new case', async () => {
+      /**
+       * Two different events, and the log has to tell them apart or "how many
+       * priority requests went unanswered" cannot be asked of it — which is the
+       * question the accepted "it waits on one coordinator" risk needs an answer
+       * to.
+       */
+      await withChatLock(db, TASHKENT_TEACHER, async (tx) => {
+        const asked = await requestUrgentCase(tx, {
+          chatId: TASHKENT_TEACHER,
+          detail: 'my appointment is on Tuesday',
+        });
+        await notifyUrgentRequestOnCase(tx, {
+          reference: asked.reference,
+          category: CASE_CATEGORY.CONTACT_SUPPORT,
+          teacherChatId: TASHKENT_TEACHER,
+          isNew: asked.isNew,
+        });
+      });
 
-      expect((await systemLog()).map((r) => r.action)).toContain('STAFF_NOTIFIED_URGENT');
+      const actions = (await systemLog()).map((r) => r.action);
+      expect(actions).toContain('STAFF_NOTIFIED_URGENT_REQUEST');
+      expect(actions).toContain('STAFF_NOTIFIED_NEW');
     });
 
     it('records the zero, so a case nobody saw is visible in the log too', async () => {
@@ -349,14 +380,14 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       expect(outcome.messages.slice(1).every((m) => !m.text.includes(DETAIL))).toBe(true);
     });
 
-    it('announces an urgent escalation of a case staff already know about', async () => {
+    it('announces a priority request on a case staff already know about', async () => {
       /**
-       * The dedup path, and it is the *common* one. Urgent cases have no topic
-       * picker, so every one of them files under the general category — and so
-       * does every ordinary Contact Support case, which means a teacher who
-       * opened one yesterday always deduplicates against it. If notification
-       * fired only on an insert, the escalation nobody hears about would be the
-       * one a teacher spent a single-use code on.
+       * The dedup path, and it is the *common* one. A priority request has no
+       * topic picker, so every one of them files under the general category —
+       * and so does every ordinary Contact Support case, which means a teacher
+       * who opened one yesterday always deduplicates against it. If notification
+       * fired only on an insert, the request nobody hears about would be the one
+       * from the teacher who had already been in touch.
        */
       await saveState(db, TASHKENT_TEACHER, {
         kind: 'AwaitingCaseDetail',
@@ -365,25 +396,20 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       });
       await send({ chatId: TASHKENT_TEACHER, kind: 'text', text: 'the water has been off a week' });
 
-      await db.execute(sql`
-        INSERT INTO urgent_codes (code, issued_by, expires_at)
-        VALUES ('QQ42ZZ', ${VISA_SUPPORT_TASHKENT}, now() + interval '48 hours')
-      `);
-      await saveState(db, TASHKENT_TEACHER, { kind: 'AwaitingUrgentCode', attempts: 0 });
-      await send({ chatId: TASHKENT_TEACHER, kind: 'text', text: 'QQ42ZZ' });
-
-      const escalated = await send({
+      await saveState(db, TASHKENT_TEACHER, { kind: 'AwaitingUrgentDetail', attempts: 0 });
+      const asked = await send({
         chatId: TASHKENT_TEACHER,
         kind: 'text',
         text: 'it is now a burst pipe and the flat is flooding',
       });
 
-      const staffTold = escalated.messages.slice(1);
+      const staffTold = asked.messages.slice(1);
       expect(staffTold.length).toBeGreaterThan(0);
-      expect(staffTold.map((m) => m.chatId)).toContain(VISA_SUPPORT_TASHKENT);
-      expect(staffTold[0]?.text ?? '').toMatch(/urgent/i);
-      expect(staffTold[0]?.purpose).toMatch(/urgent/i);
+      expect(staffTold[0]?.purpose).toMatch(/urgent|priority/i);
+      // The teacher's own words stay behind /case, which records who read them.
       expect(staffTold.every((m) => !m.text.includes('burst pipe'))).toBe(true);
+      // And the button is what makes the message actionable.
+      expect(staffTold[0]?.keyboard?.[0]?.[0]?.callback_data ?? '').toContain('UC:');
     });
 
     it('does not page everybody again when a teacher taps twice', async () => {

@@ -346,79 +346,73 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
     });
   });
 
-  describe('urgent cases', () => {
-    const CODE = 'XY77ZZ';
+  /**
+   * Asking for priority.
+   *
+   * These tests used to be about a one-time code: a wrong one refused without
+   * saying why, a right one accepted without being spent, and the code withheld
+   * from the log. The whole route went on 1 August 2026 — the gate moved from
+   * "before the teacher may speak" to "before priority is granted".
+   *
+   * What replaced it is one property worth stating plainly: **there is nothing
+   * between the button and the writing.**
+   */
+  describe('asking for priority', () => {
+    const DESCRIPTION = 'The school has locked the dormitory and we are outside';
 
-    const issueCode = async (): Promise<void> => {
-      await db.execute(sql`
-        INSERT INTO urgent_codes (code, issued_by, expires_at)
-        VALUES (${CODE}, '990001', now() + interval '48 hours')
+    it('asks for the problem straight away, with no code in the way', async () => {
+      await verify();
+      const prompt = await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
+
+      expect(firstText(prompt).toLowerCase()).toContain('describe');
+      expect(firstText(prompt).toLowerCase()).not.toContain('code');
+    });
+
+    it('files the case at Normal and tells the teacher a person will decide', async () => {
+      await verify();
+      await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
+
+      const filed = await text(DESCRIPTION);
+
+      expect(firstText(filed).toLowerCase()).toContain('coordinator');
+      /**
+       * The assertion the whole feature turns on. Retention keys off
+       * `importance`, so a request that marked itself urgent would hand every
+       * teacher six months of retention for a tap.
+       */
+      const rows = await db.execute<{ status: string; importance: string; requested: boolean }>(sql`
+        SELECT status, importance, urgent_requested_at IS NOT NULL AS requested FROM cases
       `);
-    };
-
-    it('asks for a code, refuses a wrong one, and never says why', async () => {
-      await verify();
-      await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
-      const outcome = await text('WRONG1');
-
-      expect(firstText(outcome)).toContain('not accepted');
-      expect(firstText(outcome)).not.toContain('expired');
-      expect(firstText(outcome)).not.toContain('already used');
+      expect(rows.rows[0]?.importance).toBe('Normal');
+      expect(rows.rows[0]?.requested).toBe(true);
     });
 
-    it('accepts a code without spending it, then files an escalated case', async () => {
-      await verify();
-      await issueCode();
-      await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
-
-      const accepted = await text(CODE);
-      expect(firstText(accepted)).toContain('Code accepted');
-      // Not spent yet — a teacher who stops here keeps their code.
-      const mid = await db.execute<{ used_at: string | null }>(
-        sql`SELECT used_at::text AS used_at FROM urgent_codes WHERE code = ${CODE}`,
-      );
-      expect(mid.rows[0]?.used_at).toBeNull();
-
-      const filed = await text('The school has locked the dormitory and we are outside');
-      expect(firstText(filed)).toContain('marked urgent');
-
-      const rows = await db.execute<{ status: string }>(sql`SELECT status FROM cases`);
-      expect(rows.rows[0]?.status).toBe('Escalated');
-    });
-
-    it('escalates an existing case rather than opening a second one', async () => {
-      // The common path, not an edge case: urgent has no topic picker, so it
-      // files under the same general category as every Contact Support case.
+    it('adds to an existing case rather than opening a second one', async () => {
+      // The common path, not an edge case: a priority request has no topic
+      // picker, so it files under the same general category as every Contact
+      // Support case.
       await verify();
       await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.CONTACT_SUPPORT));
       await tap(encodeCallback(CALLBACK.CASE_TOPIC, 'OTHER'));
       await text('I asked about my contract yesterday');
 
-      await issueCode();
       await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
-      await text(CODE);
-      const outcome = await text('It has become an emergency');
+      const outcome = await text('It has still not been answered and my start date is Monday');
 
-      expect(firstText(outcome)).toContain('existing case has been marked urgent');
+      expect(firstText(outcome).toLowerCase()).toContain('already have');
       const rows = await db.execute(sql`SELECT reference FROM cases`);
       expect(rows.rows).toHaveLength(1);
-      // The code still bought what it promised.
-      const codes = await db.execute<{ case_reference: string | null }>(
-        sql`SELECT case_reference FROM urgent_codes WHERE code = ${CODE}`,
-      );
-      expect(codes.rows[0]?.case_reference).not.toBeNull();
     });
 
-    it('withholds the code from the log', async () => {
+    it('withholds the description from the log, as it does for any case', async () => {
       await verify();
-      await issueCode();
       await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
-      await text(CODE);
+      await text(DESCRIPTION);
 
       const rows = await db.execute<{ detail: string }>(
         sql`SELECT detail FROM messages WHERE chat_id = ${CHAT}`,
       );
-      expect(rows.rows.map((r) => r.detail).join('|')).not.toContain(CODE);
+      expect(rows.rows.map((r) => r.detail).join('|')).not.toContain('dormitory');
     });
   });
 
@@ -434,7 +428,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       expect(firstText(outcome)).toContain('paused');
     });
 
-    it('stops an urgent case, and says who to call instead', async () => {
+    it('stops a priority request, and says who to call instead', async () => {
       await verify();
       const outcome = await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
       expect(firstText(outcome)).toContain('paused');

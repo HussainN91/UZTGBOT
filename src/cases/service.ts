@@ -18,7 +18,6 @@ import {
   CHECK_MY_CASE_CAP,
   type CaseCategory,
   MAX_SNOOZE_DAYS,
-  TIMEZONE,
 } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import {
@@ -66,14 +65,16 @@ export interface CreateCaseRequest {
   /** The teacher's own words. Stored, never echoed back, never logged. */
   readonly detail: string;
   /**
-   * File at `Escalated` rather than `New`.
+   * There used to be an `escalate` flag here, and its removal on 1 August 2026
+   * is the whole shape of the urgent gate.
    *
-   * Only the urgent flow sets this, and only after a code has been accepted —
-   * it is what the code buys. A flag rather than a free `status` parameter,
-   * because a caller that can choose any opening status can file a case as
-   * `Closed`.
+   * It filed a case at `Escalated`/`Urgent` in the opening insert, and the
+   * urgent flow set it the moment a one-time code was accepted — the code was
+   * what bought the escalation. Nothing may do that now. A case is opened at
+   * `New`/`Normal` by every path there is, and only `confirmUrgentRequest`
+   * raises it, because only a person may decide that one teacher's problem
+   * comes before another's.
    */
-  readonly escalate?: boolean;
 }
 
 export interface CreateCaseResult {
@@ -129,18 +130,16 @@ export async function createCase(
     category: request.category,
     teacherChatId: request.chatId,
     detail: request.detail,
-    status: request.escalate === true ? 'Escalated' : 'New',
     /**
-     * Set in the same insert as the status, never as a second write.
+     * Both defaulted, and neither reachable from a caller.
      *
-     * `Escalated` is a status and a status moves — once this case is resolved it
-     * becomes `Completed` and nothing about it says it was ever an emergency, so
-     * stage 5's retention would remove it at the ordinary interval. The marker is
-     * what survives (R13). A code spent for a case not marked as what the code
-     * bought is the same shape of fault as a code spent with no case at all,
-     * which already has its own alarm.
+     * They are written explicitly rather than left to the column defaults so
+     * that the opening state of a case is readable here, in the one write path,
+     * rather than in the schema — and so that the next person to want a case
+     * that starts somewhere else has to come here and say why.
      */
-    importance: request.escalate === true ? 'Urgent' : 'Normal',
+    status: 'New',
+    importance: 'Normal',
     lastActor: request.chatId,
   });
 
@@ -148,49 +147,19 @@ export async function createCase(
 }
 
 /**
- * Add an urgent follow-up to a case that already exists, and escalate it.
+ * `appendUrgentFollowUp` lived here and was removed on 1 August 2026.
  *
- * The one route by which `detail` may change after a case is filed, and it only
- * ever appends. `CaseFields` deliberately cannot reach `detail` — a write path
- * that can replace a teacher's words is a write path that can lose them — but
- * dropping the words entirely is what the Apps Script version did on this path
- * (`MenuHandler.gs:302`), and it meant a spent single-use code bought nothing
- * and nobody was told.
+ * It appended a teacher's later words to an open case **and escalated it in the
+ * same statement** — status to `Escalated`, importance raised by `GREATEST` —
+ * because on the old route the teacher had already spent a one-time code by the
+ * time it ran, and the escalation was what the code had bought.
  *
- * Stamped in Tashkent, by the database, for the same reason references are: a
- * follow-up filed at 00:30 is dated by the clock the reader uses.
- *
- * **Importance is raised here and can never be lowered here.** This is the
- * deduplicated urgent path — urgent-plus-deduplicated is the *common* case, not
- * an edge one — so if it escalated the status and left importance alone, the
- * commonest urgent case would be the one stage 5's retention throws away first
- * (R13, third order). `GREATEST` does the raising: `case_importance` is declared
- * `Normal < Urgent < Critical`, and PostgreSQL orders an enum by its declared
- * order, so a case somebody has already judged `Critical` stays `Critical`
- * rather than being demoted by an automatic follow-up.
- *
- * Returns false when no such case exists, which the caller treats as ordinary —
- * a case can be removed by retention between the dedup read and this write.
+ * Nothing may do that now. Appending is what the *request* path does, and a
+ * request that raised importance would be granting itself the thing it was
+ * asking a coordinator to decide. The append without the escalation lives in
+ * `urgent.ts` as `appendUrgentRequest`, deliberately close to the code that
+ * knows a request is only a request.
  */
-export async function appendUrgentFollowUp(
-  db: Database,
-  reference: string,
-  detail: string,
-  actor: string,
-): Promise<boolean> {
-  const result = await db.execute<{ reference: string }>(sql`
-    UPDATE cases SET
-      detail = detail || E'\n[' || to_char(now() AT TIME ZONE ${TIMEZONE}, 'YYYY-MM-DD HH24:MI')
-             || ' URGENT follow-up] ' || ${detail},
-      status = 'Escalated',
-      importance = GREATEST(importance, 'Urgent'::case_importance),
-      updated_at = now(),
-      last_actor = ${actor}
-    WHERE reference = ${reference}
-    RETURNING reference
-  `);
-  return result.rows.length > 0;
-}
 
 /**
  * Record that a new case reached somebody who can act on it — D25.

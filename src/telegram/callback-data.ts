@@ -81,6 +81,24 @@ export const CALLBACK = {
    * measures it with real values rather than trusting the arithmetic here.
    */
   PRIVACY_ACCEPTED: 'PRIV',
+  /**
+   * "Yes, treat this case as urgent", e.g. `UC:SUPPORT-2026-00482`.
+   *
+   * **The first callback in this system that a staff member taps rather than a
+   * teacher**, and the first whose payload names a case. Both are worth stating.
+   *
+   * The reference is carried rather than looked up because the button lives in a
+   * coordinator's scrollback indefinitely and the message it sits under is not
+   * re-read. It is not a permission: `routeCallback` resolves it through the
+   * ordinary staff gate and `confirmUrgentRequest` re-validates the case's state
+   * on every tap, so a payload replayed by somebody who was demoted last week
+   * buys nothing.
+   *
+   * `UC:SUPPORT-2026-00482` is 25 bytes against the 64-byte limit. The longest
+   * reference this system can build is `CONTRACT-2026-99999`, giving 22 — a test
+   * measures it with real values rather than trusting the arithmetic here.
+   */
+  URGENT_CONFIRM: 'UC',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];

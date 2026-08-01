@@ -107,14 +107,28 @@ export function mainMenuKeyboard(): InlineKeyboard {
     },
   ]);
   rows.push([CONTACT_SUPPORT_BUTTON]);
+  /**
+   * "Ask for Priority", and **not** "🚨 Urgent Case", which is what this said
+   * until 1 August 2026.
+   *
+   * The label is the feature. A siren and the word *urgent* invite a teacher to
+   * decide whether their situation is an emergency, which is both the wrong
+   * question and one the bot cannot answer — it is not a crisis line and must
+   * never read as one. What the button actually does is ask a regional
+   * coordinator to move a case ahead of the others, so it says that.
+   *
+   * The wording also sets an expectation the system can keep. "Urgent Case"
+   * promises the case *is* urgent; asking for priority promises only that
+   * somebody will read the request, which is all that happens until they tap.
+   */
   rows.push([
     {
-      text: '🚨 Urgent Case',
+      text: '⏫ Ask for Priority',
       callback_data: encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE),
     },
   ]);
   /**
-   * Last, and below Urgent Case, on purpose (Q2, step 7).
+   * Last, and below Ask for Priority, on purpose (Q2, step 7).
    *
    * A teacher who does not know who to call is a teacher who is not in the
    * middle of anything, so this does not need to compete with the two buttons

@@ -6,7 +6,7 @@
  *
  *   1. Claim the update, or stop.        Telegram resends anything it thinks
  *                                        failed; a replay must not file a second
- *                                        case or spend a second urgent code.
+ *                                        case or a second priority request.
  *   2. Take the chat's lock.             One lock, in one place. Case dedup and
  *                                        conversation state both need
  *                                        serialising for the same chat, and two
@@ -39,9 +39,15 @@ import {
 import { PRIVACY_NOTICE_VERSION } from '../config/privacy.js';
 import { parsePeriodsField, renderPeriodsField, requiresReconsent } from '../config/retention.js';
 import { isMaintenanceMode, retentionPeriods } from '../config/settings.js';
-import { fileUrgentCase, checkUrgentCode } from '../cases/urgent.js';
+import { confirmUrgentRequest, requestUrgentCase } from '../cases/urgent.js';
 import { TeacherNotVerifiedError, createCase } from '../cases/service.js';
-import { NO_NOTIFICATION, notifyNewCase, type NotificationOutcome } from '../cases/notify.js';
+import {
+  NO_NOTIFICATION,
+  notifyNewCase,
+  notifyUrgentConfirmed,
+  notifyUrgentRequestOnCase,
+  type NotificationOutcome,
+} from '../cases/notify.js';
 import { clearState, loadState, saveState, type ConversationState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
 import { activeFormByType, activeForms } from '../forms/repository.js';
@@ -50,8 +56,11 @@ import { privacyAcceptance, recordAcceptance } from '../teachers/privacy.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { verifyIdentifier } from '../teachers/verify.js';
 import type { Alert } from '../sync/alerts.js';
+import { findCase } from '../cases/queries.js';
+import { CAPABILITY, can, floorFor } from '../staff/roles.js';
 import { CALLBACK, decodeCallback } from './callback-data.js';
-import { routeStaffCommand, staffHelpSection } from './commands/index.js';
+import { STAFF_DENIED, routeStaffCommand, staffHelpSection } from './commands/index.js';
+import { scopeOf } from './commands/context.js';
 import {
   answerReply,
   faqHubReply,
@@ -77,7 +86,7 @@ import {
   regionManagerReply,
   signInPromptReply,
 } from './handlers/menu.js';
-import { type TelegramLookup, regionManagerFor } from '../staff/repository.js';
+import { type TelegramLookup, findStaff, regionManagerFor } from '../staff/repository.js';
 import {
   confirmRegion,
   flagRegionMismatch,
@@ -86,13 +95,12 @@ import {
   regionFor,
 } from '../teachers/region.js';
 import {
-  urgentCaseEscalatedReply,
-  urgentCaseFiledReply,
-  urgentCaseNotEscalatedReply,
-  urgentCodeAcceptedReply,
-  urgentCodeLockedOutReply,
-  urgentCodePromptReply,
-  urgentCodeRejectedReply,
+  urgentAlreadyReply,
+  urgentAppendedReply,
+  urgentDetailPromptReply,
+  urgentGrantedReply,
+  urgentRequestedReply,
+  urgentStillPendingReply,
   urgentUnavailableReply,
 } from './handlers/urgent.js';
 import { MENU_ACTION, backToMenuKeyboard, formsKeyboard, mainMenuKeyboard } from './keyboards.js';
@@ -329,10 +337,8 @@ async function routeText(
       return handleIdentifier(db, update.chatId, text, state, deps);
     case 'AwaitingCaseDetail':
       return handleCaseDetail(db, update.chatId, text, state, deps);
-    case 'AwaitingUrgentCode':
-      return handleUrgentCode(db, update.chatId, text, deps);
     case 'AwaitingUrgentDetail':
-      return handleUrgentDetail(db, update.chatId, text, state, deps);
+      return handleUrgentDetail(db, update.chatId, text, deps);
     case 'AwaitingCaseTopic':
       // They typed instead of tapping. Ask again rather than guessing which
       // category they meant — routing to the wrong queue is worse than a re-tap.
@@ -616,7 +622,6 @@ async function handleCaseDetail(
           reference: result.reference,
           category: state.category,
           teacherChatId: chatId,
-          urgent: false,
         })
       : NO_NOTIFICATION;
 
@@ -674,123 +679,64 @@ async function retryCaseDetail(
   });
 }
 
-async function handleUrgentCode(
-  db: Database,
-  chatId: string,
-  text: string,
-  deps: RouterDeps,
-): Promise<RouterOutcome> {
-  const outcome = await checkUrgentCode(db, chatId, text);
-
-  if (outcome.kind === 'lockedOut') {
-    await clearState(db, chatId);
-    return only(chatId, urgentCodeLockedOutReply(deps.supportContact));
-  }
-
-  if (outcome.kind === 'rejected') {
-    // The attempt count lives in the database, not this state, so clearing the
-    // state by tapping Main Menu cannot reset it. The state's own counter is
-    // left alone deliberately.
-    await saveState(db, chatId, { kind: 'AwaitingUrgentCode', attempts: 0 });
-    return only(
-      chatId,
-      urgentCodeRejectedReply(outcome.attemptsRemaining, deps.supportContact),
-    );
-  }
-
-  await saveState(db, chatId, {
-    kind: 'AwaitingUrgentDetail',
-    codeAccepted: outcome.code,
-    attempts: 0,
-  });
-  return only(chatId, urgentCodeAcceptedReply());
-}
-
+/**
+ * A teacher's description of something they want treated as a priority.
+ *
+ * The state is cleared *before* anything is announced, on every path out. A
+ * teacher whose request left them still in `AwaitingUrgentDetail` would have
+ * their next message — the FAQ question they ask five minutes later — appended
+ * to the case as more urgent detail.
+ */
 async function handleUrgentDetail(
   db: Database,
   chatId: string,
   text: string,
-  state: Extract<ConversationState, { kind: 'AwaitingUrgentDetail' }>,
   deps: RouterDeps,
 ): Promise<RouterOutcome> {
   if (text === '') {
     return only(chatId, {
       text:
-        'I did not get any text. Please describe the emergency in one message — ' +
-        'your code is still valid until you do.',
+        'I did not get any text. Please describe the problem in one message, and say ' +
+        'why it cannot wait its turn.',
     });
   }
 
   try {
-    const result = await fileUrgentCase(db, {
-      chatId,
-      code: state.codeAccepted,
-      detail: text,
-    });
+    const result = await requestUrgentCase(db, { chatId, detail: text });
     await clearState(db, chatId);
 
     /**
-     * Announced whether or not the case is new — the opposite of the ordinary
-     * path above, and deliberately.
+     * Nobody is asked to decide something that has already been decided.
      *
-     * Urgent cases have no topic picker, so every one of them files under the
-     * general category and so does every ordinary Contact Support case: a
-     * teacher who opened one yesterday always deduplicates against it. Urgent
-     * plus deduplicated is the *common* path, not an edge case. Announcing only
-     * on an insert would mean the escalation nobody hears about is the one a
-     * teacher spent a single-use code on.
+     * A case at `Urgent` or `Critical` has had its judgement; a case with a
+     * request already pending has one waiting. In both situations the teacher's
+     * words are kept — that happened inside `requestUrgentCase` — and no
+     * coordinator is paged, because a second identical message about a decision
+     * somebody is already sitting on is how the button stops being read.
      *
-     * It is announced when the code would not spend, too. The case was filed at
-     * `Escalated` by `createCase` before the code was touched, so a teacher who
-     * described an emergency reaches somebody either way; the failed
-     * consumption has its own alarm below.
+     * This is the deduplicated path, and it is the *common* one rather than an
+     * edge case: a priority request has no topic picker, so it files under the
+     * general category and so does every ordinary Contact Support case.
      */
-    const notice = await notifyNewCase(db, {
+    if (result.alreadyUrgent) {
+      return only(chatId, urgentAlreadyReply(result.reference, deps.supportContact));
+    }
+    if (result.alreadyRequested) {
+      return only(chatId, urgentStillPendingReply(result.reference, deps.supportContact));
+    }
+
+    const notice = await notifyUrgentRequestOnCase(db, {
       reference: result.reference,
       category: URGENT_CASE_CATEGORY,
       teacherChatId: chatId,
-      urgent: true,
+      isNew: result.isNew,
     });
-
-    if (!result.escalated) {
-      /**
-       * The code was good when they typed it and is not good now. The case is
-       * filed anyway — see `fileUrgentCase` — and this is alerted because the
-       * only two explanations are an expiry straddle or two chats holding the
-       * same code, and both want a person.
-       */
-      return {
-        messages: [
-          {
-            chatId,
-            text: urgentCaseNotEscalatedReply(result.reference, deps.supportContact).text,
-            keyboard: backToMenuKeyboard(),
-          },
-          ...notice.messages,
-        ],
-        alerts: [
-          ...notice.alerts,
-          {
-            severity: 'critical',
-            title: 'An urgent code was accepted and then would not spend',
-            body: [
-              `Chat: ${chatId}`,
-              `Case: ${result.reference} — filed, but NOT escalated.`,
-              '',
-              'The code passed its check when the teacher typed it and failed when',
-              'their case was filed. Either it expired in between, or another chat',
-              'spent it. Telephone the teacher; their case is not marked urgent.',
-            ].join('\n'),
-          },
-        ],
-      };
-    }
 
     return withNotice(
       chatId,
       result.isNew
-        ? urgentCaseFiledReply(result.reference, deps.supportContact)
-        : urgentCaseEscalatedReply(result.reference, deps.supportContact),
+        ? urgentRequestedReply(result.reference, deps.supportContact)
+        : urgentAppendedReply(result.reference, deps.supportContact),
       notice,
     );
   } catch (err) {
@@ -799,7 +745,7 @@ async function handleUrgentDetail(
       return only(chatId, {
         text:
           'I could not open a case because this account is no longer signed in.\n\n' +
-          `This is urgent — contact ${deps.supportContact} now.`,
+          `Tap Main Menu to sign in again, or contact ${deps.supportContact}.`,
         keyboard: backToMenuKeyboard(),
       });
     }
@@ -924,9 +870,137 @@ async function routeCallback(
       });
     }
 
+    /**
+     * The first button in this system a staff member taps rather than a teacher.
+     *
+     * It goes through the same authorization the typed commands do and then
+     * through the case scope on top of it, which is not belt and braces: the
+     * button was sent to whoever covered the region when the request arrived,
+     * and a message sits in a Telegram scrollback for ever. The person tapping
+     * it today may have been demoted, deactivated, or moved to another region
+     * since — and none of those would change the payload sitting in their chat.
+     */
+    case CALLBACK.URGENT_CONFIRM:
+      return confirmUrgent(db, update.chatId, first, state, deps);
+
     default:
       return only(update.chatId, mainMenuReply());
   }
+}
+
+/**
+ * A coordinator agreeing that a case should jump the queue.
+ *
+ * Four things are checked and each rules out a different way of getting this
+ * wrong:
+ *
+ *   **An active staff row**, and silence without one. A tap from a chat with no
+ *   staff row is answered with the main menu, exactly as an unreadable payload
+ *   is — the dispatcher's rule (`commands/index.ts`), and for its reason: an
+ *   answer that says "you are not staff" tells a stranger that the button they
+ *   guessed at is real.
+ *
+ *   **`urgent.issue`**, answered plainly for somebody who *is* staff. They know
+ *   the button exists because it is in their chat; refusing silently would leave
+ *   them tapping it.
+ *
+ *   **The case, through `findCase`**, which applies the visibility scope. The
+ *   note in `updateCase` is the whole argument: it takes a bare reference and
+ *   writes, so a caller that skips the scoped lookup lets a staff member change
+ *   a case in a queue or region they do not hold, and nothing would notice.
+ *
+ *   **The request's own state**, inside `confirmUrgentRequest`, in the same
+ *   statement as the write. That is what makes a second tap a no-op rather than
+ *   a second audit row and a second message to the teacher.
+ */
+async function confirmUrgent(
+  db: Database,
+  chatId: string,
+  reference: string,
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, `urgent confirm ${reference}`, state);
+    return only(chatId, mainMenuReply());
+  }
+
+  if (!can(member, CAPABILITY.URGENT_ISSUE)) {
+    await logInteraction(db, chatId, STAFF_DENIED, `urgent confirm ${reference}`, state);
+    return only(chatId, {
+      text:
+        'Confirming an urgent request is not available at your rank.\n\n' +
+        `It needs ${floorFor(CAPABILITY.URGENT_ISSUE)} or above. Yours is ${member.role}.`,
+    });
+  }
+
+  const found = await findCase(db, scopeOf(member), reference);
+  if (found === null) {
+    return only(chatId, {
+      text:
+        `I cannot find ${reference}, or it is outside your queue and regions.\n\n` +
+        'It may have been removed by the retention schedule, or your coverage may have ' +
+        'changed since this message was sent.',
+    });
+  }
+
+  const outcome = await confirmUrgentRequest(db, found.reference, member.telegramId);
+
+  if (outcome.kind === 'unknown' || outcome.kind === 'notRequested') {
+    return only(chatId, {
+      text:
+        `Nothing to confirm on ${found.reference}.\n\n` +
+        'No priority request is waiting on it. If it needs raising anyway, use ' +
+        `/mark ${found.reference} Urgent.`,
+    });
+  }
+
+  if (outcome.kind === 'alreadyConfirmed') {
+    return only(chatId, {
+      text:
+        `${found.reference} is already marked urgent.\n\n` +
+        `Confirmed by ${outcome.by ?? 'somebody whose id was not recorded'}. Nothing has changed ` +
+        'and nobody has been told again.',
+    });
+  }
+
+  const notice = await notifyUrgentConfirmed(db, {
+    reference: outcome.reference,
+    teacherChatId: outcome.teacherChatId,
+    owner: outcome.owner,
+    confirmedBy: member.telegramId,
+  });
+
+  /**
+   * Three audiences, and the order is `deliver`'s contract rather than a
+   * preference. `messages[0]` is the answer to whoever acted — the coordinator —
+   * because that is the position `deliver` words its failure alarm from.
+   *
+   * The teacher's message is sent from here and not from `notify.ts` for the
+   * same reason: it is not the answer to anything they just did. They asked
+   * hours ago and have been told it was passed on.
+   */
+  const granted = urgentGrantedReply(outcome.reference, deps.supportContact);
+  return {
+    messages: [
+      {
+        chatId,
+        text:
+          `⏫ ${outcome.reference} is now urgent.\n\n` +
+          'It has moved to Escalated and appears in /urgent. The teacher has been told, ' +
+          `${outcome.owner === null ? 'and it still has no owner — /assign it.' : 'and so has its owner.'}`,
+      },
+      {
+        chatId: outcome.teacherChatId,
+        text: granted.text,
+        keyboard: granted.keyboard,
+        purpose: 'telling a teacher their case was accepted as urgent',
+      },
+      ...notice.messages,
+    ],
+    alerts: notice.alerts,
+  };
 }
 
 async function routeMenu(
@@ -1168,7 +1242,7 @@ async function acceptPrivacyNotice(
  * Forms and reads the answers back later; `sendDocument` exists for `/export`
  * and has no receive path, deliberately.
  *
- * Paused by maintenance mode alongside Contact Support and Urgent Case. A
+ * Paused by maintenance mode alongside Contact Support and Ask for Priority. A
  * submission becomes a case, so it is work arriving, and the reason for pausing
  * new cases applies to it unchanged.
  *
@@ -1264,12 +1338,21 @@ async function startCase(db: Database, chatId: string, deps: RouterDeps): Promis
   return caseTopicPromptReply();
 }
 
+/**
+ * Ask for the problem, with nothing in front of it.
+ *
+ * The whole of the change made on 1 August 2026 is visible in this function:
+ * where it used to write `AwaitingUrgentCode` and demand a six-character string
+ * a Regional admin had read down the telephone, it now writes the detail state
+ * directly. Maintenance mode is still checked, because asking for priority opens
+ * a case and that is the thing maintenance pauses.
+ */
 async function startUrgent(db: Database, chatId: string, deps: RouterDeps): Promise<Reply> {
   if (await isMaintenanceMode(db)) {
     return urgentUnavailableReply(deps.supportContact);
   }
-  await saveState(db, chatId, { kind: 'AwaitingUrgentCode', attempts: 0 });
-  return urgentCodePromptReply();
+  await saveState(db, chatId, { kind: 'AwaitingUrgentDetail', attempts: 0 });
+  return urgentDetailPromptReply();
 }
 
 async function chooseCaseTopic(

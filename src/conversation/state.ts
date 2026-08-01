@@ -70,13 +70,23 @@ const conversationStateSchema = z.discriminatedUnion('kind', [
     category: z.enum(CASE_CATEGORY_VALUES),
     attempts,
   }),
-  z.object({ kind: z.literal('AwaitingUrgentCode'), attempts }),
-  z.object({
-    kind: z.literal('AwaitingUrgentDetail'),
-    /** The code already spent. Recorded so a restart mid-flow can still file the case. */
-    codeAccepted: z.string(),
-    attempts,
-  }),
+  /**
+   * Describing something they have asked to be treated as a priority.
+   *
+   * **`AwaitingUrgentCode` used to sit above this and was removed on 1 August
+   * 2026**, along with the `codeAccepted` field this state carried. A teacher
+   * had to telephone a Regional admin, be read a six-character code and type it
+   * correctly before they were allowed to describe their problem — a gate in
+   * front of speech rather than in front of priority. Nothing now stands between
+   * tapping the button and writing; the rationing happens afterwards, when a
+   * coordinator decides whether the case is actually urgent.
+   *
+   * A row written by the old build parses as neither state and `loadState`
+   * returns null for it, which the router reads as "start again from the main
+   * menu". That is the forward-only rollback story working as designed rather
+   * than a migration nobody wrote.
+   */
+  z.object({ kind: z.literal('AwaitingUrgentDetail'), attempts }),
 ]);
 
 export type ConversationState = z.infer<typeof conversationStateSchema>;

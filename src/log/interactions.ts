@@ -58,8 +58,6 @@ export function redactDetail(detail: string, state: ConversationState | null): s
     case 'AwaitingCaseDetail':
     case 'AwaitingUrgentDetail':
       return `(case detail withheld — ${detail.length} characters)`;
-    case 'AwaitingUrgentCode':
-      return '(urgent code withheld)';
     default:
       break;
   }

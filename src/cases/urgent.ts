@@ -1,350 +1,335 @@
 /**
- * Urgent cases, and the one-time codes that open them. Implements D5.
+ * Asking for a case to be treated as urgent, and the decision that grants it.
  *
- * The whole design turns on one statement:
+ * **This replaced the one-time code entirely on 1 August 2026.** The old design
+ * rationed *speech*: a teacher had to telephone a Regional admin, be read a
+ * six-character code, and type it before they were allowed to describe their
+ * problem at all. Everything in this file that generated, checked, spent and
+ * audited those codes is gone, along with the two states a teacher could get
+ * stuck in and the alarm for a code spent without a case.
  *
- *     UPDATE urgent_codes SET used_at = now(), ...
- *     WHERE code = $1 AND used_at IS NULL AND expires_at > now()
+ * What replaced it rations *priority* instead:
  *
- * It can succeed exactly once, whoever runs it and however many run at the same
- * moment. `CONCERNS-AND-IT-ACTIONS.md` B8 recorded that consuming the code at
- * case-creation time — where it belongs — was blocked because it "opens a
- * double-use race". Against a real database it does not, so B8's stated blocker
- * is simply no longer true. That is a capability that became available when the
- * spreadsheet went away, and nobody had noticed.
+ *   1. The teacher describes the problem. Nothing is in their way.
+ *   2. The case is filed at `Normal` and stamped `urgent_requested_at`.
+ *   3. A regional coordinator is told, and decides.
+ *   4. On confirmation the case becomes `Urgent` and everybody who needs to know
+ *      is told.
  *
- * What it buys the teacher: a code is spent when their case is filed, not when
- * they type the code. Someone who gives up halfway keeps their code instead of
- * having to telephone a Regional admin for another one.
+ * Three properties are load-bearing:
  *
- * What it cost, and this is the part no document mentioned: Apps Script deleted
- * a code whether the guess was right or wrong (`AdminCommands.gs:1261`), so a
- * wrong guess destroyed the thing being guessed at. A conditional update leaves
- * a wrong code alone, which makes guessing free — hence the cap below.
+ *   **A pending request is `Normal`, not `Urgent`.** Retention keys off
+ *   `importance` and keeps urgent cases for six months against the ordinary
+ *   week, so a request that stamped the marker on the way in would let anybody
+ *   grant themselves half a year of retention by tapping a button. The marker is
+ *   what the coordinator's judgement buys, and it is written in exactly one
+ *   place: `confirmUrgentRequest`.
  *
- * Nothing here takes a lock or opens a transaction. `fileUrgentCase` is a
- * read-then-write and runs inside `withChatLock`, which is already a
- * transaction — one lock, taken in one place.
+ *   **Deduplication is the common path, not an edge case.** Urgent requests file
+ *   under Contact Support because they have no topic picker, and so does every
+ *   ordinary Contact Support case — so a teacher who opened one yesterday will
+ *   always deduplicate against it. The words are appended to that case and the
+ *   request is stamped on *it*. Splitting would fragment one problem across two
+ *   references and give staff two things to work.
+ *
+ *   **Nothing here sends anything.** It returns what happened; layer 3 turns
+ *   that into messages. `notify.ts` computes the recipients.
+ *
+ * Nothing takes a lock. `requestUrgentCase` is a read-then-write and runs inside
+ * `withChatLock`, which is already a transaction — one lock, taken in one place.
  */
-import { randomInt } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import {
-  URGENT_CASE_CATEGORY,
-  URGENT_CODE_ALPHABET,
-  URGENT_CODE_ATTEMPT_WINDOW_MINUTES,
-  URGENT_CODE_LENGTH,
-  URGENT_CODE_MAX_ATTEMPTS,
-  URGENT_CODE_STRANDED_AFTER_MINUTES,
-  URGENT_CODE_TTL_HOURS,
-  TIMEZONE,
-} from '../config/constants.js';
-import { isUniqueViolation } from '../db/errors.js';
+import { TIMEZONE, URGENT_CASE_CATEGORY } from '../config/constants.js';
 import type { Database } from '../db/index.js';
-import { log } from '../log.js';
 import { recordAudit } from '../log/audit.js';
-import type { Alerter } from '../sync/alerts.js';
-import { appendUrgentFollowUp, createCase } from './service.js';
+import { createCase } from './service.js';
 
-/**
- * Codes are matched case-insensitively and without surrounding space.
- *
- * `AdminCommands.gs:1237` did the same, and it matters more than it looks: the
- * code is read aloud over the telephone by a Regional admin to a teacher who
- * then types it on a phone keyboard that capitalises the first letter for them.
- */
-export function normaliseUrgentCode(raw: string): string {
-  return raw.trim().toUpperCase();
+export interface UrgentRequest {
+  readonly chatId: string;
+  /** The teacher's own words. Stored, never echoed back, never logged. */
+  readonly detail: string;
 }
 
-/**
- * A fresh code, from a cryptographic source.
- *
- * `randomInt` rather than `Math.random`, and rather than a slice of a UUID.
- * `Math.random` is not seeded for unpredictability and its output is recoverable
- * from a handful of samples — and every code this issues is one somebody could
- * otherwise guess their way to an escalated case with. A UUID slice would be
- * hexadecimal, which is sixteen characters rather than thirty-two and throws
- * away half the code space for no benefit.
- *
- * `randomInt(max)` is rejection-sampled by Node, so each character is uniform.
- * Taking `% alphabet.length` of a random byte would not be: 256 does not divide
- * by 32 evenly for most alphabets, and the bias always favours the same early
- * characters — invisible in any test, and exactly the sort of thing that makes a
- * six-character space smaller than it looks.
- */
-export function generateUrgentCode(): string {
-  let code = '';
-  for (let i = 0; i < URGENT_CODE_LENGTH; i += 1) {
-    code += URGENT_CODE_ALPHABET[randomInt(URGENT_CODE_ALPHABET.length)];
-  }
-  return code;
-}
-
-export interface IssuedUrgentCode {
-  readonly code: string;
-  /**
-   * Read back from the database rather than computed here.
-   *
-   * The expiry is written by PostgreSQL's clock, which is the authority on every
-   * timestamp in this system that decides something — and this one decides
-   * whether a teacher's emergency is escalated. A staff member reading a
-   * different time from the one stored, because the Node clock had drifted, is
-   * a staff member who tells a teacher the wrong deadline.
-   */
-  readonly expiresAt: Date;
-}
-
-/**
- * Issue a one-time urgent code, naming who issued it.
- *
- * The two halves of this feature have never met. Codes have only ever been
- * inserted by hand through `RUNBOOK.md` §4.4, which is why `issued_by` has held
- * the string `'0'` for every code that has ever existed — and `'0'` names
- * nobody, so the stranded-code alarm, which exists to say whose teacher is
- * sitting with no case, has never been able to say whose.
- *
- * **The collision retry is not defensive tidiness.** `code` is the primary key,
- * so a duplicate raises `23505`, which would reach `bot.catch` — and `bot.catch`
- * acknowledges the update and says nothing at all, so the staff member would see
- * silence and tell the teacher a code was coming. A collision is vanishingly
- * unlikely at 32^6; being unlikely is not the same as being handled.
- */
-export async function issueUrgentCode(db: Database, actor: string): Promise<IssuedUrgentCode> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const code = generateUrgentCode();
-
-    try {
-      const inserted = await db.execute<{ expires_at: Date }>(sql`
-        INSERT INTO urgent_codes (code, issued_by, expires_at)
-        VALUES (${code}, ${actor}, now() + make_interval(hours => ${URGENT_CODE_TTL_HOURS}))
-        RETURNING expires_at
-      `);
-
-      /**
-       * ⚠️ `db.execute` hands back what PostgreSQL sent, and drizzle installs its
-       * own type parsers — a `timestamptz` read this way is a string, not the
-       * `Date` the row type claims. Constructed explicitly rather than trusted,
-       * because `formatTashkent` would otherwise be handed a string and throw
-       * inside a command, which `bot.catch` turns into silence.
-       */
-      const raw = inserted.rows[0]?.expires_at;
-      await recordAudit(db, { actor, action: 'URGENT_CODE_ISSUED', subject: code });
-
-      return { code, expiresAt: new Date(raw as unknown as string) };
-    } catch (err: unknown) {
-      if (isUniqueViolation(err)) continue;
-      throw err;
-    }
-  }
-
-  throw new Error('could not generate an unused urgent code in five attempts');
-}
-
-export type UrgentCodeCheck =
-  | { readonly kind: 'accepted'; readonly code: string }
-  /** Wrong, spent, or expired — deliberately indistinguishable. See below. */
-  | { readonly kind: 'rejected'; readonly attempts: number; readonly attemptsRemaining: number }
-  | { readonly kind: 'lockedOut'; readonly retryAfterMinutes: number };
-
-/**
- * Check a code without spending it.
- *
- * Wrong, already used and expired are one outcome on purpose. Telling a teacher
- * "that code exists but has been used" tells anyone guessing that they have
- * found a real code, which is the single most useful thing a guesser can learn.
- *
- * This is the *only* place a wrong code is counted. Checking is what a guesser
- * does; spending is what a teacher does, and by then the code has already been
- * accepted once.
- */
-export async function checkUrgentCode(
-  db: Database,
-  chatId: string,
-  rawCode: string,
-): Promise<UrgentCodeCheck> {
-  const attemptsSoFar = await countRecentAttempts(db, chatId);
-  if (attemptsSoFar >= URGENT_CODE_MAX_ATTEMPTS) {
-    return { kind: 'lockedOut', retryAfterMinutes: URGENT_CODE_ATTEMPT_WINDOW_MINUTES };
-  }
-
-  const code = normaliseUrgentCode(rawCode);
-  const found = await db.execute<{ code: string }>(sql`
-    SELECT code FROM urgent_codes
-    WHERE code = ${code} AND used_at IS NULL AND expires_at > now()
-  `);
-
-  if (found.rows.length > 0) {
-    // A correct code clears the chat's failures. Someone who mistyped four
-    // times and then got it right is not one guess away from a lockout.
-    await db.execute(sql`DELETE FROM urgent_code_attempts WHERE chat_id = ${chatId}`);
-    return { kind: 'accepted', code };
-  }
-
-  await db.execute(sql`INSERT INTO urgent_code_attempts (chat_id) VALUES (${chatId})`);
-  const attempts = attemptsSoFar + 1;
-  return {
-    kind: 'rejected',
-    attempts,
-    attemptsRemaining: Math.max(0, URGENT_CODE_MAX_ATTEMPTS - attempts),
-  };
-}
-
-async function countRecentAttempts(db: Database, chatId: string): Promise<number> {
-  const rows = await db.execute<{ count: number }>(sql`
-    SELECT count(*)::int AS count FROM urgent_code_attempts
-    WHERE chat_id = ${chatId}
-      AND at > now() - make_interval(mins => ${URGENT_CODE_ATTEMPT_WINDOW_MINUTES})
-  `);
-  return rows.rows[0]?.count ?? 0;
-}
-
-/**
- * Spend a code, naming the case it was spent on.
- *
- * The `WHERE` clause is the entire single-use guarantee, and the expiry check is
- * in the same statement rather than read first and trusted (D4). Returns false
- * when the code is not spendable, whatever the reason.
- */
-async function consumeUrgentCode(
-  db: Database,
-  code: string,
-  chatId: string,
-  caseReference: string,
-): Promise<boolean> {
-  const result = await db.execute<{ code: string }>(sql`
-    UPDATE urgent_codes
-    SET used_at = now(), used_by = ${chatId}, case_reference = ${caseReference}
-    WHERE code = ${code} AND used_at IS NULL AND expires_at > now()
-    RETURNING code
-  `);
-  return result.rows.length > 0;
-}
-
-export interface UrgentFilingResult {
+export interface UrgentRequestResult {
   readonly reference: string;
-  /** False when an open case in this category already existed. */
+  /** False when an open case in this category already existed and was appended to. */
   readonly isNew: boolean;
   /**
-   * Whether the code was actually spent on this case.
+   * The case was already `Urgent` or `Critical` before this arrived.
    *
-   * False is rare and always worth an alarm: the code was good when the teacher
-   * typed it and is not good now. The case is still filed — see below.
+   * The teacher's words are still appended — they are new information about a
+   * live problem — but nobody is notified a second time and the teacher is told
+   * plainly that it is already escalated. Re-notifying here is how a coordinator
+   * learns that the confirm button means nothing.
    */
-  readonly escalated: boolean;
+  readonly alreadyUrgent: boolean;
+  /**
+   * A request was already pending on this case when this one arrived.
+   *
+   * Distinct from `alreadyUrgent`: this is "you have asked and nobody has
+   * decided yet", which is a different sentence to the teacher and, for the
+   * coordinator, a reason not to send a second identical message.
+   */
+  readonly alreadyRequested: boolean;
 }
 
 /**
- * File an urgent case and spend the code, or neither.
+ * File — or append to — a case, and record that priority was asked for.
  *
- * Runs inside the caller's transaction, so the case and the consumption commit
- * together. That is the whole of D5: there is no window in which a code is spent
- * and no case exists, and none in which a case is escalated without the code
- * being spent.
+ * `createCase` is called without `escalate`, deliberately and against the shape
+ * of the old code. The flag files at `Escalated`/`Urgent` in one insert, which
+ * is exactly what must not happen before a person has agreed to it.
  *
- * **The deduplicated path spends the code too.** It is not an edge case: urgent
- * cases have no topic picker, so every one of them files under the general
- * category, and so does every ordinary Contact Support case — a teacher who
- * opened one yesterday will always deduplicate against it. What the code buys is
- * attention on the teacher's problem, and the existing case gets it: the urgent
- * words are appended and the case is escalated. Spending the code only on an
- * insert gives urgent escalations away free on the commonest path there is, and
- * it is the easiest thing in this stage to get silently wrong.
- *
- * **When the code will not spend, the case is still filed.** The teacher typed
- * an emergency; throwing it away because their code expired in the hours between
- * accepting it and describing the problem punishes them for our timing. They get
- * an ordinary case and are told plainly that the escalation did not apply, which
- * is recoverable — `escalated: false` is also an alarm, because a code that
- * validated and then would not spend means either it straddled its expiry or two
- * chats are holding the same code.
+ * Returns without stamping anything when the case is already urgent, so a
+ * confirmed case cannot have its decision clock reset by a teacher writing in
+ * again.
  */
-export async function fileUrgentCase(
+export async function requestUrgentCase(
   db: Database,
-  request: { readonly chatId: string; readonly code: string; readonly detail: string },
-): Promise<UrgentFilingResult> {
+  request: UrgentRequest,
+): Promise<UrgentRequestResult> {
   const result = await createCase(db, {
     chatId: request.chatId,
     category: URGENT_CASE_CATEGORY,
     detail: request.detail,
-    escalate: true,
   });
 
+  /**
+   * One statement, and every answer this function needs comes out of it.
+   *
+   * Written as a conditional `UPDATE` rather than a read followed by a write
+   * because two staff commands on one case take two different chat locks, and
+   * anything read-modify-write between them races (R2).
+   *
+   * **The `before` sub-select is not tidiness.** `RETURNING` yields the row
+   * *after* the write, so `urgent_requested_at IS NOT NULL` in that clause would
+   * be true because this statement had just made it true — the question "was one
+   * already pending" would answer itself, every time. A sub-query in `FROM` is
+   * evaluated against the pre-update snapshot, which is the only way to get the
+   * old values out in one statement; `clearUsername` records the same trap,
+   * where it made a cleared handle unreportable.
+   */
+  const stamped = await db.execute<{ already_urgent: boolean; already_requested: boolean }>(sql`
+    UPDATE cases
+    SET urgent_requested_at = CASE
+          WHEN cases.importance = 'Normal' AND cases.urgent_requested_at IS NULL THEN now()
+          ELSE cases.urgent_requested_at
+        END,
+        updated_at = now()
+    FROM (
+      SELECT importance AS was_importance,
+             urgent_requested_at AS was_requested_at,
+             urgent_confirmed_at AS was_confirmed_at
+      FROM cases WHERE reference = ${result.reference}
+    ) AS before
+    WHERE cases.reference = ${result.reference}
+    RETURNING
+      (before.was_importance <> 'Normal') AS already_urgent,
+      (before.was_requested_at IS NOT NULL AND before.was_confirmed_at IS NULL) AS already_requested
+  `);
+
+  const row = stamped.rows[0];
+
+  /**
+   * The words are appended for an existing case, and only for an existing one —
+   * a new case already holds them as its `detail`.
+   *
+   * Non-escalating, unlike the follow-up the code path used. `service.ts` used
+   * to hold an `appendUrgentFollowUp` that appended **and** raised the status
+   * and importance in one statement; it was removed with the codes, because
+   * appending on this path must not raise `importance` or the request would
+   * grant the very thing it is asking a coordinator to decide.
+   */
   if (!result.isNew) {
-    await appendUrgentFollowUp(db, result.reference, request.detail, request.chatId);
+    await appendUrgentRequest(db, result.reference, request.detail, request.chatId);
   }
 
-  const escalated = await consumeUrgentCode(
-    db,
-    normaliseUrgentCode(request.code),
-    request.chatId,
-    result.reference,
-  );
-
-  return { reference: result.reference, isNew: result.isNew, escalated };
-}
-
-export interface StrandedCode {
-  readonly code: string;
-  readonly usedBy: string | null;
-  /**
-   * Formatted in Tashkent by the database, not a `Date`.
-   *
-   * `db.execute` hands back the raw string PostgreSQL sent — drizzle installs
-   * its own type parsers, so it does not parse timestamps the way `pool.query`
-   * does. Formatting in SQL means the value is never a `Date` that only looks
-   * like one, and the person reading the alert gets their own clock.
-   */
-  readonly usedAt: string;
+  return {
+    reference: result.reference,
+    isNew: result.isNew,
+    alreadyUrgent: row?.already_urgent === true,
+    /**
+     * Only meaningful when the case is not already urgent. A confirmed case has
+     * a request stamp and a confirmation stamp, so the SQL above reports it as
+     * not pending, which is correct — but `alreadyUrgent` is the sentence the
+     * teacher gets either way.
+     */
+    alreadyRequested: row?.already_requested === true,
+  };
 }
 
 /**
- * Alert on any code that was spent without buying a case.
+ * Add a teacher's later words to a case that already exists, without escalating.
  *
- * Under D5 this cannot happen — the consumption and the insert are one
- * transaction — which is exactly why it is worth watching. A row here means
- * something consumed a code outside `fileUrgentCase`, and the teacher who spent
- * it is sitting with no case and no reason to think anything went wrong. That is
- * invisible from every other angle: no error is raised, no job fails, and the
- * teacher's silence looks like satisfaction.
+ * The second route by which `detail` may change after a case is filed, and like
+ * the first it only ever appends. `CaseFields` deliberately cannot reach
+ * `detail` — a write path that can replace a teacher's words is a write path
+ * that can lose them — but dropping the words entirely is what the Apps Script
+ * version did on this path (`MenuHandler.gs:302`).
+ *
+ * Stamped in Tashkent, by the database, for the same reason references are: a
+ * follow-up written at 00:30 is dated by the clock the reader uses.
  */
-export async function checkStrandedUrgentCodes(
+async function appendUrgentRequest(
   db: Database,
-  alerter: Alerter,
-): Promise<StrandedCode[]> {
-  const result = await db.execute<{ code: string; used_by: string | null; used_at: string }>(sql`
-    SELECT code, used_by,
-           to_char(used_at AT TIME ZONE ${TIMEZONE}, 'YYYY-MM-DD HH24:MI') AS used_at
-    FROM urgent_codes
-    WHERE used_at IS NOT NULL
-      AND case_reference IS NULL
-      AND used_at < now() - make_interval(mins => ${URGENT_CODE_STRANDED_AFTER_MINUTES})
+  reference: string,
+  detail: string,
+  actor: string,
+): Promise<boolean> {
+  const result = await db.execute<{ reference: string }>(sql`
+    UPDATE cases SET
+      detail = detail || E'\n[' || to_char(now() AT TIME ZONE ${TIMEZONE}, 'YYYY-MM-DD HH24:MI')
+             || ' URGENT REQUEST] ' || ${detail},
+      updated_at = now(),
+      last_actor = ${actor}
+    WHERE reference = ${reference}
+    RETURNING reference
+  `);
+  return result.rows.length > 0;
+}
+
+export type UrgentConfirmation =
+  | {
+      readonly kind: 'confirmed';
+      readonly reference: string;
+      readonly teacherChatId: string;
+      /** The case's owner at the moment of confirmation, or null if unassigned. */
+      readonly owner: string | null;
+    }
+  /** No such case. A button from a build that no longer exists, or a purged case. */
+  | { readonly kind: 'unknown' }
+  /** Nobody asked for this case to be urgent. */
+  | { readonly kind: 'notRequested' }
+  /** Somebody already decided. Names them, so the second tapper knows who. */
+  | { readonly kind: 'alreadyConfirmed'; readonly by: string | null };
+
+/**
+ * Grant an urgent request — the one place `importance` is raised by this route.
+ *
+ * **Every button re-validates here, on tap, rather than trusting its payload.**
+ * A callback payload is a promise about the world made when the message was
+ * built, and Telegram keeps that button in a coordinator's scrollback for ever.
+ * Two coordinators tapping the same message a minute apart must not produce two
+ * confirmations, two audit rows and two notifications to a teacher; the
+ * `urgent_confirmed_at IS NULL` guard in the `WHERE` clause is what makes the
+ * second tap a no-op, and it is the same shape of single-statement guarantee the
+ * one-time code used to rely on.
+ *
+ * The status moves to `Escalated` in the same statement, which is what puts the
+ * case in `/urgent`. `updateCase` cannot express a conditional write and adding
+ * a `where` to it would hand every caller a way to write a status that depends
+ * on the current one — the argument `markCaseReceived` records.
+ *
+ * The audit row is written in the same transaction as the change, never after.
+ */
+export async function confirmUrgentRequest(
+  db: Database,
+  reference: string,
+  actor: string,
+): Promise<UrgentConfirmation> {
+  const updated = await db.execute<{
+    reference: string;
+    teacher_chat_id: string;
+    owner: string | null;
+  }>(sql`
+    UPDATE cases
+    SET importance = GREATEST(importance, 'Urgent'::case_importance),
+        status = 'Escalated',
+        urgent_confirmed_by = ${actor},
+        urgent_confirmed_at = now(),
+        updated_at = now(),
+        last_actor = ${actor}
+    WHERE reference = ${reference}
+      AND urgent_requested_at IS NOT NULL
+      AND urgent_confirmed_at IS NULL
+    RETURNING reference, teacher_chat_id, owner
   `);
 
-  const stranded: StrandedCode[] = result.rows.map((r) => ({
-    code: r.code,
-    usedBy: r.used_by,
-    usedAt: r.used_at,
-  }));
-
-  for (const item of stranded) {
-    log.error({ code: item.code, chatId: item.usedBy }, 'urgent code spent with no case');
-  }
-
-  if (stranded.length > 0) {
-    await alerter.send({
-      severity: 'critical',
-      title: `${stranded.length} urgent code(s) spent without opening a case`,
-      body: [
-        'A teacher gave up a single-use code and has no case to show for it.',
-        'This should be impossible: the code and the case are written in one transaction,',
-        'so something has consumed a code outside src/cases/urgent.ts.',
-        '',
-        ...stranded.map((s) => `${s.code} — chat ${s.usedBy ?? 'unknown'}, spent ${s.usedAt} (Tashkent)`),
-        '',
-        'Contact each teacher; their emergency has not reached anyone.',
-      ].join('\n'),
+  const row = updated.rows[0];
+  if (row !== undefined) {
+    await recordAudit(db, {
+      actor,
+      action: 'URGENT_CONFIRMED',
+      subject: reference,
     });
+    return {
+      kind: 'confirmed',
+      reference: row.reference,
+      teacherChatId: row.teacher_chat_id,
+      owner: row.owner,
+    };
   }
 
-  return stranded;
+  /**
+   * The write did nothing, and the three reasons are different sentences.
+   *
+   * Read only on the failing path. Telling a coordinator "that case is already
+   * urgent — Karimov confirmed it" costs one query on the rare branch and turns
+   * a dead button into an answer; telling them nothing is how a person taps it
+   * four more times.
+   */
+  const existing = await db.execute<{
+    requested: boolean;
+    confirmed_by: string | null;
+    confirmed: boolean;
+  }>(sql`
+    SELECT urgent_requested_at IS NOT NULL AS requested,
+           urgent_confirmed_by AS confirmed_by,
+           urgent_confirmed_at IS NOT NULL AS confirmed
+    FROM cases WHERE reference = ${reference}
+  `);
+
+  const found = existing.rows[0];
+  if (found === undefined) return { kind: 'unknown' };
+  if (found.confirmed) return { kind: 'alreadyConfirmed', by: found.confirmed_by };
+  return { kind: 'notRequested' };
+}
+
+export interface PendingUrgentRequest {
+  readonly reference: string;
+  readonly teacherChatId: string;
+  /**
+   * How long it has been waiting, formatted by the database in Tashkent.
+   *
+   * Formatted in SQL rather than parsed into a `Date` and rendered here:
+   * `db.execute` hands back the raw string PostgreSQL sent, because drizzle
+   * installs its own type parsers and does not parse timestamps the way
+   * `pool.query` does. Doing it in SQL means the value is never a `Date` that
+   * only looks like one.
+   */
+  readonly requestedAt: string;
+}
+
+/**
+ * Urgent requests nobody has decided.
+ *
+ * The plan accepts, explicitly, that a pending request waits on one regional
+ * coordinator and declines to auto-escalate — auto-escalation would push every
+ * frivolous request to Program anyway, which defeats the gate. Visibility is
+ * what was chosen instead, so this is the query behind it, and a request that
+ * nobody answers has to be findable or the accepted risk is not a risk anybody
+ * can see.
+ */
+export async function pendingUrgentRequests(
+  db: Database,
+  limit: number,
+): Promise<PendingUrgentRequest[]> {
+  const rows = await db.execute<{
+    reference: string;
+    teacher_chat_id: string;
+    requested_at: string;
+  }>(sql`
+    SELECT reference, teacher_chat_id,
+           to_char(urgent_requested_at AT TIME ZONE ${TIMEZONE}, 'DD Mon YYYY, HH24:MI') AS requested_at
+    FROM cases
+    WHERE urgent_requested_at IS NOT NULL AND urgent_confirmed_at IS NULL
+    ORDER BY urgent_requested_at ASC
+    LIMIT ${limit}
+  `);
+
+  return rows.rows.map((r) => ({
+    reference: r.reference,
+    teacherChatId: r.teacher_chat_id,
+    requestedAt: r.requested_at,
+  }));
 }

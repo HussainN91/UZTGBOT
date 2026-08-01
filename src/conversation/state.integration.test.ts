@@ -115,14 +115,14 @@ describe.skipIf(!TEST_DATABASE_URL)('conversation state', () => {
       await expect(loadState(db, CHAT)).resolves.not.toBeNull();
     });
 
-    it('gives an urgent case far longer to be described than an ordinary one', async () => {
-      // D5 and the 24-hour decision. By the time this state is set the teacher's
-      // single-use code is already spent, so letting it lapse in thirty minutes
-      // burns the code for nothing.
+    it('gives a priority request far longer to be described than an ordinary case', async () => {
+      // Somebody asked to explain why their case should come before others has
+      // to go and find a date, a letter or an appointment reference. A prompt
+      // that lapses while they look is one answered with two words instead.
       await saveState(db, CHAT, { kind: 'AwaitingCaseTopic' });
       const ordinary = await expiryOf(db, CHAT);
 
-      await saveState(db, CHAT, { kind: 'AwaitingUrgentDetail', codeAccepted: 'AB12CD', attempts: 0 });
+      await saveState(db, CHAT, { kind: 'AwaitingUrgentDetail', attempts: 0 });
       const urgent = await expiryOf(db, CHAT);
 
       expect(urgent).toBeGreaterThan(ordinary);

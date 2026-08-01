@@ -538,9 +538,31 @@ export const cases = pgTable(
     publicUpdate: text('public_update').notNull().default(''),
     /**
      * How serious this case is. See `caseImportanceEnum` for why it is not the
-     * status. Set by `/mark`, and by the urgent-code path at creation.
+     * status. Set by `/mark`, and by a confirmed urgent request.
      */
     importance: caseImportanceEnum('importance').notNull().default('Normal'),
+    /**
+     * The urgent gate — three columns, and the gap between the first and the
+     * other two is the whole feature.
+     *
+     * A teacher asking for priority stamps `urgent_requested_at` and **nothing
+     * else**: the case stays at `Normal`, which is what stops an unconfirmed
+     * request earning the six-month retention that `importance` buys. A regional
+     * coordinator who agrees stamps the other two, and only then does
+     * `markImportance` raise the marker.
+     *
+     * Nullable rather than a fourth status, because a request is not a place a
+     * case has got to — it is a thing that was asked for about a case that is
+     * otherwise proceeding normally. `CASE_STATUS_ORDER` and `OPEN_CASE_STATUSES`
+     * are untouched by design.
+     *
+     * `urgent_requested_at` is **not** cleared on confirmation. It is the record
+     * of when the teacher asked, and the difference between the two stamps is the
+     * only measure this system has of how long a teacher waited for a decision.
+     */
+    urgentRequestedAt: tsz('urgent_requested_at'),
+    urgentConfirmedBy: chatId('urgent_confirmed_by'),
+    urgentConfirmedAt: tsz('urgent_confirmed_at'),
     /** When whoever holds this case said it would be done. */
     dueAt: tsz('due_at'),
     /** Suppresses chasing until this passes. Never suppresses the case itself. */
@@ -602,6 +624,16 @@ export const cases = pgTable(
      * late — a promise somebody made and missed — and leads with `due_at`.
      */
     index('cases_teacher_chase_idx').on(t.status, t.teacherChasedAt),
+    /**
+     * Serves "which urgent requests is nobody deciding" — the pair of columns
+     * read together, never apart.
+     *
+     * A pending request is a teacher waiting on one person's judgement with no
+     * clock running against it: the plan accepts that deliberately and declines
+     * to auto-escalate, so the only thing standing between a forgotten request
+     * and silence is somebody being able to list them cheaply.
+     */
+    index('cases_urgent_pending_idx').on(t.urgentRequestedAt, t.urgentConfirmedAt),
   ],
 );
 
@@ -692,12 +724,25 @@ export const conversationStates = pgTable(
 );
 
 /**
- * One-time codes for urgent cases.
+ * One-time codes for urgent cases — **withdrawn on 1 August 2026, kept as
+ * history.**
  *
- * Single use is enforced by the database, not by application timing: consuming a
- * code is a conditional update that can only succeed once. The Apps Script
- * version protected this with a global lock and its own notes listed the
- * possibility of a code being used twice as an accepted risk.
+ * Nothing reads or writes either of these tables any more. The route they served
+ * is gone: a teacher no longer needs a credential read to them over the
+ * telephone before the bot will let them describe an urgent problem, and the
+ * rationing moved to a coordinator's decision afterwards.
+ *
+ * They are declared here, and left in the database, because dropping a table is
+ * the one migration this project cannot walk back — and the rows are the record
+ * of which staff member issued which code to whom. Retention removes the guesses
+ * on the ordinary message schedule; the codes themselves are a small, finite set
+ * that will never grow again.
+ *
+ * The original note, which is still the interesting part: single use was
+ * enforced by the database rather than by application timing — consuming a code
+ * was a conditional update that could only succeed once. The Apps Script version
+ * protected it with a global lock, and its own notes listed a code being used
+ * twice as an accepted risk.
  */
 export const urgentCodes = pgTable(
   'urgent_codes',

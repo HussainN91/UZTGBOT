@@ -20,7 +20,6 @@ import type { StaffScope } from '../staff/visibility.js';
 import { casesPastDue } from './queries.js';
 import {
   SnoozeTooLongError,
-  appendUrgentFollowUp,
   createCase,
   markImportance,
   setDue,
@@ -67,19 +66,26 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
     await pool?.end();
   });
 
-  describe('the urgent path', () => {
-    it('marks a case urgent when it is filed with a code', async () => {
-      // In the same insert as the status, not a second write. A code spent for a
-      // case that is not marked as what the code bought is the same shape of
-      // fault as a code spent with no case at all.
+  describe('how a case opens', () => {
+    /**
+     * These two used to be four, and the pair that went are the point.
+     *
+     * They asserted that a case filed with an accepted one-time code opened at
+     * `Urgent`, and that an urgent follow-up raised an existing case to `Urgent`
+     * automatically. Both were correct while a code was what bought the
+     * escalation. Neither may be true now: nothing opens a case above `Normal`,
+     * and nothing raises `importance` without a person having decided. The
+     * behaviour they described is tested in `urgent.integration.test.ts` from
+     * the other direction — that a *request* leaves it alone.
+     */
+    it('opens every case at Normal, whatever the route', async () => {
       const { reference } = await createCase(db, {
         chatId: CHAT,
         category: CASE_CATEGORY.VISA,
         detail: 'my flight is tomorrow',
-        escalate: true,
       });
 
-      expect(await importanceOf(reference)).toBe('Urgent');
+      expect(await importanceOf(reference)).toBe('Normal');
     });
 
     it('leaves an ordinary case Normal', async () => {
@@ -90,38 +96,6 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
       });
 
       expect(await importanceOf(reference)).toBe('Normal');
-    });
-
-    it('raises importance when an urgent follow-up escalates an EXISTING case', async () => {
-      // R13, third order, and the one most likely to be missed: urgent plus
-      // deduplicated is the common path, not an edge case. If appendUrgentFollowUp
-      // escalates the status but leaves importance at Normal, the commonest
-      // urgent case is the one retention throws away first.
-      const { reference } = await createCase(db, {
-        chatId: CHAT,
-        category: CASE_CATEGORY.VISA,
-        detail: 'a question about my visa',
-      });
-      expect(await importanceOf(reference)).toBe('Normal');
-
-      await appendUrgentFollowUp(db, reference, 'my flight is tomorrow', CHAT);
-
-      expect(await importanceOf(reference)).toBe('Urgent');
-    });
-
-    it('never lowers importance on the deduplicated path', async () => {
-      // A Critical case that receives an urgent follow-up stays Critical. An
-      // automatic path must not undo a judgement a person made.
-      const { reference } = await createCase(db, {
-        chatId: CHAT,
-        category: CASE_CATEGORY.VISA,
-        detail: 'a question about my visa',
-      });
-      await markImportance(db, reference, 'Critical', ACTOR);
-
-      await appendUrgentFollowUp(db, reference, 'my flight is tomorrow', CHAT);
-
-      expect(await importanceOf(reference)).toBe('Critical');
     });
   });
 
@@ -147,8 +121,8 @@ describe.skipIf(!TEST_DATABASE_URL)('importance, due dates and snoozes', () => {
         chatId: CHAT,
         category: CASE_CATEGORY.VISA,
         detail: 'a question',
-        escalate: true,
       });
+      await markImportance(db, reference, 'Urgent', ACTOR);
       await markImportance(db, reference, 'Normal', ACTOR);
       expect(await importanceOf(reference)).toBe('Normal');
     });

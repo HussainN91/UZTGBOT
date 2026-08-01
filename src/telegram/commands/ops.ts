@@ -1,18 +1,18 @@
 /**
  * The commands that change how the bot itself behaves — Task 37, and Task 61.
  *
- * `/maintenance` pauses new cases; `/generate_urgent_code` issues the one-time
- * code that opens an escalated one; `/retention` sets how long records are kept.
- * None of them is about a case or a person, which is why they are here rather
- * than in `cases.ts` or `staff.ts`.
+ * `/maintenance` pauses new cases; `/urgent_pending` lists the priority requests
+ * nobody has decided; `/retention` sets how long records are kept. None of them
+ * is about one case or one person, which is why they are here rather than in
+ * `cases.ts` or `staff.ts`.
  *
  * All three write an audit row (D18). Between them they are the only commands
  * that change what happens to *every* teacher rather than to one, and "who
  * paused the bot at three in the morning" is exactly the question the audit
  * table exists to answer.
  */
-import { TIMEZONE } from '../../config/constants.js';
-import { issueUrgentCode } from '../../cases/urgent.js';
+import { STAFF_CASE_LIST_CAP, TIMEZONE } from '../../config/constants.js';
+import { pendingUrgentRequests } from '../../cases/urgent.js';
 import { retentionParagraph } from '../../config/privacy.js';
 import {
   RETENTION_AGREED,
@@ -24,7 +24,7 @@ import {
 import { SETTING, isMaintenanceMode, retentionPeriods, setSetting } from '../../config/settings.js';
 import { recordAudit } from '../../log/audit.js';
 import { CAPABILITY } from '../../staff/roles.js';
-import { type StaffCommand, formatTashkent, reply } from './context.js';
+import { type StaffCommand, reply } from './context.js';
 
 /**
  * What `/maintenance` accepts, matched exactly rather than by prefix.
@@ -47,8 +47,7 @@ const parseOnOff = (value: string): boolean | null => {
  * blocked: the router checks maintenance when a case is started and when a topic
  * is chosen, not when the detail is submitted. `handleMaintenance_` says the same
  * (`AdminCommands.gs:1401`), and the reason is that blocking an in-flight
- * submission would throw away a spent urgent code and the words a teacher has
- * just typed out.
+ * submission would throw away the words a teacher has just typed out.
  *
  * So cases keep arriving for a while after this is switched on. Without this
  * sentence the first System member to use it sees the trickle and reports the
@@ -57,8 +56,7 @@ const parseOnOff = (value: string): boolean | null => {
 const IN_FLIGHT_NOTE = [
   'Cases will keep arriving for a little while, and that is correct rather than a',
   'fault. A teacher already part-way through writing one is not interrupted —',
-  'stopping them there would throw away what they had typed, and an urgent code',
-  'they had already spent.',
+  'stopping them there would throw away everything they had typed.',
 ];
 
 /**
@@ -129,7 +127,7 @@ export const maintenance: StaffCommand = {
         ? [
             '⏸ New cases are paused.',
             '',
-            'Teachers tapping Contact Support or Urgent Case are told the team is dealing',
+            'Teachers tapping Contact Support or Ask for Priority are told the team is dealing',
             'with something, and are given the support contact. The answer bank and Check',
             'My Case still work.',
             '',
@@ -140,51 +138,62 @@ export const maintenance: StaffCommand = {
         : [
             '▶️ New cases are running normally again.',
             '',
-            'Contact Support and Urgent Case work as usual from the next message.',
+            'Contact Support and Ask for Priority work as usual from the next message.',
           ].join('\n'),
     );
   },
 };
 
 /**
- * `/generate_urgent_code` — the code a teacher types to open an escalated case.
+ * `/urgent_pending` — the requests nobody has decided.
  *
- * The first writer `urgent_codes.issued_by` has ever had. Every code that has
- * existed until now was inserted by hand through the runbook with `'0'` in that
- * column, and `'0'` names nobody — so the alarm that fires when a code is spent
- * without buying a case has never been able to say whose teacher was stranded.
+ * **This replaced `/generate_urgent_code` on 1 August 2026.** That command
+ * issued the one-time code a teacher had to be read down the telephone before
+ * they were allowed to describe their problem, and the whole route went with it.
+ * The capability it was gated on did not: `urgent.issue` now means "may decide
+ * that a case jumps the queue", which is the same authority pointed at the
+ * decision rather than at the credential.
  *
- * Available from `Support` upward, which is lower than it first looks and is
- * deliberate: the person a teacher telephones in an emergency is whoever is on
- * the support desk, and a code that needs a Lead to authorise is a code that
- * arrives after the emergency.
+ * It exists because the programme plan accepts, explicitly, that a pending
+ * request waits on one regional coordinator and declines to auto-escalate —
+ * auto-escalation would push every frivolous request to Program anyway, which
+ * defeats the gate. Visibility was chosen instead of automation, which only
+ * works if there is something to look at.
  *
- * **The code is printed once and never again.** Nothing in this system can show
- * it a second time, because nothing needs to — an unused code that has been lost
- * costs one more command, and a command that could re-display codes would turn
- * every staff account into a way of reading them all.
+ * Unscoped by queue and region, deliberately: this is a supervision list, and a
+ * supervisor filtered to their own region cannot see that another region has
+ * stopped answering. It shows references and waiting times, never a teacher's
+ * words — those stay behind `/case`, which records who read them.
  */
-export const generateUrgentCode: StaffCommand = {
-  name: '/generate_urgent_code',
+export const urgentPending: StaffCommand = {
+  name: '/urgent_pending',
   capability: CAPABILITY.URGENT_ISSUE,
   handle: async (ctx) => {
-    const issued = await issueUrgentCode(ctx.db, ctx.member.telegramId);
+    const waiting = await pendingUrgentRequests(ctx.db, STAFF_CASE_LIST_CAP);
+
+    if (waiting.length === 0) {
+      return reply(
+        ctx.member.telegramId,
+        [
+          'No priority requests are waiting for a decision.',
+          '',
+          'Every request that has been made has been either confirmed or overtaken by',
+          'the case being marked urgent some other way.',
+        ].join('\n'),
+      );
+    }
 
     return reply(
       ctx.member.telegramId,
       [
-        `🚨 Urgent code: ${issued.code}`,
+        `⏫ ${waiting.length} priority request(s) waiting for a decision`,
         '',
-        `Usable once, until ${formatTashkent(issued.expiresAt)} (${TIMEZONE}).`,
+        ...waiting.map((r) => `${r.reference} — asked ${r.requestedAt} (${TIMEZONE})`),
         '',
-        'Read it to the teacher and have them tap Urgent Case, then type it. It is',
-        'not used up until their case is actually filed, so they can take the time to',
-        'describe the emergency properly.',
+        'Nothing escalates these on its own, by design. Open one to read it, then',
+        'confirm it with the button on the message you were sent.',
         '',
-        'This is the only time it is shown. Nothing can display it again — issue',
-        'another if it is lost, and this one simply expires unused.',
-        '',
-        'It is recorded against your name.',
+        '/case <reference> — read it, including what the teacher wrote',
       ].join('\n'),
     );
   },
@@ -397,4 +406,4 @@ export const retention: StaffCommand = {
   },
 };
 
-export const OPS_COMMANDS: readonly StaffCommand[] = [maintenance, generateUrgentCode, retention];
+export const OPS_COMMANDS: readonly StaffCommand[] = [maintenance, urgentPending, retention];

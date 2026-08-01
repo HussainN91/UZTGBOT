@@ -188,9 +188,19 @@ export const CAPABILITY_INTERFACE: Readonly<Record<Capability, CapabilityInterfa
   },
   'case.mark': { summary: 'Say how serious a case is', commands: ['/mark'] },
   'case.assign': { summary: 'Give a case an owner', commands: ['/assign'] },
+  /**
+   * The capability outlived the thing it was named for.
+   *
+   * It used to mean "may issue a one-time code", which was the credential a
+   * teacher needed before they were allowed to describe an urgent problem. The
+   * codes went on 1 August 2026 and the authority stayed, pointed at the
+   * decision instead: whoever could hand out the credential is whoever can now
+   * agree that a case jumps the queue. Renaming the key would have been a
+   * migration of every audit row for no gain.
+   */
   'urgent.issue': {
-    summary: 'Issue a one-time urgent code',
-    commands: ['/generate_urgent_code'],
+    summary: 'Decide whether a case is treated as urgent',
+    commands: ['/urgent_pending'],
   },
   'teacher.region': { summary: 'Correct a teacher’s region', commands: ['/region', '/regions'] },
   /**

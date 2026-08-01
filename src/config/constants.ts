@@ -194,99 +194,43 @@ export const MAX_CASE_DETAIL_ATTEMPTS = 3;
 export const CONVERSATION_TTL_MINUTES = 30;
 
 /**
- * How long a teacher has to describe an urgent case after their code is
- * accepted.
+ * How long a teacher has to write out a priority request before the prompt
+ * lapses.
  *
- * The Apps Script version used six hours, and MenuHandler.gs:27-33 says plainly
- * that six was the ceiling CacheService allowed — not a considered figure. The
- * consequence of it lapsing is a burned single-use code and a teacher who has
- * to phone a Regional admin again. PostgreSQL has no such ceiling, so this is
- * chosen on its merits: a teacher who starts an urgent case in the evening can
- * finish it the next morning.
+ * Far longer than the thirty minutes every other prompt gets, and it stays that
+ * way now the one-time code is gone. The original argument was that lapsing
+ * burned a single-use code; the remaining one is simpler and was always the
+ * better half of it. Somebody asking for their case to be moved ahead of others
+ * is being asked to explain *why*, which means finding a date, a letter or an
+ * appointment reference — and a prompt that expires while they go and look is a
+ * prompt that gets answered with two words instead.
  */
 export const URGENT_DETAIL_TTL_HOURS = 24;
 
 /**
- * The category an urgent case is filed under.
+ * The category a priority request is filed under.
  *
- * Urgent Case deliberately has no topic picker (`MenuHandler.gs:445`): a teacher
- * in an emergency should not be made to classify it first. Everything urgent
- * therefore lands in the general queue, which is also why urgent-plus-duplicate
- * is the *common* path rather than an edge case — every ordinary Contact Support
- * case files here too.
+ * The request path deliberately has no topic picker (`MenuHandler.gs:445`): a
+ * teacher who needs something looked at quickly should not be made to classify
+ * it first. Everything therefore lands in the general queue, which is also why
+ * request-plus-duplicate is the *common* path rather than an edge case — every
+ * ordinary Contact Support case files here too.
  */
 export const URGENT_CASE_CATEGORY = CASE_CATEGORY.CONTACT_SUPPORT;
 
 /**
- * How many wrong urgent codes one chat may offer inside the window below.
+ * Six constants used to live here, and all six were withdrawn on 1 August 2026:
+ * the code alphabet and length, its two-day life, the guess cap, the window that
+ * cap was counted over, and the delay before a spent-but-unused code raised an
+ * alarm.
  *
- * New, and not carried over — it exists because the rebuild made something safer
- * and thereby made something else unsafe. `consumeUrgentCode_`
- * (`AdminCommands.gs:1261`) deleted the code whether it was right or wrong, so a
- * guess cost the guesser the thing they were guessing at. The conditional
- * `UPDATE` that makes a code genuinely single-use leaves a *wrong* code
- * untouched, so guessing became free — and the code space is six characters.
- *
- * No document mentions a limit, because until the consumption became atomic
- * there was nothing to limit.
+ * They existed to make a six-character credential safe to read down a telephone
+ * line, because a teacher had to be told one before the bot would let them
+ * describe an urgent problem. The gate moved: nothing now stands between the
+ * button and the writing, and a regional coordinator decides afterwards whether
+ * the case is actually a priority. A credential nobody has to hold needs no
+ * alphabet, no expiry, and no lockout.
  */
-export const URGENT_CODE_MAX_ATTEMPTS = 5;
-
-/**
- * The window the cap above is counted over.
- *
- * Rolling and self-healing, for D3's reason: a durable counter would need a
- * command to release it, and no such command exists before Stage 4. A teacher
- * who fat-fingers a code five times waits an hour; a script working through the
- * code space is slowed to sixty guesses a day, which is not a search.
- *
- * Counted in its own table rather than in the conversation state, which the
- * cap in `MAX_VERIFICATION_ATTEMPTS` uses: tapping Main Menu clears the
- * conversation state, so a state-held counter would reset on demand. That is
- * tolerable for an address a teacher is trying to remember and useless against
- * somebody guessing.
- */
-export const URGENT_CODE_ATTEMPT_WINDOW_MINUTES = 60;
-
-/**
- * How long after a code is spent a case must exist before it is treated as an
- * error.
- *
- * Under D5 a code and its case are written in one transaction, so a spent code
- * with no case cannot happen. This is the alarm for "cannot happen" happening —
- * it fires only if something has consumed a code outside the one write path.
- */
-export const URGENT_CODE_STRANDED_AFTER_MINUTES = 60;
-
-/**
- * How long an issued code stays usable (`AdminCommands.gs:77`).
- *
- * Carried over unchanged, and it is a real trade rather than an arbitrary
- * number: a code is read aloud over the telephone to a teacher who may be in
- * transit, in another time zone, or asleep, so anything much shorter turns an
- * emergency route into a second telephone call. Two days also bounds the window
- * in which a leaked code is worth anything.
- *
- * A program constant rather than a setting. Shortening it silently strands codes
- * already issued and read out to teachers, and lengthening it changes what a
- * one-time emergency credential is worth — neither is a thing to flip in seconds
- * during an incident, which is the test `settings.ts` states for its own home.
- */
-export const URGENT_CODE_TTL_HOURS = 48;
-
-/**
- * Characters a code is drawn from, and how many.
- *
- * Upper case throughout, because `normaliseUrgentCode` upper-cases what the
- * teacher types and a lower-case code would simply never match. `0`, `O`, `1`
- * and `I` are left out on purpose: this string's whole job is to survive being
- * read aloud down a bad telephone line and typed by somebody under stress, and
- * those four are the pairs people mishear and mistype. Dropping them costs about
- * a fifth of the code space and buys back every one of those failures, which
- * would otherwise present as a rejected code with no explanation.
- */
-export const URGENT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-export const URGENT_CODE_LENGTH = 6;
 
 /** Questions listed per page when browsing one topic (`QAEngine.gs:376`). */
 export const FAQ_PAGE_SIZE = 8;
