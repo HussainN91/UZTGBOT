@@ -23,7 +23,7 @@ import type { Alerter } from '../sync/alerts.js';
 import type { TelegramLookup } from '../staff/repository.js';
 import { telegramAlerter } from './alerter.js';
 import { verdictForChat } from './chat-gate.js';
-import { claimUpdate } from './dedup.js';
+import { claimUpdate, releaseUpdate } from './dedup.js';
 import type { InboundUpdate, RouterOutcome } from './router.js';
 import { route } from './router.js';
 import { send, sendDocument } from './send.js';
@@ -227,21 +227,77 @@ export function createBot(): Bot {
     }
   };
 
+  /**
+   * A teacher's message that failed to process used to vanish.
+   *
+   * The claim is taken before the work and committed on its own; the work runs
+   * in a transaction. So a throw rolled the work back and left the claim
+   * standing, Telegram's redelivery was discarded as a duplicate, and the
+   * teacher's message was gone — with `bot.catch` writing a line to the log and
+   * raising no alarm at all. In a system whose founding concern is that nobody
+   * notices when something breaks, that was the one failure nobody was told
+   * about.
+   *
+   * **This lives here rather than in `processUpdate`, and that is the whole
+   * ripple argument.** `processUpdate` is exported so the suite can drive it with
+   * a real database and no Telegram, and it has no alerter; passing one in
+   * changes its signature and every integration test that calls it. `run()`
+   * already holds the alerter, already has the update id, and is called by no
+   * test. Signature unchanged, zero test ripple.
+   *
+   * The release comes first and is itself wrapped, because a release that throws
+   * must not stop the alarm — an unreleased claim with an alarm raised is a
+   * person looking at it, and an unraised alarm is nobody.
+   */
   const run = async (ctx: Context, update: InboundUpdate): Promise<void> => {
     if (!gate(ctx)) return;
 
-    const outcome = await processUpdate(
-      getDb(),
-      ctx.update.update_id,
-      update,
-      supportContact,
-      /**
-       * `getChat` only, narrowed at the boundary so nothing reachable from the
-       * router can grow the ability to send. The handle check is a read; every
-       * send in this file happens after the transaction commits.
-       */
-      { getChat: (handle: string) => ctx.api.getChat(handle) },
-    );
+    const updateId = ctx.update.update_id;
+
+    let outcome;
+    try {
+      outcome = await processUpdate(
+        getDb(),
+        updateId,
+        update,
+        supportContact,
+        /**
+         * `getChat` only, narrowed at the boundary so nothing reachable from the
+         * router can grow the ability to send. The handle check is a read; every
+         * send in this file happens after the transaction commits.
+         */
+        { getChat: (handle: string) => ctx.api.getChat(handle) },
+      );
+    } catch (err) {
+      let released = false;
+      try {
+        released = await releaseUpdate(getDb(), updateId);
+      } catch (releaseErr) {
+        log.error({ err: releaseErr, updateId }, 'could not release a failed update claim');
+      }
+
+      log.error({ err, updateId, released }, 'handling an update failed');
+      await alerter.send({
+        severity: 'critical',
+        title: 'A message could not be handled',
+        body: [
+          `Chat: ${update.chatId}`,
+          `Update: ${updateId}`,
+          '',
+          released
+            ? 'The claim on this update was released, so Telegram will retry it and it may\n'
+              + 'yet succeed on its own. If the same update id appears here again and again,\n'
+              + 'it will not, and somebody has to look at what this person was trying to do.'
+            : 'The claim on this update could NOT be released, so Telegram’s retry will be\n'
+              + 'discarded as a duplicate and this message is lost. Somebody has to find out\n'
+              + 'what this person was trying to say and ask them to send it again.',
+          '',
+          `Reason: ${err instanceof Error ? err.message : String(err)}`,
+        ].join('\n'),
+      });
+      return;
+    }
+
     if (outcome !== null) await deliver(ctx.api, alerter, outcome);
   };
 

@@ -34,6 +34,35 @@ export async function claimUpdate(db: Database, updateId: number | string): Prom
 }
 
 /**
+ * Give an update's claim back, so Telegram's redelivery is allowed through.
+ *
+ * The claim is taken *before* the work and is committed on its own — it has to
+ * be, or two concurrent deliveries of the same update could both win. The cost
+ * of that ordering is the failure this closes: if the work then throws, the work
+ * rolls back and the claim stands, so Telegram's retry is discarded as a
+ * duplicate and the teacher's message is gone. The only trace was a line in a
+ * log file.
+ *
+ * For a project whose founding concern is that nobody notices when something
+ * breaks, and where every other failure raises an alarm somebody receives, that
+ * was the gap. Called from `run()` in `bot.ts`, which raises the alarm too.
+ *
+ * **The residual risk, stated rather than hidden.** If the throw happened during
+ * the commit itself, the work may or may not have landed, and releasing the
+ * claim lets the retry do it again. The 24-hour duplicate window in `createCase`
+ * absorbs the commonest version of that — a teacher's message is appended to the
+ * case it would have opened rather than opening a second one. A lost message is
+ * the worse failure and is the one that actually happens, so this is the trade
+ * being made deliberately.
+ */
+export async function releaseUpdate(db: Database, updateId: number | string): Promise<boolean> {
+  const result = await db.execute(
+    sql`DELETE FROM processed_updates WHERE update_id = ${String(updateId)}`,
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
  * Forget claims older than the cutoff.
  *
  * Telegram gives up retrying long before a day, so anything older cannot be

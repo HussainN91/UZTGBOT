@@ -18,7 +18,7 @@ import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
-import { claimUpdate, pruneProcessedUpdates } from './dedup.js';
+import { claimUpdate, pruneProcessedUpdates, releaseUpdate } from './dedup.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
 
@@ -63,6 +63,53 @@ describe.skipIf(!TEST_DATABASE_URL)('update deduplication', () => {
     const big = '9007199254740993';
     await expect(claimUpdate(db, big)).resolves.toBe(true);
     await expect(claimUpdate(db, '9007199254740994')).resolves.toBe(true);
+  });
+
+  /**
+   * Giving a claim back after the work failed.
+   *
+   * The claim is taken before the work and commits on its own, so a throw in the
+   * work left the claim standing and Telegram's redelivery was discarded as a
+   * duplicate. The teacher's message was gone and the only trace was a log line.
+   * Releasing is what lets the retry through.
+   */
+  describe('releasing a claim after the work failed', () => {
+    it('lets the same update be claimed again', async () => {
+      await expect(claimUpdate(db, 4242)).resolves.toBe(true);
+      await expect(claimUpdate(db, 4242)).resolves.toBe(false);
+
+      await expect(releaseUpdate(db, 4242)).resolves.toBe(true);
+
+      await expect(claimUpdate(db, 4242)).resolves.toBe(true);
+    });
+
+    it('reports whether there was anything to release', async () => {
+      // The caller alerts differently on the two answers: a released claim will
+      // be retried by Telegram, and an unreleased one means the message is lost
+      // and needs a person.
+      await expect(releaseUpdate(db, 4243)).resolves.toBe(false);
+    });
+
+    it('releases only the update it was asked about', async () => {
+      await claimUpdate(db, 7001);
+      await claimUpdate(db, 7002);
+
+      await releaseUpdate(db, 7001);
+
+      await expect(claimUpdate(db, 7001)).resolves.toBe(true);
+      await expect(claimUpdate(db, 7002)).resolves.toBe(false);
+    });
+
+    it('handles the very large ids Telegram actually issues', async () => {
+      // Same reason as the claim test: anything parsing these into a JavaScript
+      // number collides two distinct updates, and here that would release the
+      // wrong one.
+      const big = '9007199254740993';
+      await claimUpdate(db, big);
+
+      await expect(releaseUpdate(db, big)).resolves.toBe(true);
+      await expect(claimUpdate(db, big)).resolves.toBe(true);
+    });
   });
 
   it('prunes claims too old to be replayed, and keeps recent ones', async () => {
