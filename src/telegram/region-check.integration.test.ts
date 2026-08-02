@@ -33,9 +33,11 @@ const SUPPORT = '+998 71 000 0000';
 const TEACHER = '997101';
 const UNPLACED = '997102';
 const STRANGER = '997103';
+const STALE = '997104';
 
 const TEACHER_ID = 'regioncheck.teacher@example.com';
 const UNPLACED_ID = 'regioncheck.unplaced@example.com';
+const STALE_ID = 'regioncheck.stale@example.com';
 
 const MAIN_MENU = encodeCallback(CALLBACK.MENU, MENU_ACTION.MAIN);
 const CONTACT_SUPPORT = encodeCallback(CALLBACK.MENU, MENU_ACTION.CONTACT_SUPPORT);
@@ -92,13 +94,30 @@ describe.skipIf(!TEST_DATABASE_URL)('asking a teacher about their region', () =>
     await db.execute(sql`
       INSERT INTO roster_entries (identifier, name, region, active) VALUES
         (${TEACHER_ID},  'The Teacher',      'Tashkent', true),
-        (${UNPLACED_ID}, 'Unplaced Teacher', NULL,       true)
+        (${UNPLACED_ID}, 'Unplaced Teacher', NULL,       true),
+        (${STALE_ID},    'Stale Teacher',    'Bukhara',  true)
     `);
     await db.execute(sql`
       INSERT INTO teachers (chat_id, identifier, name, region, verification_state) VALUES
         (${TEACHER},  ${TEACHER_ID},  'The Teacher',      'Tashkent', 'Verified'),
-        (${UNPLACED}, ${UNPLACED_ID}, 'Unplaced Teacher', NULL,       'Verified')
+        (${UNPLACED}, ${UNPLACED_ID}, 'Unplaced Teacher', NULL,       'Verified'),
+        (${STALE},    ${STALE_ID},    'Stale Teacher',    'Bukhara',  'Verified')
     `);
+
+    /**
+     * A third teacher, long overdue to be asked, who never opens the bot in any
+     * test below. They exist to hold the whole file honest.
+     *
+     * The question is asked per teacher, so every assertion here of the form "this
+     * teacher is *not* asked" is only worth anything if somebody else in the
+     * database *is* due. Without this row the query could ignore the chat id
+     * entirely and every one of those tests would still pass — which is exactly
+     * what happened, and it is how the region question came to show one teacher's
+     * region to everybody else.
+     */
+    await db.execute(
+      sql`UPDATE teachers SET region_asked_at = now() - make_interval(days => 400) WHERE chat_id = ${STALE}`,
+    );
 
     /**
      * These teachers have accepted the current notice, because every `Verified`
@@ -110,7 +129,7 @@ describe.skipIf(!TEST_DATABASE_URL)('asking a teacher about their region', () =>
      * Support and Urgent Case, and every test below about the *region* question
      * would be measuring the privacy notice instead.
      */
-    for (const chatId of [TEACHER, UNPLACED]) {
+    for (const chatId of [TEACHER, UNPLACED, STALE]) {
       await recordAcceptance(db, chatId, PRIVACY_NOTICE_VERSION, await retentionPeriods(db));
     }
   });
@@ -169,6 +188,31 @@ describe.skipIf(!TEST_DATABASE_URL)('asking a teacher about their region', () =>
       expect(await askedAt(TEACHER)).not.toBeNull();
 
       expect(regionAsk(await tap(MAIN_MENU))).toBeUndefined();
+    });
+
+    it('asks nobody else when one teacher somewhere is overdue', async () => {
+      // The whole question is per teacher, and the way to get that wrong is to
+      // write a condition that stops looking at the chat id. Here the stale
+      // teacher is 400 days overdue and this teacher was asked yesterday: the
+      // right answer is silence, and the wrong one is this teacher being asked
+      // about *Bukhara*, which is not a place they have ever been.
+      await text('/start');
+      await askedDaysAgo(TEACHER, 1);
+
+      const second = await text('/start');
+
+      expect(regionAsk(second)).toBeUndefined();
+      expect(second.messages).toHaveLength(1);
+    });
+
+    it('does not offer a teacher somebody else’s region', async () => {
+      // Even on a visit where this teacher *is* due, the region put to them has to
+      // be their own. Asked never, so the question is asked — it must say Tashkent
+      // and it must not say Bukhara.
+      const asked = regionAsk(await text('/start')) ?? '';
+
+      expect(asked).toContain('Tashkent');
+      expect(asked).not.toContain('Bukhara');
     });
 
     it('does not ask a teacher whose region we do not hold', async () => {

@@ -152,7 +152,12 @@ export async function regionCheckDue(
       and(
         eq(teachers.chatId, chatId),
         eq(teachers.verificationState, 'Verified'),
-        sql`${teachers.regionAskedAt} IS NULL OR ${teachers.regionAskedAt} < now() - make_interval(days => ${afterDays})`,
+        // The brackets are load-bearing. `AND` binds tighter than `OR`, so without
+        // them the second half stands alone as a whole condition of its own and
+        // matches *any* teacher who is overdue — the chat id and the verified
+        // state applying only to the first half. One stale teacher then made every
+        // other signed-in teacher be asked, about the stale teacher's region.
+        sql`(${teachers.regionAskedAt} IS NULL OR ${teachers.regionAskedAt} < now() - make_interval(days => ${afterDays}))`,
       ),
     )
     .limit(1);
