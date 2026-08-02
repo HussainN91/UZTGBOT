@@ -14,17 +14,26 @@ undecided. Supersedes the "what's next" list in
 > `docs/plans/archive/`. Its two surviving open decisions are items 0 and 5 of
 > Open questions below. Do not go looking for a handoff; there is not one.
 
-> ### ⬜ PENDING — the live server, as of 2 August 2026
+> ### ✅ DEPLOYED — 2 August 2026. The live server runs `2ae5e04`.
 >
-> **The live server is now two features behind.** Deploying needs an SSH key from
-> the working machine added to the server's `ubuntu` user — none was configured —
-> or the head of project running the pull themselves. **RUNBOOK.md §2.1 is the
-> order and it is not negotiable: build, stop, migrate, start worker, start web.**
+> **It had been twenty-one commits behind — six features, not one.** Feature B, the
+> login-gating fix, case-list buttons, all of Part 5H, the privacy notice and
+> Feature A all reached the live bot in this one deploy.
 >
-> **Two schema migrations are now waiting**, not one: `0010_urgent_request_gate.sql`
-> (Feature B) and `0011_identity_disputes.sql` (Feature A). Everything else since
-> — 5F, 5G, 5H, the privacy notice — needed no schema change, but the migrate step
-> still has to run, and it has to run **before** the new code serves anybody.
+> Done in `RUNBOOK.md` §2.1's order, which is not negotiable: pull, build, stop web
+> and worker, migrate, start worker, start web. **Both pending migrations applied**
+> — `0010_urgent_request_gate.sql` and `0011_identity_disputes.sql` — taking the
+> applied count from 10 to 12. A `pg_dump` was taken into `~/pre-deploy-backups/`
+> on the server first, because §1.4 still lists a proven backup restore as a launch
+> blocker and two migrations were about to run against live teacher data.
+>
+> Verified after: four containers healthy, `/healthz` returning 200 through the
+> public domain, the webhook registered with 0 pending updates and no last error, no
+> error lines in the logs, and the data unchanged at 8 roster rows, 1 teacher,
+> 2 cases and 2 staff.
+>
+> **SSH from the working machine now exists** (`ssh mopse`), added the same day. The
+> repeated note in earlier documents that no key was configured is spent.
 >
 > ### ✅ Feature A is built — 2 August 2026, commit `d2c8e36`
 >
@@ -34,8 +43,10 @@ undecided. Supersedes the "what's next" list in
 > with its reasoning. **Read that document rather than Part 2** where the two
 > disagree; Part 2 is marked where it was overtaken.
 >
-> **Then:** Feature E, which needs its own spec starting from §9.1.C — and the
-> operational launch blockers, which are still untouched and still gate a launch.
+> **Then:** the operational launch blockers in `RUNBOOK.md` §1.4, which are still
+> completely untouched and now gate everything — there is no engineering work left
+> in front of them. Feature E is the last planned feature, and its spec must start
+> from §9.1.C.
 
 > **Revised 1 August 2026, after building Feature B.** Three changes, all made by
 > the head of project and all binding:
