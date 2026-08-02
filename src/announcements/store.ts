@@ -19,6 +19,7 @@
  * one recipient — a read followed by a write is exactly how they would.
  */
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { ANNOUNCEMENT_MAX_ATTEMPTS } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import {
   announcementRecipients,
@@ -266,23 +267,40 @@ export async function claimBatch(db: Database, id: string, limit: number): Promi
 }
 
 /**
- * Hand a recipient back after a send that could still succeed.
+ * Hand a recipient back after a send that could still succeed — up to a point.
  *
  * Rate limits and Telegram outages are the retryable failures (`isRetryable`),
  * and the right answer to both is to try again on the next sweep rather than to
- * write the teacher off. `attempts` has already been incremented by the claim,
- * so a recipient that keeps failing is visible without a second counter.
+ * write the teacher off. `attempts` is incremented by the claim, so the count is
+ * already there.
+ *
+ * **It was never read, and that was the whole fault.** With nothing consulting
+ * it there was no cap: one recipient failing every time meant the sweeper
+ * re-claimed them every minute for ever, the announcement stayed at `Sending`
+ * indefinitely, `finishIfDone` could never fire, and the person who sent it was
+ * never told it had ended. Nothing raised an alarm, because from every angle it
+ * looked like a broadcast still in progress.
+ *
+ * The fix is this one conditional statement rather than a counter kept anywhere
+ * else. Past the cap the row goes to `Failed` instead of `Pending`, which is a
+ * settled state — so the sweeper stops claiming it, `finishIfDone` fires, and
+ * the sender's report counts them under "Failed", which already has wording for
+ * a recipient Telegram would not deliver to.
+ *
+ * Written as one `UPDATE` with the decision in SQL, not as a read followed by a
+ * write. Two workers could otherwise both read four attempts and both decide to
+ * retry.
  */
 export async function returnForRetry(db: Database, id: string, chatId: string, error: string): Promise<void> {
-  await db
-    .update(announcementRecipients)
-    .set({ state: 'Pending', lastError: error.slice(0, 500) })
-    .where(
-      and(
-        eq(announcementRecipients.announcementId, id),
-        eq(announcementRecipients.chatId, chatId),
-      ),
-    );
+  await db.execute(sql`
+    UPDATE announcement_recipients
+    SET state = CASE
+          WHEN attempts >= ${ANNOUNCEMENT_MAX_ATTEMPTS} THEN 'Failed'
+          ELSE 'Pending'
+        END::delivery_state,
+        last_error = ${error.slice(0, 500)}
+    WHERE announcement_id = ${id} AND chat_id = ${chatId}
+  `);
 }
 
 export type FinalRecipientState = 'Sent' | 'Failed' | 'Skipped';

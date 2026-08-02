@@ -429,6 +429,26 @@ export const DIGEST_LIST_CAP = 10;
 export const ANNOUNCEMENT_BATCH = 200;
 
 /**
+ * How many times one recipient's send may be retried before it is written off.
+ *
+ * Without a cap there is no cap. A recipient whose send fails in a retryable way
+ * — a rate limit, a Telegram outage — is handed back as `Pending`, and the
+ * sweeper re-claims it on the next run, for ever. `attempts` was incremented on
+ * every claim and never read by anything, so one permanently failing recipient
+ * meant an announcement that sat at `Sending` indefinitely: the sender was never
+ * told it had finished, `finishIfDone` could never fire, and nothing raised an
+ * alarm about any of it.
+ *
+ * Five, because the sweeper runs once a minute and the failures this is for are
+ * transient. A Telegram rate limit clears in seconds and an outage in minutes,
+ * so five separate minutes of failing is no longer "try again shortly" — it is a
+ * recipient who is not going to receive this one, and saying so is more use to
+ * the sender than a broadcast that never ends. They are counted under "Failed"
+ * in the report, which already has wording for exactly this.
+ */
+export const ANNOUNCEMENT_MAX_ATTEMPTS = 5;
+
+/**
  * How long the per-recipient delivery rows of a finished announcement are kept.
  *
  * A constant rather than a settings key, deliberately (D33). It governs

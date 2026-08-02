@@ -13,6 +13,7 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { ANNOUNCEMENT_MAX_ATTEMPTS } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import type { Audience } from './audience.js';
@@ -252,6 +253,62 @@ describe.skipIf(!TEST_DATABASE_URL)('the announcement store', () => {
       await returnForRetry(db, id, chatId!, 'rate limited');
 
       expect(await claimBatch(db, id, 2)).toContain(chatId);
+    });
+
+    /**
+     * The recipient that could never stop being retried.
+     *
+     * `attempts` was incremented by every claim and read by nothing, so there
+     * was no cap: one recipient failing every time meant the sweeper re-claimed
+     * them once a minute for ever, the announcement stayed at `Sending`
+     * indefinitely, and the person who sent it was never told it had ended.
+     * Nothing raised an alarm, because from the outside it looked exactly like a
+     * broadcast still in progress.
+     */
+    it('writes a recipient off once they have used up their attempts', async () => {
+      // One recipient, so every claim is theirs and the count is unambiguous.
+      const id = await seedMany(1);
+
+      // Claim-and-fail, over and over, the way a rate-limited chat behaves. Runs
+      // one pass beyond the cap, and the last of those must find nothing left to
+      // claim — a written-off recipient is settled, so the sweeper stops seeing
+      // them.
+      let claims = 0;
+      for (let i = 0; i <= ANNOUNCEMENT_MAX_ATTEMPTS; i += 1) {
+        const claimed = await claimBatch(db, id, 1);
+        if (claimed.length === 0) break;
+        claims += 1;
+        await returnForRetry(db, id, claimed[0]!, 'rate limited');
+      }
+
+      expect(claims).toBe(ANNOUNCEMENT_MAX_ATTEMPTS);
+
+      const rows = await db.execute<{ state: string; attempts: number }>(sql`
+        SELECT state, attempts FROM announcement_recipients WHERE announcement_id = ${id}
+      `);
+      expect(rows.rows[0]?.state).toBe('Failed');
+      expect(rows.rows[0]?.attempts).toBe(ANNOUNCEMENT_MAX_ATTEMPTS);
+      // The reason is kept, so somebody can see why they were written off.
+      expect(rows.rows).toHaveLength(1);
+    });
+
+    it('lets the announcement reach Sent even when one recipient never succeeds', async () => {
+      // The point of the cap. `finishIfDone` can only fire when every recipient
+      // is in a settled state, so an uncapped retry meant an announcement that
+      // could never finish.
+      const id = await seedMany(2);
+
+      for (let pass = 0; pass <= ANNOUNCEMENT_MAX_ATTEMPTS + 1; pass += 1) {
+        const claimed = await claimBatch(db, id, 10);
+        if (claimed.length === 0) break;
+        for (const chatId of claimed) await returnForRetry(db, id, chatId, 'rate limited');
+      }
+
+      await expect(finishIfDone(db, id)).resolves.toBe(true);
+
+      const counts = await tally(db, id);
+      expect(counts.failed).toBe(2);
+      expect(counts.sent).toBe(0);
     });
 
     it('returns a recipient stranded by a run that died mid-batch', async () => {

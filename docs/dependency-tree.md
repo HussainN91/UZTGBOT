@@ -49,6 +49,7 @@ Erased at compile time. These may point up the layers without it being a violati
 - src/cases/service.ts → src/db/index.ts
 - src/cases/urgent.integration.test.ts → src/db/index.ts
 - src/cases/urgent.ts → src/db/index.ts
+- src/cases/urgent.ts → src/db/schema.ts
 - src/config/privacy.test.ts → src/config/retention.ts
 - src/config/privacy.ts → src/config/retention.ts
 - src/config/settings.integration.test.ts → src/db/index.ts
@@ -189,7 +190,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/announcements/store.ts
 
-- imports: src/db/index.ts *(type only)*, src/db/schema.ts, src/announcements/audience.ts *(type only)*, src/announcements/audience.ts
+- imports: src/config/constants.ts, src/db/index.ts *(type only)*, src/db/schema.ts, src/announcements/audience.ts *(type only)*, src/announcements/audience.ts
 - imported by: src/telegram/commands/announce.ts, src/worker/tasks/announcements.ts
 
 ### src/cases/importance.ts
@@ -225,17 +226,17 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/cases/status.ts
 
 - imports: src/db/schema.ts
-- imported by: src/cases/service.ts, src/telegram/commands/cases.ts
+- imported by: src/cases/service.ts, src/telegram/commands/cases.ts, src/telegram/commands/ops.ts
 
 ### src/cases/urgent.ts
 
-- imports: src/config/constants.ts, src/db/index.ts *(type only)*, src/log/audit.ts, src/cases/service.ts
+- imports: src/config/constants.ts, src/db/index.ts *(type only)*, src/db/schema.ts *(type only)*, src/log/audit.ts, src/cases/service.ts
 - imported by: src/telegram/commands/ops.ts, src/telegram/router.ts
 
 ### src/config/constants.ts
 
 - imports: nothing inside src/
-- imported by: src/cases/notes.ts, src/cases/notify.ts, src/cases/queries.ts, src/cases/reference.ts, src/cases/service.ts, src/cases/urgent.ts, src/config/privacy.ts, src/conversation/state.ts, src/digest/format.ts, src/export/csv.ts, src/faq/scoring.ts, src/sheets/parse.ts, src/staff/queues.ts, src/sync/form-responses.ts, src/teachers/dispute-notify.ts, src/teachers/disputes.ts, src/teachers/verify.ts, src/telegram/callback-data.ts, src/telegram/commands/announce.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/commands/ops.ts, src/telegram/commands/parse.ts, src/telegram/commands/staff.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/keyboards.ts, src/telegram/router.ts, src/worker/job-run.ts, src/worker/tasks/announcements.ts, src/worker/tasks/digest.ts, src/worker/tasks/retention.ts
+- imported by: src/announcements/store.ts, src/cases/notes.ts, src/cases/notify.ts, src/cases/queries.ts, src/cases/reference.ts, src/cases/service.ts, src/cases/urgent.ts, src/config/privacy.ts, src/conversation/state.ts, src/digest/format.ts, src/export/csv.ts, src/faq/scoring.ts, src/sheets/parse.ts, src/staff/queues.ts, src/sync/form-responses.ts, src/teachers/dispute-notify.ts, src/teachers/disputes.ts, src/teachers/verify.ts, src/telegram/callback-data.ts, src/telegram/commands/announce.ts, src/telegram/commands/cases.ts, src/telegram/commands/context.ts, src/telegram/commands/ops.ts, src/telegram/commands/parse.ts, src/telegram/commands/staff.ts, src/telegram/handlers/cases.ts, src/telegram/handlers/faq.ts, src/telegram/keyboards.ts, src/telegram/router.ts, src/worker/job-run.ts, src/worker/tasks/announcements.ts, src/worker/tasks/digest.ts, src/worker/tasks/retention.ts
 
 ### src/config/env.ts
 
@@ -290,7 +291,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/db/schema.ts
 
 - imports: nothing inside src/
-- imported by: src/announcements/store.ts, src/cases/importance.ts, src/cases/notes.ts, src/cases/queries.ts, src/cases/service.ts, src/cases/status.ts, src/config/settings.ts, src/db/index.ts, src/faq/repository.ts, src/forms/repository.ts, src/staff/assignment.ts, src/staff/assignment.ts, src/staff/recipients.ts, src/staff/repository.ts, src/staff/roles.ts, src/staff/visibility.ts, src/sync/form-responses.ts, src/sync/sheets-sync.ts, src/teachers/disputes.ts, src/teachers/forget.ts, src/teachers/forget.ts, src/teachers/privacy.ts, src/teachers/region.ts, src/teachers/repository.ts, src/telegram/commands/staff.ts, src/telegram/router.ts, src/worker/job-run.ts
+- imported by: src/announcements/store.ts, src/cases/importance.ts, src/cases/notes.ts, src/cases/queries.ts, src/cases/service.ts, src/cases/status.ts, src/cases/urgent.ts, src/config/settings.ts, src/db/index.ts, src/faq/repository.ts, src/forms/repository.ts, src/staff/assignment.ts, src/staff/assignment.ts, src/staff/recipients.ts, src/staff/repository.ts, src/staff/roles.ts, src/staff/visibility.ts, src/sync/form-responses.ts, src/sync/sheets-sync.ts, src/teachers/disputes.ts, src/teachers/forget.ts, src/teachers/forget.ts, src/teachers/privacy.ts, src/teachers/region.ts, src/teachers/repository.ts, src/telegram/commands/staff.ts, src/telegram/router.ts, src/worker/job-run.ts
 
 ### src/digest/format.ts
 
@@ -420,7 +421,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/teachers/disputes.ts
 
 - imports: src/config/constants.ts, src/cases/queries.ts, src/cases/service.ts, src/db/index.ts *(type only)*, src/db/schema.ts *(type only)*, src/log/audit.ts, src/staff/visibility.ts *(type only)*, src/teachers/repository.ts
-- imported by: src/teachers/dispute-notify.ts, src/telegram/commands/staff.ts, src/telegram/dispute-actions.ts, src/telegram/router.ts
+- imported by: src/teachers/dispute-notify.ts, src/telegram/commands/staff.ts, src/telegram/dispute-actions.ts, src/telegram/router.ts, src/worker/tasks/digest.ts
 
 ### src/teachers/forget.ts
 
@@ -489,7 +490,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/telegram/commands/ops.ts
 
-- imports: src/config/constants.ts, src/cases/urgent.ts, src/config/privacy.ts, src/config/retention.ts, src/config/settings.ts, src/log/audit.ts, src/staff/roles.ts, src/telegram/commands/context.ts
+- imports: src/config/constants.ts, src/cases/status.ts, src/cases/urgent.ts, src/config/privacy.ts, src/config/retention.ts, src/config/settings.ts, src/log/audit.ts, src/staff/roles.ts, src/telegram/commands/context.ts
 - imported by: src/telegram/commands/index.ts
 
 ### src/telegram/commands/parse.ts
@@ -584,7 +585,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/worker/tasks/digest.ts
 
-- imports: src/config/constants.ts, src/cases/queries.ts, src/cases/service.ts, src/db/index.ts, src/db/index.ts *(type only)*, src/digest/format.ts, src/log.ts, src/staff/roles.ts, src/staff/repository.ts, src/sync/alerts.ts *(type only)*, src/telegram/alerter.ts, src/telegram/bot.ts, src/telegram/send.ts, src/worker/job-run.ts
+- imports: src/config/constants.ts, src/cases/queries.ts, src/cases/service.ts, src/db/index.ts, src/db/index.ts *(type only)*, src/digest/format.ts, src/log.ts, src/teachers/disputes.ts, src/staff/roles.ts, src/staff/repository.ts, src/sync/alerts.ts *(type only)*, src/telegram/alerter.ts, src/telegram/bot.ts, src/telegram/send.ts, src/worker/job-run.ts
 - imported by: src/worker/main.ts
 
 ### src/worker/tasks/heartbeat.ts
