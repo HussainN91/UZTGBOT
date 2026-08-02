@@ -522,7 +522,14 @@ export async function regionManagerFor(
       telegramId: staff.telegramId,
       name: staff.name,
       telegramUsername: staff.telegramUsername,
-      explicit: sql<boolean>`${covers}`,
+      /**
+       * `explicit: sql<boolean>`${covers}`` used to be selected here and was
+       * never read by anything. It looked like it was what the tie-break below
+       * ordered on — it is not; that clause tests `regions <> ARRAY[]::text[]`
+       * directly. A column that appears to explain an ordering and does not is
+       * worse than no column, because the next person to change the ordering
+       * will change the wrong one.
+       */
     })
     .from(staff)
     .where(

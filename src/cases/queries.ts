@@ -223,10 +223,27 @@ export async function overdueDays(db: Database): Promise<number | null> {
 export async function staleCases(
   db: Database,
   scope: StaffScope,
-  /** Only cases with no owner at all — the standing backlog the digest shows. */
-  options: { readonly unassigned?: boolean } = {},
+  options: {
+    /** Only cases with no owner at all — the standing backlog the digest shows. */
+    readonly unassigned?: boolean;
+    /**
+     * The threshold, when the caller has already read it.
+     *
+     * `/urgent` reads `overdueDays` itself, because it has to say "nobody has
+     * set a threshold" in words rather than showing an empty list — and then
+     * called this, which read the same setting again. Two queries for one
+     * number, on a command staff run all day.
+     *
+     * Optional rather than required, so the rule still lives in here for every
+     * caller that does not care: omit it and `overdueDays` is read as before.
+     * `null` means the same thing whichever way it arrives — nobody has said
+     * what overdue means, so nothing is reported as late against a number this
+     * bot invented.
+     */
+    readonly overdueDays?: number | null;
+  } = {},
 ): Promise<StaffCaseList> {
-  const days = await overdueDays(db);
+  const days = options.overdueDays !== undefined ? options.overdueDays : await overdueDays(db);
   if (days === null) return EMPTY_LIST;
 
   const where = and(

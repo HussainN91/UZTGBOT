@@ -108,6 +108,23 @@ async function sendStaffDigests(
   let skipped = 0;
   let undeliverable = 0;
 
+  /**
+   * Read once, above the loop, because it is the same list for everybody.
+   *
+   * The dispute list is deliberately not filtered by region or queue — a dispute
+   * has no queue, and its region lives on the roster rather than on anything
+   * `scope` can see — so the query inside the loop asked the same question and
+   * got the same answer once per staff member. With thirty staff that is thirty
+   * identical queries every morning, on the one job that runs while nothing else
+   * is happening. Who is *shown* it still varies, and that check stays where it
+   * was, per member.
+   */
+  const allDisputes = await openDisputes(db, DIGEST_LIST_CAP);
+  const disputeLinesForAnyone = allDisputes.map(
+    (d) =>
+      `#${String(d.id)} — ${d.identifier} · ${String(d.parties.length)} accounts · opened ${d.openedAt}`,
+  );
+
   for (const member of members) {
     const scope = { role: member.role, queue: member.queue, regions: member.regions };
 
@@ -131,10 +148,7 @@ async function sendStaffDigests(
      * same unfiltered list, so the digest and the command agree.
      */
     const disputeLines = can({ role: member.role, active: member.active }, CAPABILITY.DISPUTE_REVIEW)
-      ? (await openDisputes(db, DIGEST_LIST_CAP)).map(
-          (d) =>
-            `#${String(d.id)} — ${d.identifier} · ${String(d.parties.length)} accounts · opened ${d.openedAt}`,
-        )
+      ? disputeLinesForAnyone
       : [];
 
     /**

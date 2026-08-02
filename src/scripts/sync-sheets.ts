@@ -4,29 +4,42 @@
  * Used for the very first roster load, and to check a fix straight away rather
  * than waiting for the next ten-minute slot.
  *
- *   npm run sync                 # sync both tabs
+ *   npm run sync                 # sync all three tabs
  *   npm run sync -- --faq        # one tab only
  *   npm run sync -- --roster
+ *   npm run sync -- --forms
  *   npm run sync -- --force      # allow a deliberate bulk removal
  *
  * --force exists for a genuine mass removal — end of a cohort, say. It is
  * recorded as an override on the sync run, because an override nobody can see
  * afterwards is the same as having no limit at all.
+ *
+ * **FORMS was missing from this command until 2 August 2026**, and the scheduled
+ * worker had always synced it. So forms did arrive, within ten minutes — but the
+ * manual first-load command the deploy guide points at skipped them, which is
+ * exactly the moment somebody is standing there watching and concluding the
+ * feature does not work. A command that syncs "everything" has to mean it.
  */
 import process from 'node:process';
 import { closePool } from '../db/client.js';
 import { getDb } from '../db/index.js';
 import { log } from '../log.js';
 import { createSheetReader } from '../sheets/client.js';
-import { syncFaq, syncRoster, type SyncReport } from '../sync/sheets-sync.js';
+import { syncFaq, syncForms, syncRoster, type SyncReport } from '../sync/sheets-sync.js';
 
 async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
   const force = args.has('--force');
-  const onlyFaq = args.has('--faq');
-  const onlyRoster = args.has('--roster');
-  const doFaq = onlyFaq || !onlyRoster;
-  const doRoster = onlyRoster || !onlyFaq;
+
+  /**
+   * Any tab named runs only the tabs named; no tab named runs all of them.
+   *
+   * Written this way rather than as a chain of `onlyX || !onlyY` pairs, which is
+   * what it was — that shape works for two tabs and quietly stops working at
+   * three, because `!onlyRoster` is true when `--forms` was given.
+   */
+  const named = ['--faq', '--roster', '--forms'].filter((flag) => args.has(flag));
+  const wanted = (flag: string): boolean => named.length === 0 || named.includes(flag);
 
   if (force) log.warn('--force given: the damage limit will be overridden and the override recorded');
 
@@ -34,8 +47,9 @@ async function main(): Promise<void> {
   const reader = createSheetReader();
   const reports: SyncReport[] = [];
 
-  if (doFaq) reports.push(await syncFaq(db, reader, { force }));
-  if (doRoster) reports.push(await syncRoster(db, reader, { force }));
+  if (wanted('--faq')) reports.push(await syncFaq(db, reader, { force }));
+  if (wanted('--roster')) reports.push(await syncRoster(db, reader, { force }));
+  if (wanted('--forms')) reports.push(await syncForms(db, reader, { force }));
 
   for (const report of reports) {
     log.info(

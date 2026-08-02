@@ -373,7 +373,8 @@ export const urgent: StaffCommand = {
   handle: async ({ db, member, scope }) => {
     const escalated = await listCases(db, scope, { status: 'Escalated' });
     const days = await overdueDays(db);
-    const stale = await staleCases(db, scope);
+    // Handed the threshold rather than letting it be read a second time.
+    const stale = await staleCases(db, scope, { overdueDays: days });
 
     const overdueSection =
       days === null
