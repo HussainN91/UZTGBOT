@@ -86,6 +86,43 @@ describe('the retention paragraph', () => {
     expect(body).not.toMatch(/\b\d+\s*(day|month|year)s?\b/i);
   });
 
+  /**
+   * Nothing in this bot has ever turned Telegram formatting on.
+   *
+   * `send.ts` has supported it since it was written and no call site anywhere
+   * passes it, so a `*heading*` is not a heading — it is two asterisks, read as
+   * punctuation, in the one message this system shows before it asks a teacher
+   * for an email address. The markers were removed on 2 August 2026 rather than
+   * the formatting turned on, because turning it on means escaping every piece
+   * of free text in every message that carries one, and a single unescaped
+   * character makes Telegram refuse the whole message.
+   *
+   * This assertion exists because the audit found that nothing protected it:
+   * every test that touched this text matched the words *inside* the markers, so
+   * the markers could have been added or removed at will and the suite would
+   * have said nothing either way.
+   */
+  it('contains no formatting markers, because no message is ever sent with formatting on', () => {
+    expect(privacyNotice(CONTACT, SET)).not.toContain('*');
+    expect(privacyNotice(CONTACT, INDEFINITE)).not.toContain('*');
+  });
+
+  /**
+   * The sentence that had never been true, corrected on 2 August 2026.
+   *
+   * The notice told every teacher the bot holds "your name as Telegram supplies
+   * it". No path into this system has ever read a Telegram display name — the
+   * name on a teacher's record is copied from the recruitment spreadsheet. This
+   * is a legal statement, so it is asserted rather than left to a reader.
+   */
+  it('does not claim to hold a name that Telegram supplies', () => {
+    const notice = privacyNotice(CONTACT, SET);
+
+    expect(notice).not.toMatch(/name as Telegram supplies/i);
+    expect(notice).toMatch(/display name is not stored/i);
+    expect(notice).toMatch(/recruitment records/i);
+  });
+
   it('says what is kept permanently, rather than listing only the deletions', () => {
     // A notice that describes what goes and stays silent about what stays is
     // quietly incomplete. audit_log is never pruned (D28) and teachers should

@@ -233,3 +233,36 @@ describe('the announcement report', () => {
     expect(report.toLowerCase()).not.toContain('failed');
   });
 });
+
+/**
+ * The other place a stray asterisk mattered most.
+ *
+ * `send.ts` has supported Telegram formatting since it was written and nothing
+ * anywhere has ever turned it on, so every `*bold*` in this bot was delivered as
+ * punctuation. Of all the messages that had one, an announcement is the one
+ * that goes to every teacher at once — 1,800 people reading the same stray
+ * character — and the digest is the one staff see every morning.
+ *
+ * Asserted here because the audit found nothing protected it: every test in this
+ * file matched the words inside the markers, never the markers themselves.
+ */
+describe('no message goes out carrying formatting markers', () => {
+  it('leaves none in an announcement or its report', () => {
+    expect(announcementMessage('The Ministry will be closed on Monday.')).not.toContain('*');
+    expect(announcementReport({ sent: 1780, skipped: 15, failed: 5, total: 1800 })).not.toContain(
+      '*',
+    );
+  });
+
+  it('leaves none in the morning digest, whichever lists it has', () => {
+    const full = staffDigest({
+      pastDue: list([row()]),
+      stale: list([row()]),
+      unassigned: list([row()]),
+      disputes: ['someone@example.com'],
+    });
+
+    expect(full).not.toBeNull();
+    expect(full).not.toContain('*');
+  });
+});

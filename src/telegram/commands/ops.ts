@@ -323,7 +323,7 @@ export const retention: StaffCommand = {
       return reply(
         ctx.member.telegramId,
         [
-          '🗄 *Retention periods*',
+          '🗄 Retention periods',
           '',
           ...describePeriods(current),
           '',

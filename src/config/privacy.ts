@@ -38,8 +38,27 @@ import type { RetentionPeriods } from './retention.js';
  * already signed in to accept again, and doing it now costs one round from a
  * pilot of eight rather than one round from everybody after launch — on top of
  * the round the change would have needed anyway.
+ *
+ * `2026-08-02.1` carries two corrections that the 2 August audit found, and it
+ * carries them **together** on purpose. Each bump asks every signed-in teacher
+ * to read and accept the notice again, so two commits to this file would have
+ * been two rounds of asking; and the same argument as `2026-08-01.1` applies
+ * with more force now, because it is one teacher today and 1,800 after launch.
+ *
+ * The first correction is that the notice claimed the bot holds "your name as
+ * Telegram supplies it". **It has never captured a Telegram name.** The name it
+ * holds is copied from the Ministry's recruitment records, and has been since
+ * the first version of this file. A legal statement that describes data the
+ * system does not collect is wrong in the direction that matters least, but it
+ * is still wrong, and it is the sentence a teacher would quote back.
+ *
+ * The second is that every heading in here was wrapped in asterisks intended as
+ * Telegram bold, and **nothing in this bot has ever turned Telegram formatting
+ * on**, so teachers have been reading the punctuation. The markers are gone
+ * rather than the formatting turned on: see the commit for that argument. A test
+ * below asserts the notice contains no asterisk, because nothing protected this.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-08-01.1';
+export const PRIVACY_NOTICE_VERSION = '2026-08-02.1';
 
 /**
  * One line of the retention paragraph.
@@ -87,20 +106,30 @@ export function retentionParagraph(periods: RetentionPeriods): string[] {
  */
 export function privacyNotice(supportContact: string, periods: RetentionPeriods): string {
   return [
-    '🔒 *Privacy notice*',
+    '🔒 Privacy notice',
     '',
     'Before you sign in, please read this.',
     '',
-    '*What is held*',
+    'What is held',
     '• The recruitment email address you use to verify.',
-    '• Your Telegram chat id, and your name as Telegram supplies it.',
+    /**
+     * Corrected 2 August 2026. This said "your Telegram chat id, and your name as
+     * Telegram supplies it", and the second half had never been true — no path
+     * into this system reads a Telegram display name, and the name on a teacher's
+     * record is the one copied from the recruitment spreadsheet by the roster
+     * sync. Saying so plainly is worth the extra line: a teacher who has been
+     * told the bot holds their Telegram name has been told something about
+     * themselves that is not so.
+     */
+    '• Your Telegram chat id. Your Telegram display name is not stored — the name',
+    '  held for you is the one on the Ministry’s recruitment records.',
     '• The messages you send to this bot, and the support cases you open.',
     '',
-    '*What it is used for*',
+    'What it is used for',
     'Confirming you are a teacher recruited by the Ministry, and answering the',
     'support cases you raise. It is not used for anything else.',
     '',
-    '*Who can see it*',
+    'Who can see it',
     'Ministry support staff working your case. It is not shared outside the',
     'Ministry, and it is held on a server located in Uzbekistan.',
     /**
@@ -115,11 +144,19 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * timing: a wording change asks every teacher who has already signed in to
      * accept again, which is one round now against one round afterwards on top
      * of the one this would have needed anyway.
+     *
+     * Narrowed on 2 August 2026, in the same pass as the display-name
+     * correction above and for the same reason. "Both accounts’ Telegram
+     * details" was true but wide enough for a teacher to read display names into
+     * it, which is the thing this notice has just stopped claiming. What a
+     * reviewer is actually shown is each account's chat id, when it first
+     * appeared, and when it was last active — so the notice says that.
      */
-    'If someone else tries to sign in as you, our staff will see both accounts’',
-    'Telegram details so they can decide which account is yours.',
+    'If someone else tries to sign in as you, our staff will see each account’s',
+    'Telegram chat id, when it first appeared and when it was last used, so they',
+    'can decide which account is yours.',
     '',
-    '*How long it is kept*',
+    'How long it is kept',
     ...retentionParagraph(periods),
     '',
     /**
@@ -135,7 +172,7 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
     'over who an account belongs to, and not your messages — is kept permanently,',
     'so we can always answer who did what.',
     '',
-    '*Access and removal*',
+    'Access and removal',
     `To ask what is held about you, or to ask for it to be removed, contact ${supportContact}.`,
     '',
     `You can read this notice at any time with /privacy. All times are ${TIMEZONE}.`,

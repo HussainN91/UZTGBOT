@@ -189,9 +189,9 @@ export const announce: StaffCommand = {
     return reply(
       ctx.member.telegramId,
       [
-        `📝 *Draft ${id}*`,
+        `📝 Draft ${id}`,
         '',
-        `To: ${describeAudience(resolved.audience)} — *${recipients}* ${recipients === 1 ? 'teacher' : 'teachers'}.`,
+        `To: ${describeAudience(resolved.audience)} — ${recipients} ${recipients === 1 ? 'teacher' : 'teachers'}.`,
         ...(recipients === 0
           ? ['', '⚠️ Nobody matches that audience, so sending it would reach no one.']
           : []),
@@ -280,7 +280,7 @@ export const announceSend: StaffCommand = {
     return reply(
       ctx.member.telegramId,
       [
-        `📣 *Sending to ${counts.total} ${counts.total === 1 ? 'teacher' : 'teachers'}.*`,
+        `📣 Sending to ${counts.total} ${counts.total === 1 ? 'teacher' : 'teachers'}.`,
         '',
         `They go out in batches of ${ANNOUNCEMENT_BATCH}, about a minute apart, so this takes a`,
         'few minutes rather than happening at once. You will be told when it finishes,',
@@ -385,7 +385,7 @@ export const announcementsList: StaffCommand = {
 
     return reply(
       ctx.member.telegramId,
-      ['📣 *Recent announcements*', '', ...lines, '', ...ANNOUNCE_USAGE].join('\n'),
+      ['📣 Recent announcements', '', ...lines, '', ...ANNOUNCE_USAGE].join('\n'),
     );
   },
 };

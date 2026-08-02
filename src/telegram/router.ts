@@ -1699,7 +1699,7 @@ async function submitDocsReply(db: Database, deps: RouterDeps): Promise<Reply> {
 
   return {
     text:
-      '*Submit Documents*\n\n' +
+      'Submit Documents\n\n' +
       'Choose what you need to send. Each one opens a form.\n\n' +
       '⚠️ Use the same email address you sign in here with, or we cannot match ' +
       'your documents to you.',
@@ -1740,7 +1740,7 @@ async function chooseDocForm(db: Database, type: string, deps: RouterDeps): Prom
 
   return {
     text:
-      `*${form.buttonText}*\n\n` +
+      `${form.buttonText}\n\n` +
       `${form.url}\n\n` +
       '⚠️ The form asks for your email. Use the same address you signed in here ' +
       'with — that is how we know the documents are yours.\n\n' +

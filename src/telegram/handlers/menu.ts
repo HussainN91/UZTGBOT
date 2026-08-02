@@ -152,7 +152,7 @@ export function reconsentReply(
 ): Reply {
   return {
     text: [
-      '📋 *We have set how long your information is kept.*',
+      '📋 We have set how long your information is kept.',
       '',
       'The notice you agreed to said we would tell you when this was decided, and',
       'ask you to read it again. This is that. Nothing about your cases has changed.',
@@ -192,7 +192,7 @@ export function regionManagerReply(
   if (manager === null) {
     return {
       text: [
-        '📞 *Getting help*',
+        '📞 Getting help',
         '',
         `For anything about your recruitment or your placement, contact ${supportContact}.`,
         '',
@@ -207,13 +207,13 @@ export function regionManagerReply(
 
   return {
     text: [
-      `👤 *${manager.region}*`,
+      `👤 ${manager.region}`,
       '',
       manager.telegramUsername === null
         ? `${named} covers your region.`
         : `${named} covers your region — @${manager.telegramUsername}`,
       '',
-      '**Please use Contact Support for anything that needs answering properly.**',
+      'Please use Contact Support for anything that needs answering properly.',
       'A message sent directly has no case number, is not tracked, and nobody else',
       'can pick it up if they are away.',
       '',

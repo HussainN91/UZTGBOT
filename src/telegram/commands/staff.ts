@@ -1472,7 +1472,7 @@ export const staffRegion: StaffCommand = {
       ctx.member.telegramId,
       parsed.regions.length === 0
         ? [
-            `${describeStaff(now)} now covers **every region**.`,
+            `${describeStaff(now)} now covers every region.`,
             '',
             'That is what an empty list means here, and it is not a fault — but it does',
             'mean they see every teacher’s cases, so set it deliberately.',

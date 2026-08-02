@@ -127,7 +127,11 @@ describe.skipIf(!TEST_DATABASE_URL)('announcements and export', () => {
     it('reports the exact count it froze, and sends nothing', async () => {
       const body = await run('/announce all Term starts on Monday.');
 
-      expect(body).toContain('*2* teachers');
+      // Plain, not `*2*`. Nothing in this bot sends with Telegram formatting on,
+      // so the markers were punctuation on the screen and were removed on
+      // 2 August 2026.
+      expect(body).toContain('2 teachers');
+      expect(body).not.toContain('*');
       expect(body).toContain('Nothing has been sent');
       expect(await statusOf(draftId(body))).toBe('Draft');
     });
@@ -169,7 +173,8 @@ describe.skipIf(!TEST_DATABASE_URL)('announcements and export', () => {
     it('addresses one region, resolving the spelling the roster uses', async () => {
       const body = await run('/announce region:bukhara The office is closed on Friday.');
 
-      expect(body).toContain('*1* teacher');
+      expect(body).toContain('1 teacher');
+      expect(body).not.toContain('*');
       expect(body).toContain('Bukhara');
       expect(await recipientsOf(draftId(body))).toEqual([BUKHARA_TEACHER]);
     });

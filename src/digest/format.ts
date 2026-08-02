@@ -134,9 +134,9 @@ export interface DigestLists {
  */
 export function staffDigest(lists: DigestLists): string | null {
   const body = [
-    ...section('⏰ *Past the date you promised*', lists.pastDue),
-    ...section('🕸 *Nobody has touched these*', lists.stale),
-    ...section('📥 *Nobody covers these — no owner could be found*', lists.unassigned),
+    ...section('⏰ Past the date you promised', lists.pastDue),
+    ...section('🕸 Nobody has touched these', lists.stale),
+    ...section('📥 Nobody covers these — no owner could be found', lists.unassigned),
     /**
      * The fourth list, and the only one that is not about cases at all.
      *
@@ -152,7 +152,7 @@ export function staffDigest(lists: DigestLists): string | null {
     ...(lists.disputes.length === 0
       ? []
       : [
-          '⚖️ *Somebody is disputing who an account belongs to*',
+          '⚖️ Somebody is disputing who an account belongs to',
           ...lists.disputes.map((d) => `• ${d}`),
           '',
         ]),
@@ -161,7 +161,7 @@ export function staffDigest(lists: DigestLists): string | null {
   if (body.length === 0) return null;
 
   return clamp(
-    ['☀️ *Your cases this morning*', '', ...body, '/mycases · /cases unassigned'].join('\n'),
+    ['☀️ Your cases this morning', '', ...body, '/mycases · /cases unassigned'].join('\n'),
   );
 }
 
@@ -229,7 +229,7 @@ export function chaseExhaustedMessage(row: StaffCaseRow): string {
  */
 function announcementBody(content: string): string {
   return [
-    '📣 *A message from the Ministry*',
+    '📣 A message from the Ministry',
     '',
     content.trim(),
     '',
@@ -277,7 +277,7 @@ export interface AnnouncementOutcome {
  */
 export function announcementReport(outcome: AnnouncementOutcome): string {
   const lines = [
-    '📣 *Announcement finished*',
+    '📣 Announcement finished',
     '',
     `Sent: ${outcome.sent} of ${outcome.total}.`,
   ];
