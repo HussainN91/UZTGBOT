@@ -296,7 +296,18 @@ export const cases: StaffCommand = {
         member.telegramId,
         'Open cases with no owner',
         list,
-        'Nothing is waiting to be picked up.',
+        /**
+         * Corrected 2 August 2026. This said "Nothing is waiting to be picked
+         * up", which describes a world that ended with Part 5H.
+         *
+         * Cases now arrive with an owner, and only Program and System may move
+         * one — so nothing is ever waiting to be taken, and a case with no owner
+         * is not unclaimed work. It means no active staff member holds its queue
+         * in its region, which is a staffing gap rather than a queue. The morning
+         * digest was corrected at the time and this was missed, so it went on
+         * telling staff to go and take work that most of them may not take.
+         */
+        'Every open case has an owner. Nothing is uncovered.',
       );
     }
 
@@ -311,7 +322,7 @@ export const cases: StaffCommand = {
             `The statuses are: ${caseStatusList()}.`,
             '',
             '/cases — everything still open',
-            '/cases unassigned — the ones nobody has taken',
+            '/cases unassigned — the ones no staff member covers',
           ].join('\n'),
         );
       }
@@ -339,7 +350,7 @@ export const myCases: StaffCommand = {
       member.telegramId,
       'Cases assigned to you',
       list,
-      'Nothing is assigned to you. /cases unassigned shows what nobody has taken.',
+      'Nothing is assigned to you. /cases unassigned shows the ones no staff member covers.',
     );
   },
 };
