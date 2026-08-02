@@ -1,6 +1,13 @@
 # MoPSE Teacher Support Bot — System Specification
 
-**Version:** 1.5 · **Date:** 2026-07-31 · **Status:** Pre-launch — updated after the documents stage of the rebuild
+**Version:** 1.6 · **Date:** 2026-08-02 · **Status:** Pre-launch — updated after Feature A
+
+> **What changed in 1.6.** §5 gains identity disputes: a duplicate binding no
+> longer only raises an alarm, it opens a record both accounts can act on and a
+> System administrator settles. §16 loses one line from "Later" as a result — the
+> one-time-codes entry, which is narrowed rather than removed, because disputes
+> protect a teacher who has already signed in and do nothing about an address
+> claimed before they ever do.
 
 > **What changed in 1.5.** §10 is rewritten: document submission is **built**, and
 > the "not built" heading it carried for five stages is gone. §11.0's sync line,
@@ -281,6 +288,39 @@ notice. The new binding still succeeds: a teacher switching phones produces
 exactly this signal, and locking them out would be worse than a false alarm a
 human can dismiss. This makes impersonation *visible*; only per-person one-time
 codes would prevent it (an open product decision).
+
+> ### ✅ A duplicate binding now opens a dispute — Feature A, 2 August 2026
+>
+> The paragraph above is still exactly what happens, and it was, until now, *all*
+> that happened: an alarm reached the operations chat, the prior holder got a
+> notice that led nowhere, and the two people it was actually about were never
+> asked anything.
+>
+> A duplicate binding now also **opens an `identity_disputes` record**, and both
+> chats receive a message with one button — ⚠️ *This wasn't me* for a prior
+> holder, ✅ *This is me — I changed phone* for the new chat.
+>
+> **Neither button decides anything, and the dispute does not gate access.** The
+> new chat signs in and keeps working; the argument runs alongside. Blocking it
+> would lock out any teacher who changes phone and would let anyone holding a
+> leaked recruitment address lock the real teacher out permanently — the same
+> reasoning that made duplicates detected rather than blocked in the first place.
+>
+> A tap tells the staff who cover **the region on the roster row for the disputed
+> identifier** — never the region either chat carries, because a chat's region can
+> be overridden and an impostor could otherwise choose their own adjudicator. A
+> reviewer (`dispute.review`, floored at `Support`) checks and forwards; a System
+> administrator (`dispute.resolve`) chooses which chat keeps the identity. Every
+> other chat is `Revoked` and its open cases are **closed with a stated reason,
+> not deleted** — if the losing chat was the impostor, its cases are the evidence.
+>
+> A third chat signing in **joins the existing dispute**, keyed on the identifier;
+> there is never a second record for one argument. Nothing expires on its own —
+> unsettled disputes stay in `/disputes` and in the morning digest.
+>
+> `docs/plans/2026-08-02-feature-a-identity-disputes.md` is the design of record.
+> **The operations alarm above is unchanged and still fires**, because it is what
+> reports a duplicate when *neither* party ever taps anything.
 
 **Gated (requires verification):** Contact Support, Check My Case, Ask for Priority,
 Submit Documents.
@@ -1755,6 +1795,14 @@ and §11.0 the schedule.
 - **Per-person one-time verification codes.** Email identifiers stay guessable
   by colleagues; duplicate bindings are detected (§5) but not prevented. **This
   decision gets more expensive at launch**, not more wrong.
+
+  **Narrowed, not closed, by Feature A on 2 August 2026.** A duplicate binding now
+  reaches a person who decides, so an impersonation of a teacher who is *already
+  signed in* is visible, actionable and reversible. What is untouched is the
+  land-grab: an attacker who binds a leaked roster address **before the real
+  teacher ever signs in** wins silently, and there is nobody yet on that account
+  for the dispute to be with. One-time enrolment tokens are still the only thing
+  that closes it, and it is still a decision for MoPSE.
 
 **Deliberately never:**
 

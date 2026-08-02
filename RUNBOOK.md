@@ -60,6 +60,12 @@ never did before.
 So the sentence that used to be here — *"nobody can reply to that case through the
 bot"* — is no longer true, and the launch gate has moved off engineering.
 
+**And when two accounts claim to be the same teacher, that now reaches a person.**
+It used to raise an alarm in the operations chat and nothing else — the two people
+it was about were never asked anything. Both accounts now get a button, the staff
+covering that teacher's region are told when either one uses it, and a system
+administrator decides which account is the teacher's. §4.4b is the procedure.
+
 **The system now also acts without being asked.** Records past their retention
 period are deleted at two in the morning; each staff member gets their own list of
 what is late at seven; a teacher whose case is waiting on them is reminded, three
@@ -188,7 +194,7 @@ Everything here blocks launch. None of it is engineering work.
 |---|---|---|
 | ☐ | **A real support contact** | The bot refuses to start without one, so it can no longer be forgotten. Every dead end in the bot names it |
 | ☐ | **The teacher roster** in the spreadsheet | Without it nobody can sign in, and no case can be opened |
-| ☐ | **At least two named System members** | So one person leaving cannot lock everyone out. The first is one line of SQL (§2.5); the second is `/staff_add` from the first one's account |
+| ☐ | **At least two named System members** | So one person leaving cannot lock everyone out. The first is one line of SQL (§2.5); the second is `/staff_add` from the first one's account. **Also the only rank that can settle a disputed account** (§4.4b), so with none, two people claiming one teacher have nobody to decide between them |
 | ☐ | **An operations group chat** for alarms | Use a group, not one person's private chat — one person on leave should not mean nobody is watching. **Set `OPS_ALERT_CHAT_ID` before adding the bot to the group**, or it will leave, correctly |
 | ☐ | **A proven backup restore** | The scripts are written and have never been run against a real server. An untested backup is a belief, not a capability |
 | ☐ | **The privacy notice reviewed** by somebody who can speak for MoPSE | Decision 3 above. **Now urgent:** the rewritten notice and the gate that shows it are both built, so reviewing it before this deploy means one round of re-consent instead of two |
@@ -927,6 +933,54 @@ It is deliberately **not** filtered to your own queue and region: a supervisor
 who can only see their own region cannot notice that another region has stopped
 answering.
 
+## 4.4b Two accounts claiming to be the same teacher
+
+```
+/disputes                                   — everything waiting, oldest first
+/dispute_resolve <id> <chat id> <why>       — System only
+```
+
+**This opens by itself.** When a second Telegram account signs in with a teacher's
+recruitment address, the bot records the argument and messages **both** accounts,
+each with one button — *"This wasn't me"* for the account that was already signed
+in, *"This is me — I changed phone"* for the new one.
+
+**Neither button decides anything, and neither account is locked out.** The second
+account signs in and keeps working while the argument runs. That is deliberate:
+blocking it would lock out every teacher who changes phone, and would let anyone
+who learns a colleague's recruitment address lock the real teacher out for good.
+
+**What happens, in order:**
+
+1. Both accounts are messaged. The operations chat gets the alarm it has always
+   got — that is what fires when *neither* account taps anything, which is exactly
+   what a quiet impersonation looks like.
+2. Either account taps. Staff covering **the region on the teacher's roster row**
+   are told — not the region either account claims, because an impostor with a
+   corrected region could otherwise pick who judges them.
+3. A reviewer checks however they normally would — telephone the school, or the
+   teacher on a number already held — then taps **Send to system admin**.
+4. A system administrator chooses which account is the teacher's.
+
+**Choosing is not a small action.** Every other account is signed out, and its
+open cases are closed with a reason the teacher can read. `/restore <chat id>`
+puts a wrongly signed-out account back; **the closed cases stay closed.** That
+asymmetry is why only System can do it.
+
+Give a real reason — it is required, and it is what somebody reviewing the
+decision months later will read:
+
+```
+/dispute_resolve 42 995101 telephoned the school, Nodira confirmed the new number
+```
+
+The chat id is the account that **keeps** the identity, not the one that loses it.
+`/disputes` shows which accounts are in each argument.
+
+**Nothing expires on its own.** An argument nobody answers stays in `/disputes`
+and appears in the morning message, because the alternative is one quietly ageing
+out while somebody who is not the teacher keeps the account.
+
 ## 4.5 Pausing new cases
 
 ```
@@ -1064,6 +1118,8 @@ cannot describe access you do not have.
 | `/staff_region <chat id> <regions>` | Which regions somebody covers. `clear` means **every** region — §2.6. System only |
 | `/maintenance` | §4.5 — System only |
 | `/urgent_pending` | Priority requests nobody has decided — §4.4a |
+| `/disputes` | Accounts arguing over who a teacher is — §4.4b |
+| `/dispute_resolve <id> <chat id> <why>` | Decide which account is the teacher's. **System only.** Revokes the others and closes their cases — §4.4b |
 
 **A case reference is always the first thing after the command.** `/reply` with no
 reference is refused rather than guessed at, because the recoverable outcome is
@@ -1639,7 +1695,9 @@ receive something not on this list, it did not come from the bot.
 | `A teacher was not told what happened` | 🔴 | Staff replied, or closed a case, and the message did not reach the teacher. **The work happened; the teacher does not know** | §5.7 |
 | `Somebody was not told about something that happened` | 🟠 | As above, for a message that was not the first one | §5.7 |
 | `A teacher asked for priority and nobody can decide it` | 🔴 | A priority request arrived and no active staff member holds `urgent.issue` — not in that region and not at System either | §5.6 |
-| `A teacher identity is now held by more than one chat` | 🟠 | Two Telegram accounts signed in with the same recruitment email. Both can see that teacher's cases | Find out which is genuine — usually a new phone. Revoke the other with `/revoke`. §4.3 |
+| `A teacher identity is now held by more than one chat` | 🟠 | Two Telegram accounts signed in with the same recruitment email. Both can see that teacher's cases. **A dispute has already been opened and both accounts have been given a button** | Usually a new phone, and usually one of them will tap. If neither does, this alarm is the only sign — settle it with `/disputes`. §4.4b |
+| `An identity dispute has nobody to review it` | 🔴 | Two accounts claim one teacher and **no active staff member at all** — not even a System administrator — can be found to look at it | Somebody has to be given a staff row before this can be settled. §2.5 makes the first System member; §4.4b settles it afterwards |
+| `An identity dispute reached System and there is no System member` | 🔴 | A reviewer passed a dispute on and nobody holds the rank to settle it | The launch checklist requires two named System members for exactly this. §2.5 |
 | `A published Telegram handle stopped matching its owner` | 🔵 | A staff member changed or removed their Telegram username. The bot has **already cleared it** so no teacher is sent to the wrong person | Ask that person to run `/username` again. Until they do, teachers are shown their name and the support address. §4.17 |
 | `An FAQ answer could not be shown as a button` | 🟠 | An answer's button text is too long for Telegram, so that answer is unreachable for teachers | Shorten `BUTTON_TEXT` for the named row. §4.1 |
 

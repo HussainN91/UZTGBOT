@@ -14,19 +14,28 @@ undecided. Supersedes the "what's next" list in
 > `docs/plans/archive/`. Its two surviving open decisions are items 0 and 5 of
 > Open questions below. Do not go looking for a handoff; there is not one.
 
-> ### ⬜ PENDING — picked up 2 August 2026
+> ### ⬜ PENDING — the live server, as of 2 August 2026
 >
-> **GitHub has everything through `339d1f9`; the live server does not yet.**
-> Pushed to `origin/main` on 2 August. Deploying it needs an SSH key from the
-> working machine added to the server's `ubuntu` user — none was configured —
+> **The live server is now two features behind.** Deploying needs an SSH key from
+> the working machine added to the server's `ubuntu` user — none was configured —
 > or the head of project running the pull themselves. **RUNBOOK.md §2.1 is the
-> order and it is not negotiable: build, stop, migrate, start worker, start
-> web.** One schema migration is included, `0010_urgent_request_gate.sql`
-> (Feature B) — everything since (5F, 5G, 5H, the privacy notice) needed no
-> schema change, but the migrate step still has to run.
+> order and it is not negotiable: build, stop, migrate, start worker, start web.**
 >
-> **Then:** Feature A, identity disputes — designed, unblocked, ~3.5 days. See
-> §9.2 for why it comes before Feature E.
+> **Two schema migrations are now waiting**, not one: `0010_urgent_request_gate.sql`
+> (Feature B) and `0011_identity_disputes.sql` (Feature A). Everything else since
+> — 5F, 5G, 5H, the privacy notice — needed no schema change, but the migrate step
+> still has to run, and it has to run **before** the new code serves anybody.
+>
+> ### ✅ Feature A is built — 2 August 2026, commit `d2c8e36`
+>
+> Roughly the 3.5 days estimated. Designed first in
+> **`docs/plans/2026-08-02-feature-a-identity-disputes.md`**, which is the design
+> of record for it and carries four deliberate departures from Part 2 below, each
+> with its reasoning. **Read that document rather than Part 2** where the two
+> disagree; Part 2 is marked where it was overtaken.
+>
+> **Then:** Feature E, which needs its own spec starting from §9.1.C — and the
+> operational launch blockers, which are still untouched and still gate a launch.
 
 > **Revised 1 August 2026, after building Feature B.** Three changes, all made by
 > the head of project and all binding:
@@ -111,6 +120,35 @@ no errors · `@Mopse_test_bot` · sheet synced with service account Viewer only.
 ---
 
 # PART 2 — Feature A: identity dispute escalation
+
+> ### ✅ BUILT — 2 August 2026, commit `d2c8e36`. Roughly the estimate.
+>
+> **`docs/plans/2026-08-02-feature-a-identity-disputes.md` is the design of record
+> for this feature and supersedes what follows where the two disagree.** The
+> behaviour below is what was built; four structural things in it were changed
+> deliberately while designing, and each is argued in §1 of that document:
+>
+> 1. **Two tables, not one.** The record drawn below has `prior_chat_id` and
+>    `new_chat_id`, and this part also requires that a third chat *joins* the
+>    existing dispute. Both cannot be true — a two-column record has nowhere to put
+>    a third party. The parties are their own table.
+> 2. **Four states, not five.** A party's tap records the claim **and** notifies
+>    reviewers in one transaction, so an `Escalated` sitting between `Claimed` and
+>    `WithSystem` is a value no query can ever return. That is the same defect as
+>    the unreachable System fallback `staff/recipients.ts` records.
+> 3. **No `escalated_to` column.** A frozen list of recipients disagrees with
+>    reality the moment somebody changes region or is deactivated. Reviewers are
+>    recomputed from `regionalRecipients` every time.
+> 4. **No foreign key on `identifier`.** The privacy notice now promises this
+>    record is kept permanently, so it must outlive a roster row recruitment
+>    deletes.
+>
+> **And one thing this part asked for that could not be built as written:** the
+> reviewer cannot be shown each account's **Telegram display name**, because this
+> bot has never captured one. `teachers.name` is the roster name, identical for
+> every party by construction. They are shown chat id, first seen and last active
+> instead — held, and more decisive. Capturing display names is left open and
+> costed in §7 of the new document.
 
 **~3.5 days.**
 
@@ -918,8 +956,18 @@ work.** Ordered by how much they cost to leave.
    are written and were shown to the head of project, who approved them
    "generally". They are still drafts as far as MoPSE is concerned. Feature A's
    are unwritten.
-2. **Dispute retention** — not covered by the three periods teachers are told
-   about. Check whether the privacy notice needs a line
+
+   **Update 2 August:** Feature A's are now written — two party notices, the
+   reviewer's escalation, the System forward, and the two messages the parties get
+   once it is settled. **Nobody has read them but the builder.** They are the most
+   delicate wording in the bot: one of them tells somebody their account has been
+   taken away on a judgement about who they are, and if the decision went the wrong
+   way it is the only thing standing between a real teacher and silence. **Worth
+   MoPSE reading before launch, ahead of Feature B's.**
+2. ~~**Dispute retention**~~ — ✅ **settled 1 August** by the privacy notice
+   amendment at `8e5a59f`, which names disputes in both the "who can see it" and
+   the permanent-record paragraphs. Feature A stores nothing outside what that
+   wording covers, and `retention.ts` was not touched
 3. **Whether to drop `urgent_codes` and `urgent_code_attempts`** — added
    1 August. Nothing reads or writes them. Left in place because dropping a table
    cannot be walked back
@@ -949,6 +997,21 @@ work.** Ordered by how much they cost to leave.
 7. ~~**Part 5H.1: who owns a case when two staff hold the same queue and
    region?**~~ — ✅ **answered 1 August: the one with the fewest open cases**, and
    built the same day. See Part 5H.1.
+8. **Whether to capture each account's Telegram display name** — added 2 August,
+   found while building Feature A.
+
+   Part 2 assumed a reviewer settling a dispute would be shown one for each
+   account. **The bot has never captured it.** `teachers.name` is the roster name
+   copied at sign-in, which is the same for every party in a dispute by
+   construction and so distinguishes nobody. Reviewers are shown each account's
+   chat id, when it first appeared and when it was last active — held already, and
+   for telling two accounts apart more decisive than a name its owner can change.
+
+   Building it is about half a day: a column, a capture in the inbound-update path,
+   and a line in the privacy notice. **The notice already claims we hold "your name
+   as Telegram supplies it", and that has never been true** — so that sentence
+   wants correcting whichever way this goes, and it is the sharper half of the
+   item. §7 of `2026-08-02-feature-a-identity-disputes.md` has the detail.
 
 # PART 9 — Execution order, and what breaks if it is ignored
 
@@ -1073,8 +1136,14 @@ conversation state and belongs with 5H.3, not before it.
    Feature C is subsumed and needs no separate step
 6. ~~**The privacy notice, settled**~~ — ✅ **done 1 August at `8e5a59f`**, and it
    no longer gates anything. Part 9.1.E is resolved
-7. **Feature A** — identity disputes. Uses whatever step 5 established as "who
-   is responsible for this region", and must not invent a second answer
+7. ~~**Feature A** — identity disputes~~ — ✅ **built 2 August at `d2c8e36`**, to
+   its own design document. It did what step 5 established rather than inventing
+   a second answer: escalation goes through `regionalRecipients`, the same lookup
+   Feature B built and `staff/recipients.ts` was written anticipating — its header
+   named this feature as its third caller before the feature existed. **The region
+   is the roster's, resolved from the disputed identifier**, never `regionFor` of
+   either chat, because the two chats can carry different overrides and a per-chat
+   lookup would let an impostor choose their own adjudicator
 8. ~~**Feature C** — interactive `/staff_add`~~ — **subsumed by Part 5H.3**,
    which is the same idea for every staff command rather than one command. It is
    not a separate step
