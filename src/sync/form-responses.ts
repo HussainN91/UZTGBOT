@@ -18,6 +18,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { createCase } from '../cases/service.js';
 import { CASE_CATEGORY } from '../config/constants.js';
+import { withChatLock } from '../conversation/lock.js';
 import type { Database } from '../db/index.js';
 import { formSubmissions, rosterEntries, syncRuns, teachers } from '../db/schema.js';
 import { addNote } from '../cases/notes.js';
@@ -153,9 +154,32 @@ export async function syncFormResponses(
          * the case down with it in the rollback. Proven on 31 July 2026 by
          * breaking `alreadyProcessed` on purpose: exactly one test failed, and
          * no duplicate case reached the database by either route.
+         *
+         * **Under the chat lock, which it was not before.** `cases/service.ts`
+         * states in its own header that `createCase` is a read-then-write — it
+         * looks for an open case in the same category within 24 hours and then
+         * either appends to it or inserts — and that it must run inside
+         * `withChatLock`. This ran in a plain transaction with no lock.
+         *
+         * It was safe by accident rather than by design: the worker runs one job
+         * at a time, and a form case files under `Submit Documents` while a
+         * teacher's own case files under whatever they chose, so the two could
+         * not collide on the dedup read. Both of those are true today and
+         * neither is a property this file controls. The day the worker gains a
+         * second slot, or the day anything else files under `Submit Documents`,
+         * two writers race on the read and the teacher gets two cases for one
+         * piece of work.
+         *
+         * **This replaces the transaction rather than nesting inside one.**
+         * `withChatLock` opens its own, so wrapping the existing
+         * `db.transaction` would make the inner one a savepoint pretending to be
+         * a commit — the failure `verifyIdentifier` and `forgetTeacher` both
+         * carry notes about. The lock is transaction-scoped, so it releases
+         * however this ends, including on the rollback that the marker's primary
+         * key is there to cause.
          */
-        await db.transaction(async (tx) => {
-          const t = tx as Database;
+        await withChatLock(db, match.chatId, async (tx) => {
+          const t = tx;
           const created = await createCase(t, {
             chatId: match.chatId,
             category: CASE_CATEGORY.SUBMIT_DOCS,

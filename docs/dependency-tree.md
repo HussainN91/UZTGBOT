@@ -261,7 +261,7 @@ Erased at compile time. These may point up the layers without it being a violati
 ### src/conversation/lock.ts
 
 - imports: src/db/index.ts *(type only)*
-- imported by: src/telegram/bot.ts
+- imported by: src/sync/form-responses.ts, src/telegram/bot.ts
 
 ### src/conversation/state.ts
 
@@ -405,7 +405,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/sync/form-responses.ts
 
-- imports: src/cases/service.ts, src/config/constants.ts, src/db/index.ts *(type only)*, src/db/schema.ts, src/cases/notes.ts, src/forms/repository.ts, src/log.ts, src/sheets/client.ts *(type only)*, src/sheets/parse.ts, src/sync/alerts.ts, src/sync/sheets-sync.ts *(type only)*
+- imports: src/cases/service.ts, src/config/constants.ts, src/conversation/lock.ts, src/db/index.ts *(type only)*, src/db/schema.ts, src/cases/notes.ts, src/forms/repository.ts, src/log.ts, src/sheets/client.ts *(type only)*, src/sheets/parse.ts, src/sync/alerts.ts, src/sync/sheets-sync.ts *(type only)*
 - imported by: src/worker/tasks/sync-sheets.ts
 
 ### src/sync/sheets-sync.ts
