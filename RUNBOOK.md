@@ -797,6 +797,13 @@ To publish immediately:
 docker compose exec worker node dist/scripts/sync-sheets.js
 ```
 
+With no flags this now syncs **all three tabs** — `FAQ`, `ROSTER` and `FORMS`.
+Until 2 August 2026 it silently skipped `FORMS`, which mattered most at first
+load: the scheduled worker picked the forms up within ten minutes anyway, but
+somebody running this by hand and then opening Submit Documents was told there
+were no forms, and concluded the feature did not work. Name a tab to sync only
+that one: `-- --faq`, `-- --roster`, `-- --forms`.
+
 A new answer needs a unique `CODE` and a `CATEGORY` that **exactly** matches one
 of the eleven topics. A category that does not match is rejected — that one row
 only, reported with its row number, and the rest of the sync applies normally.

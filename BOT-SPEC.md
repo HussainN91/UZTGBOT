@@ -1,6 +1,6 @@
 # MoPSE Teacher Support Bot — System Specification
 
-**Version:** 1.6 · **Date:** 2026-08-02 · **Status:** Pre-launch — updated after Feature A
+**Version:** 1.7 · **Date:** 2026-08-02 · **Status:** Pre-launch — updated after the 2 August audit fixes
 
 > **What changed in 1.6.** §5 gains identity disputes: a duplicate binding no
 > longer only raises an alarm, it opens a record both accounts can act on and a
@@ -826,7 +826,7 @@ and no command behind them.
 | `/regions` | `/regions` | `teacher.region` — teachers who reported a wrong region, in regions you hold |
 | `/revoke` | `/revoke <chat id>` | `teacher.revoke` |
 | `/restore` | `/restore <chat id>` | `teacher.revoke` — the same rank as `/revoke`, deliberately |
-| `/urgent_pending` | `/urgent_pending` | `urgent.issue` — priority requests nobody has decided. Deliberately **not** scoped to your queue and regions: a supervisor filtered to their own region cannot see that another region has stopped answering |
+| `/urgent_pending` | `/urgent_pending` | `urgent.issue` — priority requests nobody has decided. Deliberately **not** scoped to your queue and regions: a supervisor filtered to their own region cannot see that another region has stopped answering. Every row shows the **case's status**, because a case can be closed while its request is still undecided (§8.4) |
 | `/staff` `/staff_add` `/staff_role` `/staff_queue` `/staff_region` `/staff_remove` | §6.4 | `staff.manage` |
 | `/maintenance` | `/maintenance on\|off` · `/maintenance` to ask | `maintenance` |
 | `/retention` | `/retention` to read all three · `/retention case\|urgent\|message <days>` | `maintenance`, which floors at **System** — a period governs deletion with no undo. With no argument it prints the periods **and the notice's own retention paragraph**, rather than describing them in its own words |
@@ -1001,6 +1001,20 @@ of how long a teacher waited.
 **There is no decline button and no auto-escalation.** Auto-escalation would push
 every frivolous request up to Program anyway, which defeats the gate; visibility
 was chosen instead, and `/urgent_pending` is what makes it visible.
+
+**The prompt gives up after three tries.** A teacher who sends a photograph
+instead of text is asked again twice, and on the third is told to start from the
+menu and given the support contact. Before 2 August 2026 there was no limit, and
+somebody sending photographs was held at that prompt until the conversation
+expired half an hour later.
+
+**A request whose case has since been closed stays on `/urgent_pending`, marked
+with the case's status.** Closing a case does not answer the teacher who asked
+for priority on it, and dropping the row would mean the one list whose job is to
+make an unanswered request visible had quietly stopped mentioning it. Confirming
+one reopens the case — and the coordinator is told, in the confirmation, that
+their tap did so. Before 2 August 2026 confirming a closed case reopened it while
+leaving its end date in place, and the nightly retention pass then deleted it.
 
 ---
 

@@ -1019,10 +1019,24 @@ work.** Ordered by how much they cost to leave.
    for telling two accounts apart more decisive than a name its owner can change.
 
    Building it is about half a day: a column, a capture in the inbound-update path,
-   and a line in the privacy notice. **The notice already claims we hold "your name
+   and a line in the privacy notice. ~~**The notice already claims we hold "your name
    as Telegram supplies it", and that has never been true** — so that sentence
    wants correcting whichever way this goes, and it is the sharper half of the
-   item. §7 of `2026-08-02-feature-a-identity-disputes.md` has the detail.
+   item.~~ §7 of `2026-08-02-feature-a-identity-disputes.md` has the detail.
+
+   **Corrected 2 August 2026.** The sharper half is done. The notice no longer
+   claims a Telegram name: it says the display name is not stored and that the
+   name held is the one on the Ministry's recruitment records, and the dispute
+   sentence added on 1 August was narrowed at the same time to name what a
+   reviewer is actually shown. `PRIVACY_NOTICE_VERSION` moved to `2026-08-02.1`.
+
+   **The question itself is still open, and answering it "yes" would change the
+   notice a third time.** That is the cost of correcting it now rather than
+   waiting — and it was still right to correct it, because a legal statement that
+   is wrong is not something to leave standing while a decision is pending. The
+   round it cost was one teacher; after launch it would have been 1,800. If the
+   answer is likely to be "yes" soon, answering it before the next notice change
+   saves a round.
 
 # PART 9 — Execution order, and what breaks if it is ignored
 
