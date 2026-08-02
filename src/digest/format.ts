@@ -94,6 +94,19 @@ export interface DigestLists {
   readonly stale: StaffCaseList;
   /** In their queue and region, with no owner at all. */
   readonly unassigned: StaffCaseList;
+  /**
+   * Unsettled identity disputes, already rendered — Feature A.
+   *
+   * Lines rather than a `StaffCaseList`, because **a dispute is not a case**. It
+   * has no status, no queue, no importance and no due date, and passing one
+   * through `section()` would mean inventing all four. The alternative — giving
+   * disputes a fake case shape so they fit an existing renderer — is the "looks
+   * configured and does nothing" failure this rebuild exists to remove.
+   *
+   * Empty for anybody who does not hold `dispute.review`. Telling an Observer
+   * about an argument they cannot act on is R14's mistake one table along.
+   */
+  readonly disputes: readonly string[];
 }
 
 /**
@@ -124,6 +137,25 @@ export function staffDigest(lists: DigestLists): string | null {
     ...section('⏰ *Past the date you promised*', lists.pastDue),
     ...section('🕸 *Nobody has touched these*', lists.stale),
     ...section('📥 *Nobody covers these — no owner could be found*', lists.unassigned),
+    /**
+     * The fourth list, and the only one that is not about cases at all.
+     *
+     * Part 2 declines to auto-expire a dispute — "visibility over automation, as
+     * elsewhere" — so this is the other half of that decision. A dispute where
+     * neither party ever taps anything is never messaged to anybody, and without
+     * this it would sit unseen for as long as nobody thought to run `/disputes`.
+     *
+     * Added to `body` rather than after the emptiness check, so the `null`-when-
+     * there-is-nothing rule (D39) covers it for free: a member with no cases and
+     * one dispute is told, and a member with neither is still left alone.
+     */
+    ...(lists.disputes.length === 0
+      ? []
+      : [
+          '⚖️ *Somebody is disputing who an account belongs to*',
+          ...lists.disputes.map((d) => `• ${d}`),
+          '',
+        ]),
   ];
 
   if (body.length === 0) return null;

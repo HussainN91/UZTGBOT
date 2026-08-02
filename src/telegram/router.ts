@@ -52,6 +52,14 @@ import { clearState, loadState, saveState, type ConversationState } from '../con
 import type { Database } from '../db/index.js';
 import { activeFormByType, activeForms } from '../forms/repository.js';
 import { logInteraction } from '../log/interactions.js';
+import type { IdentityDisputeClaim } from '../db/schema.js';
+import {
+  disputeOpenedMessages,
+  notifyDisputeEscalated,
+  notifyDisputeWithSystem,
+} from '../teachers/dispute-notify.js';
+import { disputeDetail, forwardToSystem, openDispute, recordClaim } from '../teachers/disputes.js';
+import { settleAndAnnounce } from './dispute-actions.js';
 import { privacyAcceptance, recordAcceptance } from '../teachers/privacy.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { verifyIdentifier } from '../teachers/verify.js';
@@ -65,7 +73,7 @@ import {
   routeStaffMenu,
   staffHelpSection,
 } from './commands/index.js';
-import { scopeOf } from './commands/context.js';
+import { reply, scopeOf } from './commands/context.js';
 import {
   answerReply,
   faqHubReply,
@@ -581,20 +589,47 @@ async function handleIdentifier(
     ...(resumed.keyboard !== undefined ? { keyboard: resumed.keyboard } : {}),
   });
 
-  for (const holder of outcome.priorHolders) {
-    messages.push({
-      chatId: holder,
-      purpose: 'a duplicate sign-in notice',
-      text:
-        '⚠️ Security notice\n\n' +
-        'Your teacher identity has just been used to sign in from another Telegram ' +
-        'account. If that was you — a new phone, for instance — nothing is wrong and ' +
-        'you can ignore this.\n\n' +
-        `If it was not you, contact ${deps.supportContact} now.`,
-    });
-  }
-
   if (outcome.priorHolders.length > 0) {
+    /**
+     * Feature A. A dispute record opens in the same transaction as the binding,
+     * and its messages are returned rather than sent — `deliver` commits first
+     * and speaks afterwards, so an argument is never announced over a binding
+     * that can still roll back.
+     *
+     * **It does not gate the sign-in above, and that is D1 rather than an
+     * oversight.** Blocking the second chat would lock out every teacher who
+     * changes phone, and would hand anyone holding a leaked recruitment address a
+     * way to lock the real teacher out permanently — turning an impersonation
+     * risk into a denial of service. The teacher signs in; the argument runs
+     * alongside.
+     *
+     * The plain duplicate-sign-in notice this replaced said the same thing and
+     * led nowhere. `disputeOpenedMessages` says it and carries a button; sending
+     * both would put two near-identical messages in the prior holder's chat a
+     * second apart, and the second is the one that leads somewhere.
+     */
+    const dispute = await openDispute(db, {
+      identifier: outcome.identifier,
+      chatId,
+      otherChatIds: outcome.priorHolders,
+    });
+
+    const opened = disputeOpenedMessages({
+      disputeId: dispute.disputeId,
+      identifier: outcome.identifier,
+      newChatId: chatId,
+      priorChatIds: outcome.priorHolders,
+      supportContact: deps.supportContact,
+    });
+    messages.push(...opened.messages);
+    alerts.push(...opened.alerts);
+
+    /**
+     * The operations alarm stays, unchanged and beside the dispute rather than
+     * replaced by it. **It is the thing that fires when nobody taps anything** —
+     * a dispute waits on a party responding, and a silent impersonation is
+     * precisely the case where neither party does.
+     */
     alerts.push({
       severity: 'warning',
       title: 'A teacher identity is now held by more than one chat',
@@ -996,6 +1031,34 @@ async function routeCallback(
         ?? only(update.chatId, await menuReplyFor(db, update.chatId))
       );
 
+    /**
+     * A party's answer on an identity dispute — Feature A.
+     *
+     * **The only button in this system authorised by something other than a staff
+     * row.** The people tapping it are teachers, and what entitles them to answer
+     * is being *on the dispute*: `recordClaim` refuses any chat that is not a
+     * party, which is the whole check. The claim travels in the payload; the
+     * party never does, so neither account can answer for the other.
+     *
+     * A stranger who guesses `DC:1:Mine` gets the ordinary menu — the same answer
+     * an unreadable payload gets, and for `confirmUrgent`'s reason: a reply
+     * confirming the dispute exists tells them their guess was real.
+     */
+    case CALLBACK.DISPUTE_CLAIM:
+      return claimDispute(db, update.chatId, first, second, deps);
+
+    case CALLBACK.DISPUTE_ESCALATE:
+      return (
+        (await forwardDispute(db, update.chatId, first, state))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
+    case CALLBACK.DISPUTE_RESOLVE:
+      return (
+        (await settleDispute(db, update.chatId, first, second, state, deps))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
     default:
       return only(update.chatId, await menuReplyFor(db, update.chatId));
   }
@@ -1114,6 +1177,218 @@ async function confirmUrgent(
     ],
     alerts: notice.alerts,
   };
+}
+
+/**
+ * A teacher answering on a dispute about their own account — Feature A.
+ *
+ * **No staff gate**, and that is deliberate rather than missing: the people who
+ * tap this are the two teachers arguing. Authorisation is party membership, which
+ * `recordClaim` checks against the database, and the claim is recorded against
+ * the chat the tap arrived from rather than against anything in the payload.
+ *
+ * Every failing branch returns the ordinary main menu rather than a sentence
+ * about disputes. A stranger who hand-crafts `DC:1:Mine` must not learn whether
+ * dispute 1 exists, who is on it, or whether their guess was close.
+ */
+async function claimDispute(
+  db: Database,
+  chatId: string,
+  rawId: string,
+  rawClaim: string,
+  deps: RouterDeps,
+): Promise<RouterOutcome> {
+  const disputeId = Number.parseInt(rawId, 10);
+  /**
+   * The claim is validated against the two values the enum holds before it
+   * reaches SQL. It arrives from the network and can be hand-crafted, and an
+   * unchecked value would reach a `::identity_dispute_claim` cast and throw
+   * rather than being refused.
+   */
+  const claim: IdentityDisputeClaim | null =
+    rawClaim === 'Mine' ? 'Mine' : rawClaim === 'NotMine' ? 'NotMine' : null;
+
+  if (!Number.isFinite(disputeId) || claim === null) {
+    return only(chatId, await menuReplyFor(db, chatId));
+  }
+
+  const outcome = await recordClaim(db, disputeId, chatId, claim);
+
+  if (outcome.kind === 'unknown' || outcome.kind === 'notAParty') {
+    return only(chatId, await menuReplyFor(db, chatId));
+  }
+
+  if (outcome.kind === 'alreadyResolved') {
+    return only(chatId, {
+      text:
+        'This has already been settled.\n\n'
+        + 'Ministry staff have decided which account belongs to this teacher, so there '
+        + 'is nothing left to answer here.\n\n'
+        + `If you think the decision is wrong, contact ${deps.supportContact}.`,
+      keyboard: backToMenuKeyboard(),
+    });
+  }
+
+  const thanks: Reply = {
+    text:
+      '✅ Thank you — that is recorded.\n\n'
+      + 'A member of Ministry staff will look at both accounts and decide. You do not '
+      + 'need to do anything else, and you are not locked out while they look.\n\n'
+      + `If anything changes, contact ${deps.supportContact}.`,
+    keyboard: backToMenuKeyboard(),
+  };
+
+  /**
+   * Only the first answer pages the region. A second party tapping is recorded
+   * and told the same thing, but the reviewers are not asked twice about one
+   * argument — the failure `NO_NOTIFICATION` exists to prevent, one table along.
+   */
+  if (!outcome.isFirstClaim) return only(chatId, thanks);
+
+  const detail = await disputeDetail(db, disputeId);
+  const escalation = await notifyDisputeEscalated(db, {
+    disputeId,
+    identifier: outcome.identifier,
+    parties: detail?.partyDetail ?? [],
+  });
+
+  return {
+    messages: [{ chatId, text: thanks.text, keyboard: thanks.keyboard }, ...escalation.messages],
+    alerts: escalation.alerts,
+  };
+}
+
+/**
+ * A regional reviewer handing a dispute to a System administrator.
+ *
+ * The same four checks `confirmUrgent` makes, in the same order and for the same
+ * reasons: an active staff row with silence when there is none, the capability
+ * the *action* needs, the subject itself, and the subject's own state inside the
+ * store's conditional `UPDATE`. A message sits in a Telegram chat for ever and
+ * the person tapping it may have been demoted since it was sent.
+ *
+ * There is no queue or region scope on a dispute — it is not a case and has no
+ * queue. `dispute.review` is the scope.
+ */
+async function forwardDispute(
+  db: Database,
+  chatId: string,
+  rawId: string,
+  state: ConversationState | null,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, `dispute forward ${rawId}`, state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.DISPUTE_REVIEW)) {
+    await logInteraction(db, chatId, STAFF_DENIED, `dispute forward ${rawId}`, state);
+    return reply(
+      chatId,
+      'Passing on an identity dispute is not available at your rank.\n\n'
+        + `It needs ${floorFor(CAPABILITY.DISPUTE_REVIEW)} or above. Yours is ${member.role}.`,
+    );
+  }
+
+  const disputeId = Number.parseInt(rawId, 10);
+  if (!Number.isFinite(disputeId)) return reply(chatId, 'I cannot read that dispute number.');
+
+  const outcome = await forwardToSystem(db, disputeId, member.telegramId);
+
+  if (outcome.kind === 'unknown') {
+    return reply(
+      chatId,
+      `I cannot find dispute ${String(disputeId)}.\n\n`
+        + 'It may have been settled and removed, or this button may be from an older '
+        + 'version of the bot. /disputes lists everything still waiting.',
+    );
+  }
+
+  if (outcome.kind === 'alreadyResolved') {
+    return reply(
+      chatId,
+      `Dispute ${String(disputeId)} is already settled.\n\n`
+        + `The account kept was ${outcome.keptChatId ?? 'not recorded'}. Nothing has changed.`,
+    );
+  }
+
+  if (outcome.kind === 'alreadyWithSystem') {
+    return reply(
+      chatId,
+      `Dispute ${String(disputeId)} is already with a system administrator.\n\n`
+        + 'Nothing has changed and nobody has been told again.',
+    );
+  }
+
+  const detail = await disputeDetail(db, disputeId);
+  const notice = await notifyDisputeWithSystem(db, {
+    disputeId,
+    identifier: outcome.identifier,
+    parties: detail?.partyDetail ?? [],
+    forwardedBy: member.telegramId,
+  });
+
+  return {
+    messages: [
+      {
+        chatId,
+        text:
+          `📤 Dispute ${String(disputeId)} is now with the system administrators.\n\n`
+          + 'They decide which account keeps the identity. Nothing else is needed from you.',
+      },
+      ...notice.messages,
+    ],
+    alerts: notice.alerts,
+  };
+}
+
+/**
+ * A System administrator deciding which account is the teacher's.
+ *
+ * The heaviest button in the bot: it revokes every other party and closes their
+ * cases. `resolveDispute` holds the guarantee that a second tap changes nothing —
+ * the guard is in the `WHERE` clause of the write, not in a branch here.
+ *
+ * The closing note is built here rather than in the store because it has to name
+ * the support contact, and layer 2 has no route to one. It states a reason and
+ * accuses nobody: if the decision went the wrong way, this is the only thing
+ * standing between a real teacher and silence.
+ */
+async function settleDispute(
+  db: Database,
+  chatId: string,
+  rawId: string,
+  keptChatId: string,
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, `dispute resolve ${rawId}`, state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.DISPUTE_RESOLVE)) {
+    await logInteraction(db, chatId, STAFF_DENIED, `dispute resolve ${rawId}`, state);
+    return reply(
+      chatId,
+      'Settling an identity dispute is not available at your rank.\n\n'
+        + `It needs ${floorFor(CAPABILITY.DISPUTE_RESOLVE)} or above. Yours is ${member.role}.\n\n`
+        + 'It revokes every other account and closes its cases, which is why it sits there.',
+    );
+  }
+
+  const disputeId = Number.parseInt(rawId, 10);
+  if (!Number.isFinite(disputeId)) return reply(chatId, 'I cannot read that dispute number.');
+
+  return settleAndAnnounce(db, chatId, {
+    disputeId,
+    keptChatId,
+    actor: member.telegramId,
+    outcome: `Settled by button by ${member.telegramId}`,
+    supportContact: deps.supportContact,
+  });
 }
 
 async function routeMenu(

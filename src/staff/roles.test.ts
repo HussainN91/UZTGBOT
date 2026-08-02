@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { STAFF_ROLE_ORDER } from '../db/schema.js';
-import { ALL_CAPABILITIES, CAPABILITY, atLeast, can, capabilitiesFor } from './roles.js';
+import { ALL_CAPABILITIES, CAPABILITY, atLeast, can, capabilitiesFor, floorFor } from './roles.js';
 
 describe('the capability table', () => {
   it('grants every capability to System', () => {
@@ -101,6 +101,36 @@ describe('the capability table', () => {
     for (const capability of Object.values(CAPABILITY)) {
       expect(ALL_CAPABILITIES).toContain(capability);
     }
+  });
+});
+
+describe('the two identity-dispute capabilities — Feature A', () => {
+  it('lets an ordinary regional admin review a dispute, but never settle one', () => {
+    // The floor on reviewing is Support because a MoPSE "regional admin" is
+    // usually a Support row with a region set — see `staffRoleEnum`. Floor it at
+    // Program and no regional admin holds it, every dispute falls through to the
+    // System fallback, and the regional routing this feature is built on is dead
+    // while still looking configured.
+    const support = { role: 'Support' as const, active: true };
+    expect(can(support, CAPABILITY.DISPUTE_REVIEW)).toBe(true);
+    expect(can(support, CAPABILITY.DISPUTE_RESOLVE)).toBe(false);
+  });
+
+  it('floors settling a dispute at System, like forgetting a teacher', () => {
+    // Resolution revokes a chat and closes its cases, so it sits with
+    // `teacher.forget` rather than with `teacher.revoke`. Program is deliberately
+    // refused: it is the rank that can revoke, and this is more than a revocation.
+    expect(floorFor(CAPABILITY.DISPUTE_RESOLVE)).toBe('System');
+    expect(can({ role: 'Program', active: true }, CAPABILITY.DISPUTE_RESOLVE)).toBe(false);
+    expect(can({ role: 'System', active: true }, CAPABILITY.DISPUTE_RESOLVE)).toBe(true);
+  });
+
+  it('never lets an Observer near either', () => {
+    // An Observer may read a case and may change nothing. A dispute is somebody's
+    // identity, which is further from reading than a case is.
+    const observer = { role: 'Observer' as const, active: true };
+    expect(can(observer, CAPABILITY.DISPUTE_REVIEW)).toBe(false);
+    expect(can(observer, CAPABILITY.DISPUTE_RESOLVE)).toBe(false);
   });
 });
 

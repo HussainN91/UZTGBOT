@@ -89,7 +89,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       TRUNCATE cases, case_notes, teachers, roster_entries, case_sequences,
                conversation_states, messages, faq_entries, urgent_codes,
                urgent_code_attempts, processed_updates, settings, staff,
-               audit_log CASCADE
+               identity_dispute_parties, identity_disputes, audit_log CASCADE
     `);
 
     await db.execute(sql`
@@ -602,6 +602,128 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
 
         expect(await tapText([SUPPORT_MEMBER])).toContain('no staff row any more');
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Identity disputes — Feature A
+  // -------------------------------------------------------------------------
+
+  describe('/disputes and /dispute_resolve', () => {
+    const SECOND_TEACHER = '998102';
+
+    /** Two chats holding one roster identity, with a dispute open over it. */
+    const openOne = async (): Promise<number> => {
+      await db.execute(sql`
+        INSERT INTO teachers (chat_id, identifier, name, region, verification_state)
+        VALUES (${SECOND_TEACHER}, ${IDENTIFIER}, 'Staff Test Teacher', 'Tashkent', 'Verified')
+      `);
+      const inserted = await db.execute<{ id: number }>(sql`
+        INSERT INTO identity_disputes (identifier, state) VALUES (${IDENTIFIER}, 'Open')
+        RETURNING id
+      `);
+      const id = inserted.rows[0]?.id ?? 0;
+      await db.execute(sql`
+        INSERT INTO identity_dispute_parties (dispute_id, chat_id)
+        VALUES (${id}, ${TEACHER}), (${id}, ${SECOND_TEACHER})
+      `);
+      return id;
+    };
+
+    it('lists an open dispute to a Support member, with a button', async () => {
+      // Support is the floor deliberately: a MoPSE regional admin is usually a
+      // Support row with a region set, so a higher floor would mean no regional
+      // admin ever sees one.
+      const id = await openOne();
+      const outcome = await outcomeOf('/disputes', SUPPORT_MEMBER);
+
+      expect(outcome.messages[0]?.text).toContain(`#${String(id)}`);
+      expect(outcome.messages[0]?.text).toContain(IDENTIFIER);
+      expect(buttonsOf(outcome)).toContain(encodeCallback(CALLBACK.DISPUTE_ESCALATE, String(id)));
+    });
+
+    it('says plainly when nothing is in dispute', async () => {
+      expect(await run('/disputes', SUPPORT_MEMBER)).toContain('No accounts are in dispute');
+    });
+
+    it('is not a command-existence oracle for somebody with no staff row', async () => {
+      // Silence, exactly as every other staff command gives — a reply would tell
+      // a stranger the command is real.
+      const outcome = await outcomeOf('/disputes', TEACHER);
+      expect(outcome.messages[0]?.text ?? '').not.toContain('dispute');
+    });
+
+    it('refuses /dispute_resolve to Program, naming the rank it needs', async () => {
+      const id = await openOne();
+      const body = await run(`/dispute_resolve ${String(id)} ${TEACHER} checked`, PROGRAM);
+
+      expect(body).toContain('System');
+      expect((await findStaff(db, PROGRAM))?.role).toBe('Program');
+    });
+
+    it('refuses a chat id that is not one of the accounts in dispute', async () => {
+      const id = await openOne();
+      const body = await run(`/dispute_resolve ${String(id)} 998999 checked`, SYSTEM);
+
+      expect(body).toContain('not one of the accounts');
+    });
+
+    it('insists on a reason, because the audit row is the point', async () => {
+      const id = await openOne();
+      const body = await run(`/dispute_resolve ${String(id)} ${TEACHER}`, SYSTEM);
+
+      expect(body).toContain('I need a reason');
+    });
+
+    it('settles it, revoking the other account and writing one audit row', async () => {
+      const id = await openOne();
+      await createCase(db, {
+        chatId: SECOND_TEACHER,
+        category: CASE_CATEGORY.VISA,
+        detail: 'a case on the losing account',
+      });
+
+      const body = await run(
+        `/dispute_resolve ${String(id)} ${TEACHER} telephoned the school`,
+        SYSTEM,
+      );
+
+      expect(body).toContain('settled');
+      const states = await db.execute<{ chat_id: string; state: string }>(sql`
+        SELECT chat_id, verification_state AS state FROM teachers
+        WHERE chat_id IN (${TEACHER}, ${SECOND_TEACHER}) ORDER BY chat_id
+      `);
+      expect(states.rows.find((r) => r.chat_id === TEACHER)?.state).toBe('Verified');
+      expect(states.rows.find((r) => r.chat_id === SECOND_TEACHER)?.state).toBe('Revoked');
+
+      // The losing account's case is closed with a reason a teacher can read.
+      const closed = await db.execute<{ status: string; public_update: string | null }>(
+        sql`SELECT status, public_update FROM cases WHERE teacher_chat_id = ${SECOND_TEACHER}`,
+      );
+      expect(closed.rows[0]?.status).toBe('Closed');
+      expect(closed.rows[0]?.public_update).toContain(SUPPORT);
+
+      expect(await auditActions(IDENTIFIER)).toEqual(['IDENTITY_DISPUTE_RESOLVED']);
+    });
+
+    it('gives the typed command and the button the identical answer', async () => {
+      // The whole reason `settleAndAnnounce` lives outside the router. If the two
+      // paths ever grow separate implementations, this is what fails.
+      const id = await openOne();
+      await run(`/dispute_resolve ${String(id)} ${TEACHER} checked`, SYSTEM);
+
+      const viaButton = await send({
+        chatId: SYSTEM,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.DISPUTE_RESOLVE, String(id), SECOND_TEACHER),
+      });
+
+      expect(viaButton.messages[0]?.text).toContain('already settled');
+      // And it did not change hands on the second attempt.
+      const kept = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${TEACHER}`,
+      );
+      expect(kept.rows[0]?.state).toBe('Verified');
     });
   });
 });

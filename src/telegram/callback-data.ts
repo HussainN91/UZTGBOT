@@ -150,6 +150,44 @@ export const CALLBACK = {
    * keyboard skips any button that will not fit, the way the FAQ listing does.
    */
   STAFF_MENU: 'SM',
+  /**
+   * A party's answer on an identity dispute, e.g. `DC:42:NotMine` — Feature A.
+   *
+   * **The claim travels; the party does not.** Who is answering is the chat the
+   * tap arrived from, which cannot be forged — the same reasoning as `ROK` and
+   * `RMV`, and here it is load-bearing rather than tidy: a payload that named its
+   * own party would let either account answer on behalf of the other, in a
+   * feature whose entire subject is two accounts disagreeing about who somebody
+   * is.
+   *
+   * **It decides nothing.** Both parties may tap, both are recorded, and a System
+   * administrator settles it afterwards. `recordClaim` refuses any chat that is
+   * not on the dispute, which is the whole authorisation — there is no staff row
+   * involved, because the people tapping this are teachers.
+   *
+   * `DC:42:NotMine` is 13 bytes against the 64-byte limit. A test measures the
+   * worst case with a `bigserial` at `Number.MAX_SAFE_INTEGER` rather than
+   * trusting the arithmetic here.
+   */
+  DISPUTE_CLAIM: 'DC',
+  /**
+   * "Send to system admin", e.g. `DE:42` — the reviewer's one button.
+   *
+   * A regional reviewer holds `dispute.review` and can do exactly two things with
+   * a dispute: read it, and pass it on. There is deliberately no button here that
+   * settles anything, because settling is `dispute.resolve` and floors at System.
+   */
+  DISPUTE_ESCALATE: 'DE',
+  /**
+   * "This chat is the teacher", e.g. `DR:42:991001` — System only.
+   *
+   * **It names the chat that KEEPS the identity, never one that loses it.** The
+   * losing chats are derived from the party list at the moment of resolution, so
+   * a dispute that has since acquired a third party cannot be half-settled by a
+   * button built when there were two — and a button sitting in a scrollback for a
+   * week is exactly how that would happen.
+   */
+  DISPUTE_RESOLVE: 'DR',
 } as const;
 
 export type CallbackPrefix = (typeof CALLBACK)[keyof typeof CALLBACK];

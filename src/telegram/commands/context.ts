@@ -239,6 +239,23 @@ export const CAPABILITY_INTERFACE: Readonly<Record<Capability, CapabilityInterfa
     summary: 'Remove a teacher’s name and identifier permanently',
     commands: ['/forget'],
   },
+  /**
+   * The pair is split across two ranks on purpose — Feature A.
+   *
+   * Reviewing floors at `Support`, because that is the rank a MoPSE regional
+   * admin actually holds, and settling floors at `System`, because it revokes a
+   * chat and closes its cases. Listing them separately here is what makes that
+   * gap visible in `/whoami`: a Support member reads "look at" and does not go
+   * hunting for a command that would refuse them.
+   */
+  'dispute.review': {
+    summary: 'Look at a disputed account and pass it to a system admin',
+    commands: ['/disputes'],
+  },
+  'dispute.resolve': {
+    summary: 'Decide which account a disputed teacher identity belongs to',
+    commands: ['/dispute_resolve'],
+  },
   'staff.manage': {
     summary: 'Add staff, and set their rank, queue and regions',
     /**

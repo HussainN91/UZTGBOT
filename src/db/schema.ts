@@ -18,6 +18,8 @@
  */
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
+  bigserial,
   boolean,
   check,
   index,
@@ -28,6 +30,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -720,6 +723,123 @@ export const conversationStates = pgTable(
   (t) => [
     check('conversation_states_chat_id_digits', CHAT_ID_IS_DIGITS('chat_id')),
     index('conversation_states_expiry_idx').on(t.expiresAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Identity disputes — Feature A
+// ---------------------------------------------------------------------------
+
+export const IDENTITY_DISPUTE_STATES = ['Open', 'Claimed', 'WithSystem', 'Resolved'] as const;
+export type IdentityDisputeState = (typeof IDENTITY_DISPUTE_STATES)[number];
+export const identityDisputeStateEnum = pgEnum('identity_dispute_state', IDENTITY_DISPUTE_STATES);
+
+export const IDENTITY_DISPUTE_CLAIMS = ['Mine', 'NotMine'] as const;
+export type IdentityDisputeClaim = (typeof IDENTITY_DISPUTE_CLAIMS)[number];
+export const identityDisputeClaimEnum = pgEnum('identity_dispute_claim', IDENTITY_DISPUTE_CLAIMS);
+
+/**
+ * One argument about who a roster identity belongs to — Feature A.
+ *
+ * Opened when a second Telegram account signs in as a teacher who is already
+ * bound. **It does not gate the sign-in**, and that is D1's decision rather than
+ * this table's: blocking would lock out any teacher who changes phone, and would
+ * hand anyone holding a leaked recruitment address a way to lock the real teacher
+ * out for good.
+ *
+ * Deliberately not a `CASE_CATEGORY`. A dispute is not a teacher's support
+ * request, and making it one would ripple into `QUEUE_FOR_CATEGORY`,
+ * `CASE_REFERENCE_PREFIX` and retention for nothing.
+ *
+ * **No foreign key on `identifier`**, unlike `teachers.identifier`, which has one
+ * with `restrict`. The privacy notice promises this record is kept permanently —
+ * "a record of decisions our staff make about access ... is kept permanently" —
+ * and a permanent record of who was judged to own an account must outlive a
+ * roster row recruitment deletes. A teacher *binding* is meaningless without its
+ * roster row; a decision about who somebody is remains true afterwards.
+ *
+ * The state machine is four values, not the five the programme plan drew. A
+ * party's tap records the claim and notifies the region's reviewers inside one
+ * transaction, so a separate `Escalated` between `Claimed` and `WithSystem` would
+ * be a value no query could ever return — the same shape of defect as the
+ * unreachable System fallback `staff/recipients.ts` records. `claimed_at` and
+ * `escalated_at` are both kept, because "when did somebody first respond" and
+ * "when were staff told" really are two questions.
+ */
+export const identityDisputes = pgTable(
+  'identity_disputes',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    identifier: text('identifier').notNull(),
+    state: identityDisputeStateEnum('state').notNull().default('Open'),
+    openedAt: tsz('opened_at').notNull().defaultNow(),
+    /** When any party first responded. Null while nobody has. */
+    claimedAt: tsz('claimed_at'),
+    /** When the region's reviewers were told. Same transaction as the first claim. */
+    escalatedAt: tsz('escalated_at'),
+    systemNotifiedAt: tsz('system_notified_at'),
+    resolvedBy: chatId('resolved_by'),
+    resolvedAt: tsz('resolved_at'),
+    /** The chat judged to be the teacher's own. Null until resolved. */
+    keptChatId: chatId('kept_chat_id'),
+    /** What the resolver said, in their words. Staff-facing; no teacher reads it. */
+    outcome: text('outcome'),
+  },
+  (t) => [
+    /**
+     * One OPEN dispute per identity, enforced by the database rather than by a
+     * read followed by a write.
+     *
+     * Two chats presenting the same identifier at the same moment take two
+     * *different* chat locks — `withChatLock` is the sender's — so nothing in
+     * JavaScript can make "is one already open?" safe here (R2). This partial
+     * index is what makes a third chat join the existing record instead of
+     * opening a second one, which the programme plan requires and which no
+     * application-level check could guarantee.
+     *
+     * Partial on `resolved_at IS NULL`, so a settled dispute does not stop a new
+     * one being opened if the same identity is contested again later.
+     */
+    uniqueIndex('identity_disputes_one_open_idx')
+      .on(t.identifier)
+      .where(sql`resolved_at IS NULL`),
+    index('identity_disputes_state_idx').on(t.state),
+  ],
+);
+
+/**
+ * The chats arguing, one row each.
+ *
+ * A separate table because **a third chat signing in joins the existing dispute**
+ * rather than opening a second one, and a record with `prior_chat_id` and
+ * `new_chat_id` columns — which is how the programme plan drew it — has nowhere
+ * to put a third party. It would either overwrite the second or leave the third
+ * with no button at all.
+ *
+ * No foreign key to `teachers`, for the reason above and for `audit_log`'s: this
+ * outlives the rows it names.
+ */
+export const identityDisputeParties = pgTable(
+  'identity_dispute_parties',
+  {
+    disputeId: bigint('dispute_id', { mode: 'number' })
+      .notNull()
+      .references(() => identityDisputes.id, { onDelete: 'cascade' }),
+    chatId: chatId('chat_id').notNull(),
+    joinedAt: tsz('joined_at').notNull().defaultNow(),
+    /**
+     * Which button this chat tapped, or null while it has not.
+     *
+     * It records what they said and **decides nothing**. Both parties may tap,
+     * both are recorded, and no wording on either button lets a party certify
+     * itself — a System administrator settles it afterwards.
+     */
+    claim: identityDisputeClaimEnum('claim'),
+    claimedAt: tsz('claimed_at'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.disputeId, t.chatId] }),
+    check('identity_dispute_parties_chat_id_digits', CHAT_ID_IS_DIGITS('chat_id')),
   ],
 );
 

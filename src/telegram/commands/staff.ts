@@ -18,7 +18,7 @@ import type { Database } from '../../db/index.js';
  */
 import type { RouterOutcome } from '../router.js';
 import { casesOwnedBy, listCases } from '../../cases/queries.js';
-import { STAFF_ROLE_ORDER, type StaffRole } from '../../db/schema.js';
+import { STAFF_ROLE_ORDER, type IdentityDisputeState, type StaffRole } from '../../db/schema.js';
 import { ALL_QUEUES, QUEUE, type Queue } from '../../staff/queues.js';
 import { CAPABILITY, capabilitiesFor } from '../../staff/roles.js';
 import {
@@ -45,6 +45,8 @@ import {
   type RegionFlag,
 } from '../../teachers/region.js';
 import { forgetTeacher } from '../../teachers/forget.js';
+import { openDisputes } from '../../teachers/disputes.js';
+import { settleAndAnnounce } from '../dispute-actions.js';
 import {
   findTeacher,
   restoreTeacher,
@@ -1785,10 +1787,143 @@ function toggledRegions(member: StaffRecord, region: string): string {
   return next.length === 0 ? 'clear' : next.join(', ');
 }
 
+// ---------------------------------------------------------------------------
+// Identity disputes — Feature A
+// ---------------------------------------------------------------------------
+
+/**
+ * `/disputes` — every argument about who an account belongs to, still open.
+ *
+ * **A button is not a route to a dispute nobody was messaged about.** The
+ * reviewer's message carries the escalate button, but it scrolls away, it only
+ * reaches whoever covered the region at the moment somebody tapped, and a dispute
+ * where *neither* party ever answers is never messaged to anybody at all. Part 2
+ * declines to auto-expire a dispute and chooses visibility instead; this command
+ * and the morning digest are that choice.
+ *
+ * Not scoped by region, and that is deliberate. A dispute is not a case: it has
+ * no queue, and `visibleToStaff` has nothing to filter on. `dispute.review` is
+ * the scope, which is why the floor on it was argued rather than assumed.
+ */
+export const disputes: StaffCommand = {
+  name: '/disputes',
+  capability: CAPABILITY.DISPUTE_REVIEW,
+  handle: async (ctx) => {
+    const open = await openDisputes(ctx.db, STAFF_CASE_LIST_CAP);
+
+    if (open.length === 0) {
+      return reply(
+        ctx.member.telegramId,
+        'No accounts are in dispute.\n\n'
+          + 'One opens by itself when a second Telegram account signs in as a teacher who '
+          + 'is already signed in.',
+      );
+    }
+
+    const lines = open.flatMap((d) => [
+      `#${String(d.id)} — ${d.identifier}`,
+      `  ${String(d.parties.length)} accounts · opened ${d.openedAt} · ${describeDisputeState(d.state)}`,
+      `  ${d.parties.join(', ')}`,
+      '',
+    ]);
+
+    /**
+     * Capped like every keyboard here. `STAFF_BUTTON_CAP` rather than the list
+     * cap: the text above is still there to read, and a wall of buttons is the
+     * failure Part 5G's cap exists to prevent.
+     */
+    const keyboard: InlineKeyboard = open.slice(0, STAFF_BUTTON_CAP).map((d) => [
+      {
+        text: `📤 Send #${String(d.id)} to system admin`,
+        callback_data: encodeCallback(CALLBACK.DISPUTE_ESCALATE, String(d.id)),
+      },
+    ]);
+
+    return reply(
+      ctx.member.telegramId,
+      [
+        `⚖️ ${String(open.length)} account${open.length === 1 ? '' : 's'} in dispute`,
+        '',
+        ...lines,
+        'Check however you normally would, then pass it on. Only a system',
+        'administrator can decide which account stays.',
+      ].join('\n'),
+      keyboard,
+    );
+  },
+};
+
+/** The state, in the words a ministry staff member would use. */
+function describeDisputeState(state: IdentityDisputeState): string {
+  if (state === 'Open') return 'nobody has answered yet';
+  if (state === 'Claimed') return 'answered, waiting on review';
+  if (state === 'WithSystem') return 'with a system administrator';
+  return 'settled';
+}
+
+/**
+ * `/dispute_resolve <id> <chat id> <why>` — System only.
+ *
+ * **It runs the same function the button does.** `settleAndAnnounce` holds the
+ * refusals, the revocations, the case closing and the messages to every party, so
+ * the typed command and the tap cannot answer differently — the property Part
+ * 5H.3 established for staff management, applied to the heaviest action in the
+ * bot.
+ *
+ * The reason is required rather than optional. This closes somebody's cases and
+ * ends their access on a judgement about who they are; an audit row that says
+ * only "resolved" is one nobody can review afterwards.
+ */
+export const disputeResolve: StaffCommand = {
+  name: '/dispute_resolve',
+  capability: CAPABILITY.DISPUTE_RESOLVE,
+  handle: async (ctx) => {
+    const usage =
+      '/dispute_resolve 42 995101 telephoned the school and confirmed\n\n'
+      + 'The chat id is the account that KEEPS the identity — every other account in '
+      + 'the dispute is revoked and its cases closed. /disputes shows which they are.';
+
+    const trimmed = ctx.rest.trim();
+    const boundary = trimmed.search(/\s/);
+    const head = boundary === -1 ? trimmed : trimmed.slice(0, boundary);
+
+    if (!/^\d+$/.test(head)) {
+      return reply(ctx.member.telegramId, `I need a dispute number.\n\n${usage}`);
+    }
+
+    const split = splitChatId(boundary === -1 ? '' : trimmed.slice(boundary).trim());
+    if (split === null) {
+      return reply(
+        ctx.member.telegramId,
+        `I need the chat id of the account that keeps the identity.\n\n${usage}`,
+      );
+    }
+
+    if (split.rest === '') {
+      return reply(
+        ctx.member.telegramId,
+        'I need a reason, in your own words.\n\n'
+          + 'This ends somebody’s access and closes their cases on a judgement about who '
+          + `they are. An audit row saying only “resolved” is one nobody can review.\n\n${usage}`,
+      );
+    }
+
+    return settleAndAnnounce(ctx.db, ctx.member.telegramId, {
+      disputeId: Number.parseInt(head, 10),
+      keptChatId: split.chatId,
+      actor: ctx.member.telegramId,
+      outcome: split.rest,
+      supportContact: ctx.deps.supportContact,
+    });
+  },
+};
+
 export const PEOPLE_COMMANDS: readonly StaffCommand[] = [
   whoami,
   region,
   regions,
+  disputes,
+  disputeResolve,
   staffList,
   staffAdd,
   staffRole,

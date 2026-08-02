@@ -27,6 +27,7 @@
 import type { Task } from 'graphile-worker';
 import type { Api } from 'grammy';
 import {
+  DIGEST_LIST_CAP,
   TEACHER_CHASE_AFTER_DAYS,
   TEACHER_CHASE_MAX,
 } from '../../config/constants.js';
@@ -46,6 +47,7 @@ import {
   teacherChaseMessage,
 } from '../../digest/format.js';
 import { log } from '../../log.js';
+import { openDisputes } from '../../teachers/disputes.js';
 import { CAPABILITY, can } from '../../staff/roles.js';
 import {
   type TelegramLookup,
@@ -116,11 +118,31 @@ async function sendStaffDigests(
     ]);
 
     /**
+     * Disputes go only to the people who may act on them — Feature A.
+     *
+     * Filtered on `dispute.review`, the capability the line asks them to
+     * *exercise*, rather than on the `case.update` that got them into this loop.
+     * That is R14 in its own words, and the two sets are genuinely different: the
+     * loop above is everybody who can work a case, and reviewing a dispute is a
+     * separate grant that somebody may not hold.
+     *
+     * Not filtered by region, because a dispute has no queue and its region lives
+     * on the roster rather than on anything `scope` can see. `/disputes` shows the
+     * same unfiltered list, so the digest and the command agree.
+     */
+    const disputeLines = can({ role: member.role, active: member.active }, CAPABILITY.DISPUTE_REVIEW)
+      ? (await openDisputes(db, DIGEST_LIST_CAP)).map(
+          (d) =>
+            `#${String(d.id)} — ${d.identifier} · ${String(d.parties.length)} accounts · opened ${d.openedAt}`,
+        )
+      : [];
+
+    /**
      * `null` when there is nothing, and the formatter decides that rather than
      * this job (D39). A daily message saying "nothing to do" is a daily message
      * people filter, and then they filter the one that matters.
      */
-    const text = staffDigest({ pastDue, stale, unassigned });
+    const text = staffDigest({ pastDue, stale, unassigned, disputes: disputeLines });
     if (text === null) {
       skipped += 1;
       continue;

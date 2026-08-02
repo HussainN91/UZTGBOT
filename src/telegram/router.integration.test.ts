@@ -71,9 +71,18 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
   beforeEach(async () => {
     pool ??= new pg.Pool({ connectionString: TEST_DATABASE_URL });
     db ??= drizzle(pool, { schema }) as unknown as Database;
+    /**
+     * `identity_disputes` and its parties are truncated here from Feature A
+     * onward, and the reason is the fault Part 5H.1 recorded rather than
+     * tidiness: **a feature that starts reading a table breaks every test file
+     * that does not clean it.** A dispute surviving between tests would collide
+     * with the partial unique index on the next duplicate sign-in, and the test
+     * that failed would be one that had never heard of disputes.
+     */
     await db.execute(sql`
       TRUNCATE cases, teachers, roster_entries, case_sequences, conversation_states,
                messages, faq_entries, urgent_codes, urgent_code_attempts,
+               identity_dispute_parties, identity_disputes, staff, audit_log,
                processed_updates, settings CASCADE
     `);
     clearSettingsCache();
@@ -352,6 +361,207 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
 
       expect(outcome.messages[0]?.purpose).toBeUndefined();
       expect(outcome.messages[1]?.purpose).toBe('a duplicate sign-in notice');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Identity disputes — Feature A
+  // -------------------------------------------------------------------------
+
+  describe('identity disputes', () => {
+    /** Sign both chats in as the same teacher, which is what opens a dispute. */
+    const contest = async (): Promise<RouterOutcome> => {
+      await verify(CHAT);
+      await text('/start', SECOND_CHAT);
+      await tap(SIGN_IN, SECOND_CHAT);
+      return text(IDENTIFIER, SECOND_CHAT);
+    };
+
+    const openDisputeId = async (): Promise<number> => {
+      const rows = await db.execute<{ id: number }>(
+        sql`SELECT id FROM identity_disputes WHERE resolved_at IS NULL`,
+      );
+      return rows.rows[0]?.id ?? 0;
+    };
+
+    it('opens a record and gives both chats a button', async () => {
+      const outcome = await contest();
+
+      const [{ n }] = (
+        await db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM identity_disputes`)
+      ).rows as [{ n: string }];
+      expect(n).toBe('1');
+
+      // Both parties get something they can act on. Neither button settles it.
+      const prior = outcome.messages.find((m) => m.chatId === CHAT);
+      const fresh = outcome.messages.filter((m) => m.chatId === SECOND_CHAT).at(-1);
+      expect(prior?.keyboard).toBeDefined();
+      expect(fresh?.keyboard).toBeDefined();
+    });
+
+    it('signs the second chat in anyway — a dispute does not gate access', async () => {
+      // The decision D1 made and Part 2 kept. Blocking would lock out any teacher
+      // who changes phone, and would let anyone with a leaked address lock the
+      // real teacher out permanently.
+      const outcome = await contest();
+
+      expect(firstText(outcome)).toContain('Signed in');
+      const rows = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${SECOND_CHAT}`,
+      );
+      expect(rows.rows[0]?.state).toBe('Verified');
+    });
+
+    it('keeps the operations alarm as well as the dispute', async () => {
+      // The alarm is what fires when NOBODY taps anything, which is exactly the
+      // silent impersonation case. The dispute is added beside it, not instead.
+      const outcome = await contest();
+      expect(outcome.alerts[0]?.title).toContain('more than one chat');
+    });
+
+    it('joins a third chat to the same record rather than opening a second', async () => {
+      const third = '980003';
+      await contest();
+      await text('/start', third);
+      await tap(SIGN_IN, third);
+      await text(IDENTIFIER, third);
+
+      const rows = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM identity_disputes`,
+      );
+      expect(rows.rows[0]?.n).toBe('1');
+
+      const parties = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM identity_dispute_parties`,
+      );
+      expect(parties.rows[0]?.n).toBe('3');
+    });
+
+    it('records a party’s answer and thanks them without settling anything', async () => {
+      await contest();
+      const id = await openDisputeId();
+
+      const answered = await tap(encodeCallback(CALLBACK.DISPUTE_CLAIM, String(id), 'NotMine'), CHAT);
+
+      expect(firstText(answered)).toContain('recorded');
+      const rows = await db.execute<{ claim: string | null; state: string }>(sql`
+        SELECT p.claim, d.state FROM identity_dispute_parties p
+        JOIN identity_disputes d ON d.id = p.dispute_id
+        WHERE p.dispute_id = ${id} AND p.chat_id = ${CHAT}
+      `);
+      expect(rows.rows[0]?.claim).toBe('NotMine');
+      expect(rows.rows[0]?.state).toBe('Claimed');
+      // Nobody has been revoked. A party cannot decide.
+      const teacher = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${SECOND_CHAT}`,
+      );
+      expect(teacher.rows[0]?.state).toBe('Verified');
+    });
+
+    it('gives a stranger who guesses a dispute payload nothing but the menu', async () => {
+      // Tapped rather than checked for absence. A hand-crafted payload must not
+      // reveal whether the dispute exists, who is on it, or that the guess landed.
+      await contest();
+      const id = await openDisputeId();
+      const stranger = '980777';
+
+      const outcome = await tap(
+        encodeCallback(CALLBACK.DISPUTE_CLAIM, String(id), 'Mine'),
+        stranger,
+      );
+
+      expect(firstText(outcome)).not.toContain('recorded');
+      const rows = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM identity_dispute_parties WHERE chat_id = ${stranger}`,
+      );
+      expect(rows.rows[0]?.n).toBe('0');
+    });
+
+    it('refuses a settle tap from a Program member and names the rank it needs', async () => {
+      // A button sits in a scrollback for ever, so it is tapped rather than
+      // assumed absent. Program can revoke a teacher and still cannot do this.
+      await contest();
+      const id = await openDisputeId();
+      const program = '980500';
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, active)
+        VALUES (${program}, 'Program Person', 'Program', 'All', true)
+      `);
+
+      const outcome = await tap(
+        encodeCallback(CALLBACK.DISPUTE_RESOLVE, String(id), CHAT),
+        program,
+      );
+
+      expect(firstText(outcome)).toContain('System');
+      const teacher = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${SECOND_CHAT}`,
+      );
+      expect(teacher.rows[0]?.state).toBe('Verified');
+    });
+
+    it('settles it for System, revoking the other account and closing its cases', async () => {
+      await contest();
+      const id = await openDisputeId();
+      const admin = '980900';
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, active)
+        VALUES (${admin}, 'System Person', 'System', 'All', true)
+      `);
+
+      const outcome = await tap(encodeCallback(CALLBACK.DISPUTE_RESOLVE, String(id), CHAT), admin);
+
+      expect(firstText(outcome)).toContain('settled');
+      const kept = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${CHAT}`,
+      );
+      const lost = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${SECOND_CHAT}`,
+      );
+      expect(kept.rows[0]?.state).toBe('Verified');
+      expect(lost.rows[0]?.state).toBe('Revoked');
+
+      // Both parties are told, and the losing chat is given a route rather than
+      // an accusation.
+      const toLoser = outcome.messages.find((m) => m.chatId === SECOND_CHAT);
+      expect(toLoser?.text).toContain(SUPPORT);
+    });
+
+    it('makes a second settle tap a no-op that says so', async () => {
+      await contest();
+      const id = await openDisputeId();
+      const admin = '980900';
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, active)
+        VALUES (${admin}, 'System Person', 'System', 'All', true)
+      `);
+
+      await tap(encodeCallback(CALLBACK.DISPUTE_RESOLVE, String(id), CHAT), admin);
+      const again = await tap(
+        encodeCallback(CALLBACK.DISPUTE_RESOLVE, String(id), SECOND_CHAT),
+        admin,
+      );
+
+      expect(firstText(again)).toContain('already settled');
+      // The second tap named the OTHER chat. It must not have changed hands.
+      const first = await db.execute<{ state: string }>(
+        sql`SELECT verification_state AS state FROM teachers WHERE chat_id = ${CHAT}`,
+      );
+      expect(first.rows[0]?.state).toBe('Verified');
+    });
+
+    it('tells a party who answers after the decision that it is settled', async () => {
+      await contest();
+      const id = await openDisputeId();
+      const admin = '980900';
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, active)
+        VALUES (${admin}, 'System Person', 'System', 'All', true)
+      `);
+      await tap(encodeCallback(CALLBACK.DISPUTE_RESOLVE, String(id), CHAT), admin);
+
+      const late = await tap(encodeCallback(CALLBACK.DISPUTE_CLAIM, String(id), 'Mine'), CHAT);
+      expect(firstText(late)).toContain('already been settled');
     });
   });
 

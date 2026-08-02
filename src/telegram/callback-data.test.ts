@@ -81,6 +81,30 @@ describe('callback data stays inside Telegram’s 64-byte limit', () => {
     expect(reference).not.toContain(':');
   });
 
+  /**
+   * The three dispute buttons — Feature A.
+   *
+   * Measured against a `bigserial` at the largest value JavaScript can hold
+   * exactly and a fifteen-digit Telegram chat id, because neither is chosen from
+   * a list: one is allocated by the database and the other is handed to us by
+   * Telegram, so both grow without anybody editing this repository. That is the
+   * same reason the confirm-urgent test above measures a generated reference
+   * rather than a fixed code.
+   */
+  it('the dispute buttons fit with the largest id and chat id either can carry', () => {
+    const hugeId = String(Number.MAX_SAFE_INTEGER);
+    const longChatId = '999999999999999';
+
+    const claim = encodeCallback(CALLBACK.DISPUTE_CLAIM, hugeId, 'NotMine');
+    const escalate = encodeCallback(CALLBACK.DISPUTE_ESCALATE, hugeId);
+    const resolve = encodeCallback(CALLBACK.DISPUTE_RESOLVE, hugeId, longChatId);
+
+    for (const emitted of [claim, escalate, resolve]) {
+      expect(byteLength(emitted)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+      expect(byteLength(emitted)).toBeLessThanOrEqual(40);
+    }
+  });
+
   it('payload size does not depend on the language shown on the button', () => {
     // The whole point of Chain 4. A topic's label may be translated into Russian
     // or Uzbek, where Cyrillic costs two bytes a character; the payload must not

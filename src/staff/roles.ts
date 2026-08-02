@@ -37,6 +37,31 @@ export const CAPABILITY = {
    * rather than an obstacle.
    */
   TEACHER_FORGET: 'teacher.forget',
+  /**
+   * Looking at an identity dispute, and handing it to a System administrator.
+   *
+   * **Floored at `Support`, and the floor is the decision rather than an
+   * oversight.** `staffRoleEnum` records that a MoPSE "regional admin" is usually
+   * a `Support` row with a region set — the rank ladder and the org chart are
+   * different axes. Floor this at `Program`, where `teacher.revoke` sits, and no
+   * actual regional admin would hold it: every dispute would fall through to the
+   * System fallback, and the regional routing this whole feature is built on
+   * would be dead on arrival while still looking configured.
+   *
+   * It sits beside `urgent.issue` for the same stated reason — the person a
+   * teacher reaches is whoever is on the desk. A reviewer can look and forward.
+   * Deciding is the capability below, and it is three ranks away.
+   */
+  DISPUTE_REVIEW: 'dispute.review',
+  /**
+   * Deciding which chat keeps a contested teacher identity.
+   *
+   * `System`, with `teacher.forget` rather than with `teacher.revoke`, because it
+   * does more than a revocation: it revokes every losing chat AND closes their
+   * cases with a stated reason. `/restore` makes the revocation reversible; the
+   * closed cases stay closed, and that asymmetry is why the rank is what it is.
+   */
+  DISPUTE_RESOLVE: 'dispute.resolve',
   STAFF_MANAGE: 'staff.manage',
   MAINTENANCE: 'maintenance',
   ANNOUNCE: 'announce',
@@ -84,6 +109,8 @@ const FLOOR: Readonly<Record<Capability, StaffRole>> = {
   'teacher.region': 'Lead',
   'teacher.revoke': 'Program',
   'teacher.forget': 'System',
+  'dispute.review': 'Support',
+  'dispute.resolve': 'System',
   'staff.manage': 'System',
   maintenance: 'System',
   announce: 'Program',

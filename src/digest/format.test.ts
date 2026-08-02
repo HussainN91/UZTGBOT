@@ -48,13 +48,13 @@ describe('the staff digest', () => {
      * rather than deciding it in the job means the rule lives in one place and
      * the job cannot send an empty digest by accident.
      */
-    expect(staffDigest({ pastDue: empty, stale: empty, unassigned: empty })).toBeNull();
+    expect(staffDigest({ pastDue: empty, stale: empty, unassigned: empty, disputes: []  })).toBeNull();
   });
 
   it('sends a digest when any one list has something in it', () => {
-    expect(staffDigest({ pastDue: list([row()]), stale: empty, unassigned: empty })).not.toBeNull();
-    expect(staffDigest({ pastDue: empty, stale: list([row()]), unassigned: empty })).not.toBeNull();
-    expect(staffDigest({ pastDue: empty, stale: empty, unassigned: list([row()]) })).not.toBeNull();
+    expect(staffDigest({ pastDue: list([row()]), stale: empty, unassigned: empty, disputes: []  })).not.toBeNull();
+    expect(staffDigest({ pastDue: empty, stale: list([row()]), unassigned: empty, disputes: []  })).not.toBeNull();
+    expect(staffDigest({ pastDue: empty, stale: empty, unassigned: list([row()]), disputes: []  })).not.toBeNull();
   });
 
   it('never contains what the teacher wrote', () => {
@@ -63,7 +63,7 @@ describe('the staff digest', () => {
      * problem does not belong in a message pushed to a phone. Staff read it with
      * `/case`, which checks permission first and leaves a row saying who read it.
      */
-    const digest = staffDigest({ pastDue: list([row()]), stale: empty, unassigned: empty })!;
+    const digest = staffDigest({ pastDue: list([row()]), stale: empty, unassigned: empty, disputes: []  })!;
     expect(digest).not.toContain('the teacher’s own words');
   });
 
@@ -74,6 +74,7 @@ describe('the staff digest', () => {
       pastDue: list([row({ reference: 'VISA-2026-00001' })]),
       stale: list([row({ reference: 'TRAVEL-2026-00002' })]),
       unassigned: list([row({ reference: 'SUPPORT-2026-00003' })]),
+      disputes: [],
     })!;
 
     const pastDueAt = digest.indexOf('VISA-2026-00001');
@@ -91,10 +92,31 @@ describe('the staff digest', () => {
     const many = Array.from({ length: DIGEST_LIST_CAP + 5 }, (_, i) =>
       row({ reference: `VISA-2026-0000${i}` }),
     );
-    const digest = staffDigest({ pastDue: list(many, 40), stale: empty, unassigned: empty })!;
+    const digest = staffDigest({ pastDue: list(many, 40), stale: empty, unassigned: empty, disputes: []  })!;
 
     expect(digest.match(/VISA-2026-/g)).toHaveLength(DIGEST_LIST_CAP);
     expect(digest).toContain('30 more');
+  });
+
+  it('shows unsettled identity disputes, and still says nothing when there is nothing', () => {
+    // Part 2 declines to auto-expire a dispute and chooses visibility instead.
+    // This is that choice: a dispute nobody has answered is never messaged to
+    // anybody, so without the digest it would sit unseen indefinitely.
+    expect(
+      staffDigest({ pastDue: empty, stale: empty, unassigned: empty, disputes: [] }),
+    ).toBeNull();
+
+    const withOne = staffDigest({
+      pastDue: empty,
+      stale: empty,
+      unassigned: empty,
+      disputes: ['#42 — nodira@example.com · 2 accounts · opened 2 Aug 2026'],
+    })!;
+
+    // A member with no cases at all and one dispute is still told. D39's
+    // null-when-empty rule covers the new section rather than being bypassed by it.
+    expect(withOne).not.toBeNull();
+    expect(withOne).toContain('#42');
   });
 
   it('stays inside what Telegram will deliver', () => {
@@ -103,6 +125,10 @@ describe('the staff digest', () => {
       pastDue: list(many, 200),
       stale: list(many, 200),
       unassigned: list(many, 200),
+      // The dispute section is inside the clamp too. It is the one section built
+      // from strings rather than from a capped `StaffCaseList`, so it is the one
+      // that could grow past what Telegram will take.
+      disputes: Array.from({ length: 200 }, (_, i) => `#${String(i)} — teacher${String(i)}@example.com`),
     })!;
     expect(digest.length).toBeLessThanOrEqual(TELEGRAM_MESSAGE_MAX_CHARS);
   });
@@ -114,6 +140,7 @@ describe('the staff digest', () => {
       pastDue: list([row({ teacherName: null, region: null })]),
       stale: empty,
       unassigned: empty,
+      disputes: [],
     })!;
     expect(digest).not.toContain('null');
   });
