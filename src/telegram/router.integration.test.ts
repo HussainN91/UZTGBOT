@@ -773,6 +773,50 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       expect(rows.rows[0]?.requested).toBe(true);
     });
 
+    /**
+     * The prompt a teacher could be held at for half an hour.
+     *
+     * `AwaitingUrgentDetail` has carried an `attempts` count since it was
+     * written and nothing ever incremented it, so there was no limit here at
+     * all: somebody sending photographs instead of text got the same sentence
+     * back every time until the state expired, while the ordinary case prompt
+     * beside it gives up after three tries and says what to do instead. The
+     * person likeliest to hit it is the one with an emergency and a photograph
+     * of a document.
+     */
+    it('gives up on the priority prompt after three tries, rather than looping', async () => {
+      await verify();
+      await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
+
+      // Two refusals that keep them where they are.
+      expect(firstText(await text('')).toLowerCase()).toContain('did not get any text');
+      expect(firstText(await text('')).toLowerCase()).toContain('did not get any text');
+
+      // The third ends it, says what to do next, and offers the way back.
+      const third = await text('');
+      expect(firstText(third).toLowerCase()).toContain('start again');
+      expect(third.messages[0]?.keyboard).toBeDefined();
+
+      // And the state is gone, so their next message is not swallowed as detail.
+      const states = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM conversation_states WHERE chat_id = ${CHAT}`,
+      );
+      expect(Number(states.rows[0]?.n)).toBe(0);
+    });
+
+    it('still files the case when a teacher gets it right on the second try', async () => {
+      // The counter must not lock somebody out who simply mistyped once.
+      await verify();
+      await tap(encodeCallback(CALLBACK.MENU, MENU_ACTION.URGENT_CASE));
+      await text('');
+
+      const filed = await text(DESCRIPTION);
+
+      expect(firstText(filed).toLowerCase()).toContain('coordinator');
+      const rows = await db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM cases`);
+      expect(Number(rows.rows[0]?.n)).toBe(1);
+    });
+
     it('adds to an existing case rather than opening a second one', async () => {
       // The common path, not an edge case: a priority request has no topic
       // picker, so it files under the same general category as every Contact

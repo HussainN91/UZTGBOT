@@ -369,7 +369,7 @@ async function routeText(
     case 'AwaitingCaseDetail':
       return handleCaseDetail(db, update.chatId, text, state, deps);
     case 'AwaitingUrgentDetail':
-      return handleUrgentDetail(db, update.chatId, text, deps);
+      return handleUrgentDetail(db, update.chatId, text, state, deps);
     case 'AwaitingCaseTopic':
       // They typed instead of tapping. Ask again rather than guessing which
       // category they meant — routing to the wrong queue is worse than a re-tap.
@@ -777,9 +777,38 @@ async function handleUrgentDetail(
   db: Database,
   chatId: string,
   text: string,
+  state: Extract<ConversationState, { kind: 'AwaitingUrgentDetail' }>,
   deps: RouterDeps,
 ): Promise<RouterOutcome> {
   if (text === '') {
+    /**
+     * The counter was stored and never incremented, so this prompt had no end.
+     *
+     * The state has carried an `attempts` field since it was written, and
+     * nothing ever added to it — so a teacher sending photographs instead of
+     * text was held at this prompt for the whole 30-minute life of the state,
+     * being told the same sentence every time, while the ordinary case prompt
+     * beside it gives up after three tries and says so. The person likeliest to
+     * hit this is the one with an emergency and a photograph of a document.
+     *
+     * `retryCaseDetail`'s shape exactly, and deliberately not a shared function:
+     * the two differ in what they say and in what a teacher should do next, and
+     * the counting is three lines. No schema change — the count lives in the
+     * state's JSON payload, which is already typed for it.
+     */
+    const attempts = state.attempts + 1;
+    if (attempts >= MAX_CASE_DETAIL_ATTEMPTS) {
+      await clearState(db, chatId);
+      return only(chatId, {
+        text:
+          'I still have not got any text.\n\n' +
+          'Let us start again — tap Main Menu, then Ask for Priority. If it is easier to ' +
+          `speak to somebody, contact ${deps.supportContact}.`,
+        keyboard: backToMenuKeyboard(),
+      });
+    }
+
+    await saveState(db, chatId, { ...state, attempts });
     return only(chatId, {
       text:
         'I did not get any text. Please describe the problem in one message, and say ' +
