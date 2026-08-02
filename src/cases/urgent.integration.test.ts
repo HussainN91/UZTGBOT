@@ -29,7 +29,7 @@ import { loadState, saveState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { confirmUrgentRequest, pendingUrgentRequests, requestUrgentCase } from './urgent.js';
-import { createCase } from './service.js';
+import { createCase, updateCase } from './service.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
 
@@ -64,6 +64,32 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
       FROM cases WHERE reference = ${reference}
     `);
     return rows.rows[0]!;
+  };
+
+  /** The end date, which a case may only carry once it has actually ended. */
+  const closedAt = async (reference: string): Promise<string | null> => {
+    const rows = await db.execute<{ closed_at: string | null }>(
+      sql`SELECT closed_at FROM cases WHERE reference = ${reference}`,
+    );
+    return rows.rows[0]?.closed_at ?? null;
+  };
+
+  /**
+   * Every open case in the database that is still carrying an end date.
+   *
+   * One query, asked of the whole table rather than of a reference, because the
+   * fault this guards against is not "this function got it wrong" — it is "a
+   * function nobody has written yet learns to write a status and does not learn
+   * to clear the date". Naming the offenders makes the failure readable.
+   */
+  const openCasesWithAnEndDate = async (): Promise<string[]> => {
+    const rows = await db.execute<{ reference: string }>(sql`
+      SELECT reference FROM cases
+      WHERE closed_at IS NOT NULL
+        AND status NOT IN ('Completed', 'Closed', 'Duplicate')
+      ORDER BY reference
+    `);
+    return rows.rows.map((r) => r.reference);
   };
 
   beforeEach(async () => {
@@ -302,6 +328,95 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
       const outcome = await confirmUrgentRequest(db, 'SUPPORT-2026-99999', COORDINATOR);
       expect(outcome.kind).toBe('unknown');
     });
+
+    /**
+     * An ordinary sequence, and the one that destroyed a case.
+     *
+     * A teacher asks for priority. Before anybody decides, a staff member closes
+     * the case. The coordinator then taps the confirm button still sitting in
+     * their chat, because Telegram keeps buttons for ever. The case reopens — and
+     * used to reopen still carrying the end date it was given when it was closed,
+     * which the nightly retention pass reads as "this ended a week ago" and
+     * deletes.
+     */
+    it('clears the end date when confirming reopens a closed case', async () => {
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await updateCase(db, asked.reference, { status: 'Completed' }, COORDINATOR);
+      expect(await closedAt(asked.reference)).not.toBeNull();
+
+      const outcome = await confirmUrgentRequest(db, asked.reference, COORDINATOR);
+
+      expect(outcome.kind).toBe('confirmed');
+      const row = await caseRow(asked.reference);
+      expect(row.status).toBe('Escalated');
+      expect(row.importance).toBe('Urgent');
+      // The case is open again, so it must not still say when it ended.
+      expect(await closedAt(asked.reference)).toBeNull();
+    });
+
+    it('says so when the confirmation reopened a case somebody had closed', async () => {
+      // A case reopening without the person who closed it being able to tell is
+      // the kind of quiet change this project does not make. The coordinator is
+      // the one who caused it, so the coordinator is the one told.
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await updateCase(db, asked.reference, { status: 'Completed' }, COORDINATOR);
+
+      const reopened = await confirmUrgentRequest(db, asked.reference, COORDINATOR);
+      expect(reopened.kind === 'confirmed' && reopened.reopened).toBe(true);
+    });
+
+    it('says nothing about reopening when the case was open all along', async () => {
+      // The common path. A sentence that appears on every confirmation is a
+      // sentence nobody reads by the third one.
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+
+      const outcome = await confirmUrgentRequest(db, asked.reference, COORDINATOR);
+      expect(outcome.kind === 'confirmed' && outcome.reopened).toBe(false);
+    });
+
+    it('restarts the teacher’s chase clock, exactly as any other status move does', async () => {
+      // `updateCase` resets these on every status change and explains at length
+      // why the reset belongs at the write rather than at the caller. This is a
+      // second writer of the status, so it owes the same reset.
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await db.execute(sql`
+        UPDATE cases SET teacher_chased_at = now(), teacher_chase_count = 2
+        WHERE reference = ${asked.reference}
+      `);
+
+      await confirmUrgentRequest(db, asked.reference, COORDINATOR);
+
+      const rows = await db.execute<{ chased_at: string | null; chase_count: number }>(sql`
+        SELECT teacher_chased_at AS chased_at, teacher_chase_count AS chase_count
+        FROM cases WHERE reference = ${asked.reference}
+      `);
+      expect(rows.rows[0]?.chased_at).toBeNull();
+      expect(rows.rows[0]?.chase_count).toBe(0);
+    });
+  });
+
+  /**
+   * The invariant itself, asserted rather than inferred.
+   *
+   * The fix above corrects one function. This asserts the property that function
+   * broke — *a case carries an end date if and only if it has ended* — so the
+   * next function that learns to write a status is caught by a failing test
+   * rather than by a teacher's case disappearing.
+   */
+  describe('the end-date invariant', () => {
+    it('holds after a case is closed, reopened by confirmation, and closed again', async () => {
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+
+      await updateCase(db, asked.reference, { status: 'Completed' }, COORDINATOR);
+      expect(await openCasesWithAnEndDate()).toEqual([]);
+
+      await confirmUrgentRequest(db, asked.reference, COORDINATOR);
+      expect(await openCasesWithAnEndDate()).toEqual([]);
+
+      await updateCase(db, asked.reference, { status: 'Closed' }, COORDINATOR);
+      expect(await openCasesWithAnEndDate()).toEqual([]);
+      expect(await closedAt(asked.reference)).not.toBeNull();
+    });
   });
 
   describe('what is still waiting', () => {
@@ -326,6 +441,34 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
 
       // `/mark` does not stamp a request, so there is no decision outstanding.
       expect(await pendingUrgentRequests(db, 20)).toHaveLength(0);
+    });
+
+    /**
+     * A request on a case somebody closed without deciding.
+     *
+     * It is **not** filtered out. Silently dropping a teacher's unanswered request
+     * because a staff member closed the case is worse than showing it — the
+     * teacher asked and nobody ever answered, and that is precisely what a
+     * supervision list is for. What it must not do is sit there looking like work
+     * that is still waiting, so the status comes with it and the reader can tell
+     * the difference at a glance.
+     */
+    it('still shows a request on a case that was closed, and says it is closed', async () => {
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await updateCase(db, asked.reference, { status: 'Completed' }, COORDINATOR);
+
+      const waiting = await pendingUrgentRequests(db, 20);
+
+      expect(waiting).toHaveLength(1);
+      expect(waiting[0]?.status).toBe('Completed');
+    });
+
+    it('reports the status of an ordinary waiting request too', async () => {
+      const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+
+      const waiting = await pendingUrgentRequests(db, 20);
+      expect(waiting[0]?.reference).toBe(asked.reference);
+      expect(waiting[0]?.status).toBe('New');
     });
   });
 

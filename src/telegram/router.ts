@@ -1165,7 +1165,21 @@ async function confirmUrgent(
         text:
           `⏫ ${outcome.reference} is now urgent.\n\n` +
           'It has moved to Escalated and appears in /urgent. The teacher has been told, ' +
-          `${outcome.owner === null ? 'and it still has no owner — /assign it.' : 'and so has its owner.'}`,
+          `${outcome.owner === null ? 'and it still has no owner — /assign it.' : 'and so has its owner.'}` +
+          /**
+           * Only when it applies, and it rarely will.
+           *
+           * The button lives in a coordinator's chat for ever, so this tap can
+           * land long after somebody else closed the case. Confirming still
+           * works — the teacher's request was never answered and closing the
+           * case did not answer it — but the coordinator has just undone another
+           * person's deliberate close, and being told is the difference between
+           * that and it happening quietly.
+           */
+          (outcome.reopened
+            ? '\n\nThis case had been closed, and confirming has opened it again. ' +
+              'If that was not what you wanted, /status it back.'
+            : ''),
       },
       {
         chatId: outcome.teacherChatId,

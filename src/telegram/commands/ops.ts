@@ -12,6 +12,7 @@
  * table exists to answer.
  */
 import { STAFF_CASE_LIST_CAP, TIMEZONE } from '../../config/constants.js';
+import { isClosedStatus } from '../../cases/status.js';
 import { pendingUrgentRequests } from '../../cases/urgent.js';
 import { retentionParagraph } from '../../config/privacy.js';
 import {
@@ -183,15 +184,36 @@ export const urgentPending: StaffCommand = {
       );
     }
 
+    /**
+     * A request whose case somebody has since closed.
+     *
+     * It is still listed — closing a case does not answer the teacher who asked
+     * for priority, and this list exists precisely so an unanswered request
+     * cannot disappear. But it is not work waiting on a decision in the way the
+     * others are, and a supervisor scanning the list has to be able to tell
+     * without opening each one. So the status rides along on every row, and the
+     * closed ones get a line of their own explaining what they are.
+     */
+    const closed = waiting.filter((r) => isClosedStatus(r.status));
+
     return reply(
       ctx.member.telegramId,
       [
         `⏫ ${waiting.length} priority request(s) waiting for a decision`,
         '',
-        ...waiting.map((r) => `${r.reference} — asked ${r.requestedAt} (${TIMEZONE})`),
+        ...waiting.map((r) => `${r.reference} — ${r.status} — asked ${r.requestedAt} (${TIMEZONE})`),
         '',
         'Nothing escalates these on its own, by design. Open one to read it, then',
         'confirm it with the button on the message you were sent.',
+        ...(closed.length > 0
+          ? [
+              '',
+              `${closed.length} of these sit on a case that has since been closed. The teacher`,
+              'asked and nobody ever answered, so they stay here — confirming one reopens',
+              'the case, and closing the request instead means marking the case urgent or',
+              'telling the teacher why not.',
+            ]
+          : []),
         '',
         '/case <reference> — read it, including what the teacher wrote',
       ].join('\n'),

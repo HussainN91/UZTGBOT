@@ -245,6 +245,45 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
     it('is not available to an Observer', async () => {
       expect(await run('/urgent_pending', OBSERVER)).toMatch(/rank/i);
     });
+
+    it('shows the status of each case beside the request', async () => {
+      // `Received`, not `New` — the case reached its queue when it was filed.
+      await askForPriority();
+      const rows = await db.execute<{ reference: string }>(sql`SELECT reference FROM cases`);
+
+      const body = await run('/urgent_pending', SUPPORT_MEMBER);
+
+      expect(body).toContain(`${rows.rows[0]?.reference} — Received — asked `);
+    });
+
+    /**
+     * The request that used to sit here for ever with nothing marking it out.
+     *
+     * The query asks whether a request was made and not decided, and closing a
+     * case does neither of those things — so the row stayed, correctly, and
+     * looked exactly like the ones still waiting on somebody. A supervision list
+     * where the permanent entries are indistinguishable from the live ones is a
+     * list people stop reading.
+     */
+    it('keeps a request whose case was closed, and marks it as closed', async () => {
+      await askForPriority();
+      const rows = await db.execute<{ reference: string }>(sql`SELECT reference FROM cases`);
+      await db.execute(
+        sql`UPDATE cases SET status = 'Completed', closed_at = now() WHERE reference = ${rows.rows[0]!.reference}`,
+      );
+
+      const body = await run('/urgent_pending', SUPPORT_MEMBER);
+
+      expect(body).toContain(rows.rows[0]?.reference);
+      expect(body).toContain('Completed');
+      expect(body).toMatch(/since been closed/i);
+    });
+
+    it('says nothing about closed cases when there are none', async () => {
+      await askForPriority();
+
+      expect(await run('/urgent_pending', SUPPORT_MEMBER)).not.toMatch(/since been closed/i);
+    });
   });
 
   /**
@@ -285,6 +324,47 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
       expect(outcome.messages[0]?.chatId).toBe(SUPPORT_MEMBER);
       const toTeacher = outcome.messages.find((m) => m.chatId === TEACHER);
       expect(toTeacher?.text.toLowerCase()).toContain('marked urgent');
+    });
+
+    /**
+     * The tap that arrives after somebody closed the case.
+     *
+     * Telegram keeps the button in the coordinator's chat for ever, so this is an
+     * ordinary sequence rather than an exotic one. Two things have to be true
+     * afterwards: the case is genuinely open again — no leftover end date for the
+     * nightly retention pass to read as "this ended a week ago" — and the
+     * coordinator is told that their tap undid somebody else's close.
+     */
+    it('tells the tapper when confirming has reopened a closed case', async () => {
+      const reference = await askForPriority();
+      await db.execute(
+        sql`UPDATE cases SET status = 'Completed', closed_at = now() WHERE reference = ${reference}`,
+      );
+
+      const outcome = await send({
+        chatId: SUPPORT_MEMBER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+      });
+
+      expect(outcome.messages[0]?.text ?? '').toMatch(/had been closed/i);
+
+      const rows = await db.execute<{ closed_at: string | null }>(
+        sql`SELECT closed_at FROM cases WHERE reference = ${reference}`,
+      );
+      expect(rows.rows[0]?.closed_at).toBeNull();
+    });
+
+    it('says nothing about reopening on an ordinary confirmation', async () => {
+      const reference = await askForPriority();
+
+      const outcome = await send({
+        chatId: SUPPORT_MEMBER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+      });
+
+      expect(outcome.messages[0]?.text ?? '').not.toMatch(/had been closed/i);
     });
 
     it('says nothing useful to a chat with no staff row', async () => {

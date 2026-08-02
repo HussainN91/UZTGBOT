@@ -41,6 +41,7 @@
 import { sql } from 'drizzle-orm';
 import { TIMEZONE, URGENT_CASE_CATEGORY } from '../config/constants.js';
 import type { Database } from '../db/index.js';
+import type { CaseStatus } from '../db/schema.js';
 import { recordAudit } from '../log/audit.js';
 import { createCase } from './service.js';
 
@@ -195,6 +196,16 @@ export type UrgentConfirmation =
       readonly teacherChatId: string;
       /** The case's owner at the moment of confirmation, or null if unassigned. */
       readonly owner: string | null;
+      /**
+       * The case had been closed, and confirming has opened it again.
+       *
+       * Telegram keeps a button in a chat for ever, so a coordinator can tap
+       * confirm long after somebody else closed the case. The tap is honoured —
+       * a teacher's unanswered request outlives a close — but the coordinator is
+       * told, because reopening somebody else's deliberate close is not a thing
+       * that should happen quietly.
+       */
+      readonly reopened: boolean;
     }
   /** No such case. A button from a build that no longer exists, or a purged case. */
   | { readonly kind: 'unknown' }
@@ -220,6 +231,21 @@ export type UrgentConfirmation =
  * a `where` to it would hand every caller a way to write a status that depends
  * on the current one — the argument `markCaseReceived` records.
  *
+ * **This is the second writer of `status`, so it owes everything the first one
+ * does.** `updateCase` carries a long note explaining that it clears `closed_at`
+ * and restarts the teacher's chase clock on *any* status move, and that putting
+ * that logic in the individual commands instead "is exactly how a reopened case
+ * kept a stale `closed_at` for three stages". This function gained a conditional
+ * write and lost that invariant with it: a case closed while its request was
+ * still undecided came back to `Escalated` still carrying the date it ended, and
+ * the nightly retention pass — which reads `closed_at` and never `status`, on
+ * purpose — deleted it a week later.
+ *
+ * The three fields below are therefore not a nicety. They are the same three
+ * `updateCase` writes, in the same statement as the status, because a status
+ * written anywhere else in this codebase is written by a function that keeps
+ * them together.
+ *
  * The audit row is written in the same transaction as the change, never after.
  */
 export async function confirmUrgentRequest(
@@ -227,22 +253,45 @@ export async function confirmUrgentRequest(
   reference: string,
   actor: string,
 ): Promise<UrgentConfirmation> {
+  /**
+   * `before` is the same trick `requestUrgentCase` uses, for the same reason.
+   *
+   * `RETURNING` yields the row *after* the write, and the write sets `closed_at`
+   * to null — so `closed_at IS NOT NULL` in that clause would be false every
+   * time and "did this reopen a closed case?" would answer itself wrongly on
+   * every call. A sub-query in `FROM` is evaluated against the pre-update
+   * snapshot, which is the only way to see the old value in one statement.
+   *
+   * It cannot change which rows are updated: it selects on the same reference,
+   * so it yields exactly the row being written, or nothing at all for a
+   * reference that does not exist — in which case the `WHERE` would have matched
+   * nothing anyway.
+   */
   const updated = await db.execute<{
     reference: string;
     teacher_chat_id: string;
     owner: string | null;
+    reopened: boolean;
   }>(sql`
     UPDATE cases
     SET importance = GREATEST(importance, 'Urgent'::case_importance),
         status = 'Escalated',
+        closed_at = NULL,
+        teacher_chased_at = NULL,
+        teacher_chase_count = 0,
         urgent_confirmed_by = ${actor},
         urgent_confirmed_at = now(),
         updated_at = now(),
         last_actor = ${actor}
-    WHERE reference = ${reference}
-      AND urgent_requested_at IS NOT NULL
-      AND urgent_confirmed_at IS NULL
-    RETURNING reference, teacher_chat_id, owner
+    FROM (
+      SELECT closed_at AS was_closed_at
+      FROM cases WHERE reference = ${reference}
+    ) AS before
+    WHERE cases.reference = ${reference}
+      AND cases.urgent_requested_at IS NOT NULL
+      AND cases.urgent_confirmed_at IS NULL
+    RETURNING cases.reference, cases.teacher_chat_id, cases.owner,
+              (before.was_closed_at IS NOT NULL) AS reopened
   `);
 
   const row = updated.rows[0];
@@ -257,6 +306,7 @@ export async function confirmUrgentRequest(
       reference: row.reference,
       teacherChatId: row.teacher_chat_id,
       owner: row.owner,
+      reopened: row.reopened,
     };
   }
 
@@ -298,6 +348,13 @@ export interface PendingUrgentRequest {
    * only looks like one.
    */
   readonly requestedAt: string;
+  /**
+   * The case's status right now, which is not always one that is still open.
+   *
+   * A case can be closed while its request is still undecided, and that request
+   * stays on this list — see the note on the query below.
+   */
+  readonly status: CaseStatus;
 }
 
 /**
@@ -309,6 +366,14 @@ export interface PendingUrgentRequest {
  * what was chosen instead, so this is the query behind it, and a request that
  * nobody answers has to be findable or the accepted risk is not a risk anybody
  * can see.
+ *
+ * **A request on a closed case is shown, not filtered out.** The two conditions
+ * here are about the *request* — asked, and not decided — and a staff member
+ * closing the case does not decide it. Dropping the row would mean a teacher
+ * asked for priority, nobody ever answered, and the list whose entire job is to
+ * make that visible had quietly stopped mentioning it. What the row must not do
+ * is look like work still waiting, which is what `status` is for: it comes back
+ * with every row so the reader can tell in one glance which of these are live.
  */
 export async function pendingUrgentRequests(
   db: Database,
@@ -318,8 +383,10 @@ export async function pendingUrgentRequests(
     reference: string;
     teacher_chat_id: string;
     requested_at: string;
+    /** The column is the `case_status` enum, so this is one of the eight. */
+    status: CaseStatus;
   }>(sql`
-    SELECT reference, teacher_chat_id,
+    SELECT reference, teacher_chat_id, status,
            to_char(urgent_requested_at AT TIME ZONE ${TIMEZONE}, 'DD Mon YYYY, HH24:MI') AS requested_at
     FROM cases
     WHERE urgent_requested_at IS NOT NULL AND urgent_confirmed_at IS NULL
@@ -331,5 +398,6 @@ export async function pendingUrgentRequests(
     reference: r.reference,
     teacherChatId: r.teacher_chat_id,
     requestedAt: r.requested_at,
+    status: r.status,
   }));
 }
