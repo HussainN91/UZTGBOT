@@ -380,15 +380,46 @@ export async function resolveDispute(
      * Written out rather than derived from the actor, because the reason it is
      * System is the *action*, not who happens to be performing it.
      */
-    const open = await listCases(db, SYSTEM_SCOPE, { teacherChatId: chatId });
-    for (const found of open.cases) {
-      await updateCase(
-        db,
-        found.reference,
-        { status: 'Closed', publicUpdate: request.closingNote },
-        request.actor,
-      );
-      closedCases.push(found.reference);
+    /**
+     * A loop, because `listCases` is a staff *display* query and stops at
+     * `STAFF_CASE_LIST_CAP`.
+     *
+     * It reports the true total in a field this caller was ignoring, so an
+     * account with twenty-five open cases had twenty closed and five left open —
+     * belonging to an account the Ministry had just judged is not the teacher's,
+     * with nothing anywhere reporting the gap. The cap is right for a list a
+     * person reads and wrong for a list a machine acts on.
+     *
+     * Raising the cap would be the wrong fix twice over: it is correct for every
+     * other caller, and any number chosen is a number some account will one day
+     * exceed. Looping has no ceiling and adds no function to `queries.ts`.
+     *
+     * **It terminates because each pass closes what it read**, so the next pass
+     * asks for open cases and gets fewer. The `progressed` guard is what makes
+     * that a guarantee rather than an argument: if a pass closes nothing at all —
+     * a case deleted between the read and the write, or any future reason
+     * `updateCase` declines — the loop stops instead of asking the same question
+     * for ever.
+     */
+    for (;;) {
+      const open = await listCases(db, SYSTEM_SCOPE, { teacherChatId: chatId });
+      if (open.cases.length === 0) break;
+
+      let progressed = false;
+      for (const found of open.cases) {
+        const closed = await updateCase(
+          db,
+          found.reference,
+          { status: 'Closed', publicUpdate: request.closingNote },
+          request.actor,
+        );
+        if (closed) {
+          closedCases.push(found.reference);
+          progressed = true;
+        }
+      }
+
+      if (!progressed) break;
     }
   }
 

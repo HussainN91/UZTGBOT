@@ -320,6 +320,68 @@ describe.skipIf(!TEST_DATABASE_URL)('identity disputes', () => {
     expect(winning.rows.every((r) => r.status !== 'Closed')).toBe(true);
   });
 
+  /**
+   * The losing account with more open cases than a staff list will show.
+   *
+   * `listCases` is a display query and stops at `STAFF_CASE_LIST_CAP`, reporting
+   * the true total in a field this caller ignored. So a settlement closed at most
+   * twenty, and the rest stayed open on an account the Ministry had just judged
+   * is not the teacher's — with nothing anywhere saying so. The number reported
+   * back to the person who settled it was the number that got closed, so it
+   * looked complete.
+   *
+   * Twenty-five rather than twenty-one, so that it also proves the loop runs more
+   * than the once a fence-post fix would give it.
+   */
+  it('closes every case the losing account has, not the first twenty', async () => {
+    await signIn(CHAT_A);
+    await signIn(CHAT_B);
+
+    const TOTAL = 25;
+    for (let i = 1; i <= TOTAL; i += 1) {
+      await db.execute(sql`
+        INSERT INTO cases (reference, category, teacher_chat_id, status, detail)
+        VALUES (
+          ${`VISA-2026-${String(i).padStart(5, '0')}`},
+          ${CASE_CATEGORY.VISA},
+          ${CHAT_B},
+          'New',
+          'an open case'
+        )
+      `);
+    }
+
+    const { disputeId } = await openDispute(db, {
+      identifier: IDENT,
+      chatId: CHAT_A,
+      otherChatIds: [],
+    });
+    await openDispute(db, { identifier: IDENT, chatId: CHAT_B, otherChatIds: [CHAT_A] });
+
+    const outcome = await resolveDispute(db, {
+      disputeId,
+      keptChatId: CHAT_A,
+      actor: SYSTEM_STAFF,
+      outcome: 'telephoned the school',
+      closingNote: NOTE,
+    });
+
+    // Nothing is left open on the losing account.
+    const stillOpen = await db.execute<{ n: string }>(sql`
+      SELECT count(*) AS n FROM cases
+      WHERE teacher_chat_id = ${CHAT_B} AND status NOT IN ('Completed', 'Closed', 'Duplicate')
+    `);
+    expect(Number(stillOpen.rows[0]?.n)).toBe(0);
+
+    /**
+     * And the count handed back is the real one. `settleAndAnnounce` prints this
+     * to the System member who settled it, so a number that silently stopped at
+     * the cap is a number that reads as "done".
+     */
+    expect(outcome.kind === 'resolved' && outcome.closedCases).toHaveLength(TOTAL);
+    expect(outcome.kind === 'resolved' && new Set(outcome.closedCases).size).toBe(TOTAL);
+  });
+
   it('stamps closed_at on the cases it closes, so retention can find them', async () => {
     // Retention measures from `closed_at`, and a hand-written UPDATE here would
     // strand it — which is why this goes through `updateCase` rather than SQL.
