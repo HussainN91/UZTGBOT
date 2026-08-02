@@ -269,14 +269,50 @@ export function createBot(): Bot {
         { getChat: (handle: string) => ctx.api.getChat(handle) },
       );
     } catch (err) {
-      let released = false;
+      /**
+       * Three outcomes, and they are three different sentences to an operator.
+       *
+       * **`false` does not mean the release failed.** `claimUpdate` is a single
+       * committed statement at the top of `processUpdate`, so a throw at or
+       * before it — a database outage, which is the commonest reason this whole
+       * branch runs — leaves no claim row at all. Deleting nothing then returns
+       * `false`, and Telegram's retry is accepted normally because nothing is
+       * standing in its way.
+       *
+       * Reading that as "the release failed, the message is lost" would raise a
+       * critical alarm about permanent data loss for every single update during
+       * an outage, when in fact none of them is lost. An alarm that cries wolf
+       * on the worst night is worse than no alarm, because it is the night
+       * somebody stops reading them.
+       *
+       * The only case where this system genuinely cannot tell is a release that
+       * **throws**, and that one says so rather than guessing.
+       */
+      let claim: 'released' | 'nothingToRelease' | 'unknown';
       try {
-        released = await releaseUpdate(getDb(), updateId);
+        claim = (await releaseUpdate(getDb(), updateId)) ? 'released' : 'nothingToRelease';
       } catch (releaseErr) {
+        claim = 'unknown';
         log.error({ err: releaseErr, updateId }, 'could not release a failed update claim');
       }
 
-      log.error({ err, updateId, released }, 'handling an update failed');
+      const WHAT_IT_MEANS = {
+        released:
+          'The claim on this update was released, so Telegram will retry it and it may\n'
+          + 'yet succeed on its own. If the same update id appears here again and again,\n'
+          + 'it will not, and somebody has to look at what this person was trying to do.',
+        nothingToRelease:
+          'Nothing had claimed this update yet, so Telegram’s retry will be accepted\n'
+          + 'normally and no message has been lost. This usually means the failure came\n'
+          + 'before any work started — most often the database being unreachable.',
+        unknown:
+          'Whether this update is still claimed could NOT be determined, because giving\n'
+          + 'the claim back failed as well. If it is still claimed, Telegram’s retry will\n'
+          + 'be discarded and this message is lost — somebody has to find out what this\n'
+          + 'person was trying to say and ask them to send it again.',
+      } as const;
+
+      log.error({ err, updateId, claim }, 'handling an update failed');
       await alerter.send({
         severity: 'critical',
         title: 'A message could not be handled',
@@ -284,13 +320,7 @@ export function createBot(): Bot {
           `Chat: ${update.chatId}`,
           `Update: ${updateId}`,
           '',
-          released
-            ? 'The claim on this update was released, so Telegram will retry it and it may\n'
-              + 'yet succeed on its own. If the same update id appears here again and again,\n'
-              + 'it will not, and somebody has to look at what this person was trying to do.'
-            : 'The claim on this update could NOT be released, so Telegram’s retry will be\n'
-              + 'discarded as a duplicate and this message is lost. Somebody has to find out\n'
-              + 'what this person was trying to say and ask them to send it again.',
+          WHAT_IT_MEANS[claim],
           '',
           `Reason: ${err instanceof Error ? err.message : String(err)}`,
         ].join('\n'),

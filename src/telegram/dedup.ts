@@ -47,6 +47,13 @@ export async function claimUpdate(db: Database, updateId: number | string): Prom
  * breaks, and where every other failure raises an alarm somebody receives, that
  * was the gap. Called from `run()` in `bot.ts`, which raises the alarm too.
  *
+ * **Returns whether a claim was actually standing, and the caller depends on the
+ * distinction.** `false` means there was nothing to release — which is the
+ * ordinary answer when the work threw at `claimUpdate` itself, before any row
+ * was committed, as it does whenever the database is unreachable. That is not a
+ * failure: nothing is claimed, so Telegram's retry is accepted normally. Only a
+ * call that *throws* leaves the question genuinely unanswered.
+ *
  * **The residual risk, stated rather than hidden.** If the throw happened during
  * the commit itself, the work may or may not have landed, and releasing the
  * claim lets the retry do it again. The 24-hour duplicate window in `createCase`

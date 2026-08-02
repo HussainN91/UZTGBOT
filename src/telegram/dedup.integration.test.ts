@@ -83,10 +83,18 @@ describe.skipIf(!TEST_DATABASE_URL)('update deduplication', () => {
       await expect(claimUpdate(db, 4242)).resolves.toBe(true);
     });
 
-    it('reports whether there was anything to release', async () => {
-      // The caller alerts differently on the two answers: a released claim will
-      // be retried by Telegram, and an unreleased one means the message is lost
-      // and needs a person.
+    it('reports false when there was no claim to release', async () => {
+      /**
+       * `false` means "nothing had claimed this", **not** "the release failed" —
+       * and `run()` in `bot.ts` words its alarm on exactly that distinction.
+       *
+       * The commonest reason the work throws is the database being unreachable,
+       * and that throws at `claimUpdate` itself, before any row is committed. So
+       * there is nothing to delete, this returns false, and Telegram's retry is
+       * accepted normally because nothing is standing in its way. Reading false
+       * as a failed release would raise a critical "message lost" alarm for
+       * every update during an outage, when none of them is lost.
+       */
       await expect(releaseUpdate(db, 4243)).resolves.toBe(false);
     });
 
