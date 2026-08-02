@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "lint": "oxlint --type-aware src",
+    "lint": "oxlint --type-aware --deny-warnings src",
     "knip": "node --max-old-space-size=4096 node_modules/knip/bin/knip.js",
     "knip:prod": "node --max-old-space-size=4096 node_modules/knip/bin/knip.js --production",
     "deps": "node scripts/dependency-tree.mjs > docs/dependency-tree.md",
