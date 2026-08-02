@@ -341,8 +341,20 @@ export async function notifyDisputeWithSystem(
     },
   ]);
 
+  /**
+   * Capped, like every other fan-out in the bot. This was the only one that was
+   * not.
+   *
+   * Small today, because System is a rank two people hold — but the cap is not
+   * about today's numbers. It is one send per recipient in a single outcome, and
+   * `deliver` sends them one after another before answering anything else, so an
+   * uncapped list is a length nobody has bounded sitting in the path of every
+   * other message. The sibling at line 211 already slices; so does every fan-out
+   * in `cases/notify.ts`. A rule with one exception is a rule that gets copied
+   * without the exception.
+   */
   return {
-    messages: recipients.chatIds.map((chatId) => ({
+    messages: recipients.chatIds.slice(0, NEW_CASE_NOTIFY_CAP).map((chatId) => ({
       chatId,
       text,
       purpose: 'an identity dispute awaiting a decision',

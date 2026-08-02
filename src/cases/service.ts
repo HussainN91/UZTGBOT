@@ -298,7 +298,19 @@ export async function updateCase(
       updatedAt: sql`now()`,
       lastActor: actor,
     })
-    .where(eq(cases.reference, reference))
+    /**
+     * Tidied like every sibling. This was the one case-writing function that
+     * took the reference exactly as given.
+     *
+     * `markImportance`, `setDue`, `setSnooze`, `clearSnooze` and `findCase` all
+     * trim and upper-case; this did not. Harmless today, because every caller
+     * resolves through `findCase` first and hands on the reference the database
+     * returned — but this is the function whose own comment warns callers to be
+     * careful with it, and "the strict one is the one with the warning on it" is
+     * a rule that lasts exactly until somebody reads five siblings and assumes
+     * the sixth behaves the same.
+     */
+    .where(eq(cases.reference, reference.trim().toUpperCase()))
     .returning({ reference: cases.reference });
 
   return result.length > 0;
