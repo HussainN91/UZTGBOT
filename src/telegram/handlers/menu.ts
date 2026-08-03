@@ -100,11 +100,28 @@ export function regionCheckReply(region: string): Reply {
  */
 export function signInPromptReply(supportContact: string, periods: RetentionPeriods): Reply {
   return {
+    /**
+     * The instruction first, the notice under it — reordered and reworded on
+     * 3 August 2026, and both halves were faults rather than preferences.
+     *
+     * *"Reply with the email address"* reads as a Telegram reply, which is a
+     * real thing a teacher can do and a wrong one: a reply to a message is not
+     * how this is read. It says enter now.
+     *
+     * And it sat **after** the whole privacy notice, which is the longest
+     * message this bot sends. A teacher who scrolled to the bottom to find out
+     * what to do had to read a page of legal text to find one sentence.
+     *
+     * The notice is still in the same message, so the property the old ordering
+     * was chosen for is kept rather than traded away: sending the address is the
+     * acknowledgement, and the two cannot be separated by somebody who scrolled
+     * past.
+     */
     text:
-      `${privacyNotice(supportContact, periods)}\n\n` +
+      'Enter your email address. Use the one you were recruited with.\n\n' +
+      'Sending it means you have read the privacy notice below.\n\n' +
       '— — —\n\n' +
-      'To continue, please reply with the email address you were recruited with. ' +
-      'Replying means you have read the notice above.',
+      privacyNotice(supportContact, periods),
   };
 }
 

@@ -145,7 +145,15 @@ describe.skipIf(!TEST_DATABASE_URL)('the re-consent gate', () => {
        */
       const body = await menu(MENU_ACTION.CONTACT_SUPPORT, STRANGER);
 
-      expect(body).toContain('email address you were recruited with');
+      /**
+       * Matched on the instruction rather than on the sentence that used to
+       * carry it. The prompt was reworded on 3 August 2026 — it asked them to
+       * "reply with the email address you were recruited with" and now says
+       * "Enter your email address" — and what this test is actually proving is
+       * that they were handed the sign-in prompt rather than a second notice, so
+       * it should match the line that only the prompt has.
+       */
+      expect(body).toContain('Enter your email address');
       expect(await stateOf(STRANGER)).toBe('AwaitingIdentifier');
     });
 

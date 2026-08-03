@@ -264,7 +264,13 @@ describe.skipIf(!TEST_DATABASE_URL)('the manager a teacher is shown', () => {
       const body = await asks(STRANGER);
 
       expect(body).toContain(SUPPORT);
-      expect(body).not.toContain('email address you were recruited with');
+      /**
+       * Matched on the prompt's current instruction. This asserted the sentence
+       * the prompt used before it was reworded on 3 August 2026, and a negative
+       * assertion against wording that no longer exists anywhere passes for the
+       * wrong reason — it would go on passing if this chat *were* gated.
+       */
+      expect(body).not.toContain('Enter your email address');
     });
   });
 
