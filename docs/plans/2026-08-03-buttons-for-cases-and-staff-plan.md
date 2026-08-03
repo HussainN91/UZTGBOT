@@ -1793,7 +1793,27 @@ git add src/telegram/commands/case-menu.ts src/telegram/commands/case-menu.test.
 - Modify: `src/telegram/router.ts`
 - Test: `src/telegram/commands/staff.integration.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Measure the new prefix, asserting the value**
+
+Add to `src/telegram/callback-data.test.ts`:
+
+```typescript
+describe('the staff add prefix', () => {
+  /**
+   * The payload it built, not merely its length — the lesson of commit
+   * `417f821`. `vitest` transpiles rather than type-checks, so a `CALLBACK`
+   * member that does not exist is `undefined` at runtime, `encodeCallback`
+   * stringifies it, and a length-only assertion passes over nothing at all.
+   */
+  it('builds the longest add payload, inside the limit', () => {
+    const data = encodeCallback(CALLBACK.STAFF_ADD, '9999999999', 'System', 'Accommodation');
+    expect(data).toBe('SA:9999999999:System:Accommodation');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+});
+```
+
+- [ ] **Step 2: Write the failing flow test**
 
 Add to `src/telegram/commands/staff.integration.test.ts`:
 
@@ -1853,7 +1873,7 @@ describe('adding somebody by button', () => {
 Read this file's `beforeEach` and replace `SYSTEM_MEMBER` and `SUPPORT_MEMBER` with the constants it
 actually seeds.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 3: Run it and watch it fail**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/telegram/commands/staff.integration.test.ts -t "adding somebody by button"
@@ -1861,7 +1881,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 
 Expected: FAIL — `CALLBACK.STAFF_ADD` is undefined.
 
-- [ ] **Step 3: Add the prefix**
+- [ ] **Step 4: Add the prefix**
 
 In `src/telegram/callback-data.ts`, after `STAFF_MENU: 'SM'`:
 
@@ -1888,7 +1908,7 @@ In `src/telegram/callback-data.ts`, after `STAFF_MENU: 'SM'`:
   STAFF_ADD: 'SA',
 ```
 
-- [ ] **Step 4: Add the button and the flow**
+- [ ] **Step 5: Add the button and the flow**
 
 In `src/telegram/commands/staff.ts`, in `staffMenuList`, change the keyboard argument from
 `staffListKeyboard(everybody)` to `[...staffListKeyboard(everybody), [addSomebodyButton]]`, and add:
@@ -1980,7 +2000,7 @@ function addChoiceKeyboard(
 }
 ```
 
-- [ ] **Step 5: Route it**
+- [ ] **Step 6: Route it**
 
 In `src/telegram/commands/index.ts`, append:
 
@@ -2099,7 +2119,7 @@ export async function routeStaffWriting(
 
 `routeStaffAdd` is declared above this in the same file, so the call needs no import.
 
-- [ ] **Step 6: Wire the router**
+- [ ] **Step 7: Wire the router**
 
 In `src/telegram/router.ts`, add after the `case CALLBACK.STAFF_MENU:` arm:
 
@@ -2113,7 +2133,7 @@ In `src/telegram/router.ts`, add after the `case CALLBACK.STAFF_MENU:` arm:
 
 Add `routeStaffAdd` to the `./commands/index.js` import list.
 
-- [ ] **Step 7: Run it and watch it pass**
+- [ ] **Step 8: Run it and watch it pass**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/telegram/commands/staff.integration.test.ts
@@ -2121,7 +2141,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 
 Expected: PASS, 0 failed, the whole file.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/telegram/callback-data.ts src/telegram/commands/staff.ts src/telegram/commands/index.ts src/telegram/router.ts src/telegram/commands/staff.integration.test.ts && git commit -m "feat: adding somebody to staff is now a chat id and two taps"
