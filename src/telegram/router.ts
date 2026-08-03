@@ -72,6 +72,7 @@ import {
   routeCaseMenu,
   routeStaffCommand,
   routeStaffMenu,
+  routeStaffWriting,
   staffHelpSection,
 } from './commands/index.js';
 import { reply, scopeOf } from './commands/context.js';
@@ -361,6 +362,18 @@ async function routeText(
    * message was. Without it, refusing a command is a second route by which a
    * teacher's case detail reaches the interaction log.
    */
+  /**
+   * A staff member who was asked for words — the one place a staff path runs
+   * ahead of the command dispatcher.
+   *
+   * Guarded twice over: it fires only for `AwaitingCaseText`, which no teacher
+   * can ever be in, and `routeStaffWriting` returns null for a chat with no
+   * active staff row. So the teacher state machine below is untouched and its
+   * order is unchanged.
+   */
+  const writing = await routeStaffWriting(db, update.chatId, text, state, deps);
+  if (writing !== null) return writing;
+
   const staffOutcome = await routeStaffCommand(db, update.chatId, text, state, deps);
   if (staffOutcome !== null) return staffOutcome;
 

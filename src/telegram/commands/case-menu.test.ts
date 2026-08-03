@@ -90,4 +90,13 @@ describe('which buttons suit the case as it stands', () => {
   it('offers importance on a finished case', () => {
     expect(payloads(member({ role: 'Program' }), openCase({ status: 'Completed' }))).toContain('M');
   });
+
+  it('offers a note on a finished case and a reply only on an open one', () => {
+    const open = payloads(member({ role: 'Support' }), openCase({ status: 'Under review' }));
+    const done = payloads(member({ role: 'Support' }), openCase({ status: 'Completed' }));
+    expect(open).toContain('REP');
+    expect(done).not.toContain('REP');
+    expect(open).toContain('N');
+    expect(done).toContain('N');
+  });
 });

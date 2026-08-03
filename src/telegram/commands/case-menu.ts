@@ -48,6 +48,11 @@ export const CASE_ACTION = {
   OWNER: 'OWN',
   IMPORTANCE: 'M',
   SNOOZE: 'SN',
+  REPLY: 'REP',
+  AWAIT: 'AWT',
+  NOTE: 'N',
+  DUE: 'D',
+  CLOSE: 'C',
 } as const;
 
 const forCase = (reference: string, action: string): string =>
@@ -103,7 +108,20 @@ export function caseActionKeyboard(row: StaffCaseRow, member: StaffRecord): Inli
   }
 
   if (mayUpdate && open) {
+    rows.push([{ text: '💬 Reply to teacher', callback_data: forCase(row.reference, CASE_ACTION.REPLY) }]);
+    rows.push([{ text: '📥 Ask them for something', callback_data: forCase(row.reference, CASE_ACTION.AWAIT) }]);
+    rows.push([{ text: '✅ Close it', callback_data: forCase(row.reference, CASE_ACTION.CLOSE) }]);
+    rows.push([{ text: '📅 Promised by', callback_data: forCase(row.reference, CASE_ACTION.DUE) }]);
     rows.push([{ text: '😴 Snooze', callback_data: forCase(row.reference, CASE_ACTION.SNOOZE) }]);
+  }
+
+  /**
+   * A note is allowed on a finished case, unlike everything else that writes.
+   * Something worth recording often turns up after the fact, and a note is a
+   * record rather than an action — `/note` already permits it.
+   */
+  if (mayUpdate) {
+    rows.push([{ text: '📝 Add a note', callback_data: forCase(row.reference, CASE_ACTION.NOTE) }]);
   }
 
   rows.push([backToMyCasesButton]);
@@ -119,12 +137,34 @@ export function caseActionKeyboard(row: StaffCaseRow, member: StaffRecord): Inli
  * function a typed command runs through, rather than through something that
  * resembles it.
  */
+export type CaseTextAction = 'reply' | 'await' | 'note' | 'due' | 'close' | 'close-unresolved';
+
 export type CaseMenuStep =
   | { readonly kind: 'show'; readonly outcome: RouterOutcome }
-  | { readonly kind: 'run'; readonly command: string };
+  | { readonly kind: 'run'; readonly command: string }
+  /**
+   * Ask for the words, and remember what they are for.
+   *
+   * A third kind rather than a `show` that happens to save a state, because a
+   * state written from inside a function that claims only to render is exactly
+   * the kind of side effect nobody finds. `index.ts` writes it, where every
+   * other write in this path happens.
+   */
+  | {
+      readonly kind: 'ask';
+      readonly outcome: RouterOutcome;
+      readonly action: CaseTextAction;
+      readonly reference: string;
+    };
 
 const show = (outcome: RouterOutcome): CaseMenuStep => ({ kind: 'show', outcome });
 const run = (command: string): CaseMenuStep => ({ kind: 'run', command });
+const ask = (outcome: RouterOutcome, action: CaseTextAction, reference: string): CaseMenuStep => ({
+  kind: 'ask',
+  outcome,
+  action,
+  reference,
+});
 
 /**
  * One tap, resolved.
@@ -174,6 +214,9 @@ export async function caseMenuView(
   if (action === '') return run(`/case ${row.reference}`);
 
   if (action === CASE_ACTION.REOPEN) return run(`/reopen ${row.reference}`);
+
+  const asking = promptFor(chatId, row, action, value);
+  if (asking !== null) return asking;
 
   if (value === '') return show(await choicesFor(db, chatId, row, action));
 
@@ -320,4 +363,198 @@ async function ownerChoices(db: Database, chatId: string, row: StaffCaseRow): Pr
       })),
     ),
   );
+}
+
+/**
+ * The prompt for an action that carries words, or null if this action does not.
+ *
+ * Every prompt names the case, because by the time somebody comes back to it the
+ * case itself has scrolled away — and a bot asking "what should I tell them?"
+ * with no subject is a bot nobody trusts.
+ *
+ * Every prompt carries Cancel. The alternative is a staff member whose next
+ * message goes somewhere they did not intend, and the thirty-minute expiry is a
+ * backstop rather than an answer.
+ */
+function promptFor(
+  chatId: string,
+  row: StaffCaseRow,
+  action: string,
+  value: string,
+): CaseMenuStep | null {
+  const cancel: InlineKeyboard = [
+    [{ text: '✖️ Cancel', callback_data: encodeCallback(CALLBACK.CASE_ACTION, row.reference) }],
+  ];
+
+  if (action === CASE_ACTION.REPLY) {
+    return ask(
+      reply(
+        chatId,
+        [
+          `Writing a reply to the teacher on ${row.reference}.`,
+          '',
+          'Type it now. They will be sent exactly what you write, and can read it',
+          'again in Check My Case.',
+        ].join('\n'),
+        cancel,
+      ),
+      'reply',
+      row.reference,
+    );
+  }
+
+  if (action === CASE_ACTION.AWAIT) {
+    return ask(
+      reply(
+        chatId,
+        [
+          `What do you need from the teacher on ${row.reference}?`,
+          '',
+          'Type it now. The case is marked “Action required” and cannot move forward',
+          'until they do it.',
+        ].join('\n'),
+        cancel,
+      ),
+      'await',
+      row.reference,
+    );
+  }
+
+  if (action === CASE_ACTION.NOTE) {
+    return ask(
+      reply(
+        chatId,
+        [
+          `Writing a note on ${row.reference}.`,
+          '',
+          'Type it now. No teacher ever sees these, and the case is not touched — a',
+          'note is a record rather than progress.',
+        ].join('\n'),
+        cancel,
+      ),
+      'note',
+      row.reference,
+    );
+  }
+
+  if (action === CASE_ACTION.DUE) {
+    return ask(
+      reply(
+        chatId,
+        [
+          `When is ${row.reference} promised by?`,
+          '',
+          'Type a date — 2026-08-15, or 15 Aug 2026.',
+          'Type “clear” to take the date off again.',
+          '',
+          'The teacher is not told. A date staff agree among themselves is not a',
+          'promise to anybody until somebody makes it.',
+        ].join('\n'),
+        cancel,
+      ),
+      'due',
+      row.reference,
+    );
+  }
+
+  /**
+   * Closing asks a question first. "We fixed it" and "we gave up" are the most
+   * useful thing a later reader can know, and the two write different statuses,
+   * send the teacher different things, and record the reason in different
+   * places.
+   */
+  if (action === CASE_ACTION.CLOSE && value === '') {
+    return {
+      kind: 'show',
+      outcome: reply(
+        chatId,
+        [
+          `Closing ${row.reference}. Was it resolved?`,
+          '',
+          'Either way the teacher is told the case is closed.',
+        ].join('\n'),
+        [
+          [
+            {
+              text: '✅ Yes — it was resolved',
+              callback_data: encodeCallback(CALLBACK.CASE_ACTION, row.reference, CASE_ACTION.CLOSE, 'ok'),
+            },
+          ],
+          [
+            {
+              text: '⚠️ No — closing it unresolved',
+              callback_data: encodeCallback(CALLBACK.CASE_ACTION, row.reference, CASE_ACTION.CLOSE, 'no'),
+            },
+          ],
+          ...cancel,
+        ],
+      ),
+    };
+  }
+
+  if (action === CASE_ACTION.CLOSE && value === 'ok') {
+    return ask(
+      reply(
+        chatId,
+        [
+          `Closing ${row.reference} as resolved.`,
+          '',
+          'What should I tell the teacher? They will be sent exactly what you write.',
+        ].join('\n'),
+        cancel,
+      ),
+      'close',
+      row.reference,
+    );
+  }
+
+  if (action === CASE_ACTION.CLOSE && value === 'no') {
+    return ask(
+      reply(
+        chatId,
+        [
+          `Closing ${row.reference} without resolving it.`,
+          '',
+          'Why? This goes on the case as a note for whoever reads it later. The',
+          'teacher is told the case is closed, not why.',
+        ].join('\n'),
+        cancel,
+      ),
+      'close-unresolved',
+      row.reference,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * The typed command a captured message is equivalent to.
+ *
+ * **This is the whole of what the writing states buy**, and it is deliberately
+ * one small total function: every state maps to a command that already exists,
+ * with the reference the state remembered and the words the staff member typed.
+ * Nothing is parsed, nothing is validated, nothing is decided — `/reply` refuses
+ * a finished case, `/due` refuses a date already gone, and `/close` writes the
+ * note. They keep doing all of it.
+ */
+export function commandForCaseText(
+  action: CaseTextAction,
+  reference: string,
+  text: string,
+): string {
+  switch (action) {
+    case 'reply':
+      return `/reply ${reference} ${text}`;
+    case 'await':
+      return `/await ${reference} ${text}`;
+    case 'note':
+      return `/note ${reference} ${text}`;
+    case 'due':
+      return `/due ${reference} ${text}`;
+    case 'close':
+      return `/close ${reference} ${text}`;
+    case 'close-unresolved':
+      return `/close ${reference} unresolved ${text}`;
+  }
 }

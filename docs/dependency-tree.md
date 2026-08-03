@@ -135,7 +135,6 @@ Erased at compile time. These may point up the layers without it being a violati
 - src/telegram/commands/context.ts → src/telegram/router.ts
 - src/telegram/commands/context.ts → src/telegram/keyboards.ts
 - src/telegram/commands/dispatch.integration.test.ts → src/db/index.ts
-- src/telegram/commands/index.ts → src/conversation/state.ts
 - src/telegram/commands/index.ts → src/db/index.ts
 - src/telegram/commands/index.ts → src/telegram/router.ts
 - src/telegram/commands/mutate.integration.test.ts → src/db/index.ts
@@ -502,7 +501,7 @@ Erased at compile time. These may point up the layers without it being a violati
 
 ### src/telegram/commands/index.ts
 
-- imports: src/conversation/state.ts *(type only)*, src/db/index.ts *(type only)*, src/log/interactions.ts, src/staff/repository.ts, src/staff/roles.ts, src/telegram/router.ts *(type only)*, src/telegram/commands/context.ts, src/telegram/commands/announce.ts, src/telegram/commands/case-menu.ts, src/telegram/commands/cases.ts, src/telegram/commands/ops.ts, src/telegram/commands/parse.ts, src/telegram/commands/staff.ts
+- imports: src/conversation/state.ts, src/db/index.ts *(type only)*, src/log/interactions.ts, src/staff/repository.ts, src/staff/roles.ts, src/telegram/router.ts *(type only)*, src/telegram/commands/context.ts, src/telegram/commands/announce.ts, src/telegram/commands/case-menu.ts, src/telegram/commands/cases.ts, src/telegram/commands/ops.ts, src/telegram/commands/parse.ts, src/telegram/commands/staff.ts
 - imported by: src/telegram/router.ts
 
 ### src/telegram/commands/ops.ts

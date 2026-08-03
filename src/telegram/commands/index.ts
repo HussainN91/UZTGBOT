@@ -23,7 +23,7 @@
  * plainly: they already know the command exists, and silence would send a Lead's
  * `/maintenance` to the teacher topic picker.
  */
-import type { ConversationState } from '../../conversation/state.js';
+import { clearState, saveState, type ConversationState } from '../../conversation/state.js';
 import type { Database } from '../../db/index.js';
 import { logInteraction } from '../../log/interactions.js';
 import { findStaff } from '../../staff/repository.js';
@@ -37,7 +37,7 @@ import {
   scopeOf,
 } from './context.js';
 import { ANNOUNCE_COMMANDS } from './announce.js';
-import { caseMenuView } from './case-menu.js';
+import { caseMenuView, commandForCaseText } from './case-menu.js';
 import { CASE_COMMANDS } from './cases.js';
 import { OPS_COMMANDS } from './ops.js';
 import { parseCommand } from './parse.js';
@@ -229,6 +229,21 @@ export async function routeCaseMenu(
   const step = await caseMenuView(db, chatId, scopeOf(member), parts);
   if (step.kind === 'show') return step.outcome;
 
+  /**
+   * Asked for words. The state is written here rather than inside the view, so
+   * that every write in this path happens in the same place — and so that a
+   * refusal above this line can never leave a chat waiting for a message nobody
+   * asked it for.
+   */
+  if (step.kind === 'ask') {
+    await saveState(db, chatId, {
+      kind: 'AwaitingCaseText',
+      action: step.action,
+      reference: step.reference,
+    });
+    return step.outcome;
+  }
+
   const done = await routeStaffCommand(db, chatId, step.command, state, deps);
   if (done === null) return null;
 
@@ -247,6 +262,67 @@ export async function routeCaseMenu(
   const [reference = ''] = parts;
   const again = await routeStaffCommand(db, chatId, `/case ${reference}`, state, deps);
 
+  return {
+    messages: [...done.messages, ...(again?.messages ?? [])],
+    alerts: [...done.alerts, ...(again?.alerts ?? [])],
+  };
+}
+
+/**
+ * A staff member's next message, when they were asked for one.
+ *
+ * **It runs ahead of the command dispatcher, which nothing else does**, and that
+ * is the decision this mechanism turns on: a reply beginning with `/close` is
+ * the words, not a command. Matched as a command it would be refused for having
+ * no reference, and the staff member's sentence would be gone.
+ *
+ * The cost is that no command works while the bot is waiting. There are three
+ * ways out and all are cheap — the Cancel button, `/cancel`, and the ordinary
+ * thirty-minute expiry that needs nobody to remember it.
+ *
+ * `null` means "this is not somebody in a writing state", and the router carries
+ * on exactly as it did. That includes a chat whose staff row has gone since the
+ * state was written, which is why the row is re-read rather than assumed.
+ */
+export async function routeStaffWriting(
+  db: Database,
+  chatId: string,
+  text: string,
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  if (state === null || state.kind !== 'AwaitingCaseText') return null;
+
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    // Their staff row went while they were typing. Forget the state rather than
+    // leaving a chat that swallows every message it sends.
+    await clearState(db, chatId);
+    return null;
+  }
+
+  if (text.trim().toLowerCase() === '/cancel') {
+    await clearState(db, chatId);
+    return reply(chatId, `Cancelled. Nothing was changed on ${state.reference}.`);
+  }
+
+  /**
+   * Cleared before the command runs, not after. A command that throws would
+   * otherwise leave the chat still waiting, and the staff member's next message
+   * — quite possibly "what happened?" — would be sent to a teacher.
+   */
+  await clearState(db, chatId);
+
+  const done = await routeStaffCommand(
+    db,
+    chatId,
+    commandForCaseText(state.action, state.reference, text),
+    null,
+    deps,
+  );
+  if (done === null) return null;
+
+  const again = await routeStaffCommand(db, chatId, `/case ${state.reference}`, null, deps);
   return {
     messages: [...done.messages, ...(again?.messages ?? [])],
     alerts: [...done.alerts, ...(again?.alerts ?? [])],

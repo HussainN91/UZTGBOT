@@ -228,4 +228,127 @@ describe.skipIf(!TEST_DATABASE_URL)('one tap on a case menu', () => {
     expect(outcome.messages[0]?.text).not.toContain('not available at your rank');
     expect(outcome.messages[0]?.text).not.toContain('VISA-2026-00911');
   });
+
+  describe('writing the words for an action', () => {
+    it('asks for the reply, then sends what was typed to the teacher', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00920',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+      });
+
+      const prompt = await send({
+        chatId: VISA_TASHKENT,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00920', 'REP'),
+      });
+      expect(prompt.messages[0]?.text).toContain('VISA-2026-00920');
+
+      const done = await send({
+        chatId: VISA_TASHKENT,
+        kind: 'text',
+        text: 'your visa is with the embassy and should be ready on Friday',
+      });
+
+      const toTeacher = done.messages.find((m) => m.chatId === TASHKENT_TEACHER);
+      expect(toTeacher?.text).toContain('should be ready on Friday');
+    });
+
+    /**
+     * The rule this whole mechanism turns on. Without it the sentence is matched
+     * as `/close`, refused for having no reference, and the staff member's words
+     * are gone.
+     */
+    it('treats a message beginning with a slash as the words, not as a command', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00921',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+      });
+
+      await send({
+        chatId: VISA_TASHKENT,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00921', 'REP'),
+      });
+
+      const done = await send({
+        chatId: VISA_TASHKENT,
+        kind: 'text',
+        text: '/close the window in her flat is broken, we are chasing the landlord',
+      });
+
+      const toTeacher = done.messages.find((m) => m.chatId === TASHKENT_TEACHER);
+      expect(toTeacher?.text).toContain('the window in her flat is broken');
+    });
+
+    it('lets somebody out with /cancel, changing nothing', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00922',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+        status: 'Under review',
+      });
+
+      await send({
+        chatId: VISA_TASHKENT,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00922', 'REP'),
+      });
+      await send({ chatId: VISA_TASHKENT, kind: 'text', text: '/cancel' });
+
+      // The next message is an ordinary one again, not a reply to a teacher.
+      const after = await send({ chatId: VISA_TASHKENT, kind: 'text', text: '/mycases' });
+      expect(after.messages.every((m) => m.chatId === VISA_TASHKENT)).toBe(true);
+
+      const rows = await db.execute<{ status: string }>(
+        sql`SELECT status FROM cases WHERE reference = 'VISA-2026-00922'`,
+      );
+      expect(rows.rows[0]?.status).toBe('Under review');
+    });
+
+    it('does not put an Observer into a writing state at all', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00923',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+      });
+
+      await send({
+        chatId: OBSERVER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00923', 'REP'),
+      });
+
+      const next = await send({ chatId: OBSERVER, kind: 'text', text: 'anything at all' });
+      expect(next.messages.some((m) => m.chatId === TASHKENT_TEACHER)).toBe(false);
+    });
+
+    it('closes a case as unresolved, telling the teacher it closed and not why', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00924',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+      });
+
+      await send({
+        chatId: VISA_TASHKENT,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00924', 'C', 'no'),
+      });
+      const done = await send({
+        chatId: VISA_TASHKENT,
+        kind: 'text',
+        text: 'unreachable since March, three attempts',
+      });
+
+      const toTeacher = done.messages.find((m) => m.chatId === TASHKENT_TEACHER);
+      expect(toTeacher?.text).not.toContain('unreachable since March');
+
+      const rows = await db.execute<{ status: string }>(
+        sql`SELECT status FROM cases WHERE reference = 'VISA-2026-00924'`,
+      );
+      expect(rows.rows[0]?.status).toBe('Closed');
+    });
+  });
 });
