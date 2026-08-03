@@ -23,7 +23,7 @@
  * plainly: they already know the command exists, and silence would send a Lead's
  * `/maintenance` to the teacher topic picker.
  */
-import type { ConversationState } from '../../conversation/state.js';
+import { clearState, saveState, type ConversationState } from '../../conversation/state.js';
 import type { Database } from '../../db/index.js';
 import { logInteraction } from '../../log/interactions.js';
 import { findStaff } from '../../staff/repository.js';
@@ -37,10 +37,11 @@ import {
   scopeOf,
 } from './context.js';
 import { ANNOUNCE_COMMANDS } from './announce.js';
+import { caseMenuView, commandForCaseText } from './case-menu.js';
 import { CASE_COMMANDS } from './cases.js';
 import { OPS_COMMANDS } from './ops.js';
 import { parseCommand } from './parse.js';
-import { PEOPLE_COMMANDS, staffMenuList, staffMenuView } from './staff.js';
+import { PEOPLE_COMMANDS, staffAddView, staffMenuList, staffMenuView } from './staff.js';
 
 export type { StaffCommand, StaffContext };
 
@@ -186,6 +187,206 @@ export async function routeStaffMenu(
   return {
     messages: [...done.messages, ...list.messages],
     alerts: [...done.alerts, ...list.alerts],
+  };
+}
+
+/**
+ * One tap on a case menu.
+ *
+ * It lives here rather than beside the menu it draws, for `routeStaffMenu`'s
+ * reason: the acting taps run by handing the equivalent typed command to
+ * `routeStaffCommand` above, and `case-menu.ts` cannot call that without a
+ * cycle. **The consequence is the safety argument for the whole part.** A tap
+ * that closes a case is not merely *as* authorised as `/close`; it **is**
+ * `/close`, so the refusal on an already-finished case, the warning when a
+ * teacher can no longer read the message, and the row recording who did it all
+ * come from the one place that has ever had them.
+ *
+ * The gate is `case.view`, which is the least any of these needs — the action's
+ * own capability is checked again inside `routeStaffCommand` when the command
+ * runs, which is what refuses a Support member the owner button they were never
+ * shown. Silence for no staff row, a plain answer for a rank too low: the same
+ * shape as the dispatcher above, and for the same reasons.
+ */
+export async function routeCaseMenu(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'case menu', state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.CASE_VIEW)) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'case menu', state);
+    return reply(chatId, refusalText('/case', CAPABILITY.CASE_VIEW, member.role));
+  }
+
+  const step = await caseMenuView(db, chatId, scopeOf(member), parts);
+  if (step.kind === 'show') return step.outcome;
+
+  /**
+   * Asked for words. The state is written here rather than inside the view, so
+   * that every write in this path happens in the same place — and so that a
+   * refusal above this line can never leave a chat waiting for a message nobody
+   * asked it for.
+   */
+  if (step.kind === 'ask') {
+    await saveState(db, chatId, {
+      kind: 'AwaitingCaseText',
+      action: step.action,
+      reference: step.reference,
+    });
+    return step.outcome;
+  }
+
+  const done = await routeStaffCommand(db, chatId, step.command, state, deps);
+  if (done === null) return null;
+
+  /**
+   * The command's answer first, then the case again.
+   *
+   * The first message says what changed, or refuses with a reason only the
+   * command knows. The case follows so the next action is another tap rather
+   * than another `/cases` — which is the entire point of the part.
+   *
+   * `/mycases` is the one exception: it *is* a list, so re-showing a case after
+   * it would be showing a case nobody asked for.
+   */
+  if (step.command === '/mycases') return done;
+
+  const [reference = ''] = parts;
+  const again = await routeStaffCommand(db, chatId, `/case ${reference}`, state, deps);
+
+  return {
+    messages: [...done.messages, ...(again?.messages ?? [])],
+    alerts: [...done.alerts, ...(again?.alerts ?? [])],
+  };
+}
+
+/**
+ * The add-somebody flow.
+ *
+ * `staff.manage` floors at System and is checked here before anything is shown,
+ * so somebody who guesses the payload is refused at the first step rather than
+ * after choosing a rank. It is checked again inside `/staff_add` when the last
+ * tap runs — the rule is enforced twice on purpose, exactly as it is for every
+ * other staff button.
+ */
+export async function routeStaffAdd(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'staff add', state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.STAFF_MANAGE)) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'staff add', state);
+    return reply(chatId, refusalText('/staff_add', CAPABILITY.STAFF_MANAGE, member.role));
+  }
+
+  const step = staffAddView(chatId, parts);
+
+  if (step.kind === 'ask') {
+    await saveState(db, chatId, { kind: 'AwaitingStaffId' });
+    return step.outcome;
+  }
+  if (step.kind === 'show') return step.outcome;
+
+  const done = await routeStaffCommand(db, chatId, step.command, state, deps);
+  if (done === null) return null;
+
+  const list = await staffMenuList(db, chatId);
+  return {
+    messages: [...done.messages, ...list.messages],
+    alerts: [...done.alerts, ...list.alerts],
+  };
+}
+
+/**
+ * A staff member's next message, when they were asked for one.
+ *
+ * **It runs ahead of the command dispatcher, which nothing else does**, and that
+ * is the decision this mechanism turns on: a reply beginning with `/close` is
+ * the words, not a command. Matched as a command it would be refused for having
+ * no reference, and the staff member's sentence would be gone.
+ *
+ * The cost is that no command works while the bot is waiting. There are three
+ * ways out and all are cheap — the Cancel button, `/cancel`, and the ordinary
+ * thirty-minute expiry that needs nobody to remember it.
+ *
+ * `null` means "this is not somebody in a writing state", and the router carries
+ * on exactly as it did. That includes a chat whose staff row has gone since the
+ * state was written, which is why the row is re-read rather than assumed.
+ */
+export async function routeStaffWriting(
+  db: Database,
+  chatId: string,
+  text: string,
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  if (state === null) return null;
+  if (state.kind !== 'AwaitingCaseText' && state.kind !== 'AwaitingStaffId') return null;
+
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    // Their staff row went while they were typing. Forget the state rather than
+    // leaving a chat that swallows every message it sends.
+    await clearState(db, chatId);
+    return null;
+  }
+
+  if (text.trim().toLowerCase() === '/cancel') {
+    await clearState(db, chatId);
+    return reply(
+      chatId,
+      state.kind === 'AwaitingStaffId'
+        ? 'Cancelled. Nobody was added.'
+        : `Cancelled. Nothing was changed on ${state.reference}.`,
+    );
+  }
+
+  /**
+   * Cleared before anything runs, on every path, and that ordering is the point.
+   * A command that throws would otherwise leave the chat still waiting, and the
+   * staff member's next message — quite possibly "what happened?" — would be
+   * sent to a teacher.
+   */
+  await clearState(db, chatId);
+
+  /**
+   * The typed chat id. It is not validated here: `/staff_add` already refuses a
+   * value that is not a chat id, and `addStaff` already answers a row that
+   * exists. Validating here would be the second copy of both.
+   */
+  if (state.kind === 'AwaitingStaffId') {
+    return routeStaffAdd(db, chatId, [text.trim()], null, deps);
+  }
+
+  const done = await routeStaffCommand(
+    db,
+    chatId,
+    commandForCaseText(state.action, state.reference, text),
+    null,
+    deps,
+  );
+  if (done === null) return null;
+
+  const again = await routeStaffCommand(db, chatId, `/case ${state.reference}`, null, deps);
+  return {
+    messages: [...done.messages, ...(again?.messages ?? [])],
+    alerts: [...done.alerts, ...(again?.alerts ?? [])],
   };
 }
 

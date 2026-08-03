@@ -120,6 +120,33 @@ export const CALLBACK = {
    */
   CASE_OPEN: 'CO',
   /**
+   * One action on one case — `CA:<reference>[:<action>[:<value>]]`.
+   *
+   * The same three depths as `STAFF_MENU`, for the same reasons and by
+   * deliberate copy:
+   *
+   * ```
+   * CA:VISA-2026-00311           → the case, with its keyboard
+   * CA:VISA-2026-00311:M         → which level of importance?
+   * CA:VISA-2026-00311:M:Urgent  → do it
+   * ```
+   *
+   * **The reference travels in the payload rather than in conversation state.**
+   * A menu sits in a chat for ever, and one holding "whichever case we were
+   * looking at" would act on a case chosen an hour ago. A self-contained payload
+   * cannot.
+   *
+   * It is not a permission and carries none. Every acting tap is executed by
+   * handing the equivalent typed command to the same dispatcher a typed command
+   * goes through, so a payload replayed by somebody demoted last week buys
+   * exactly nothing.
+   *
+   * `CA:CONTRACT-2026-99999:OWN:99999999999` is 38 bytes against the 64-byte
+   * limit, and `CONTRACT-2026-99999` is the longest reference this system can
+   * build. Tests measure all three shapes with real values.
+   */
+  CASE_ACTION: 'CA',
+  /**
    * Staff management by button — Part 5H.3. `SM:<chat id>[:<action>[:<value>]]`.
    *
    * Three depths in one prefix, because they are one journey:
@@ -150,6 +177,25 @@ export const CALLBACK = {
    * keyboard skips any button that will not fit, the way the FAQ listing does.
    */
   STAFF_MENU: 'SM',
+  /**
+   * Adding a staff member — `SA[:<chat id>[:<rank>[:<queue>]]]`.
+   *
+   * The one flow in this system whose first step cannot be a button, because
+   * the chat id is the single thing only the person adding knows. So the id is
+   * typed once, into `AwaitingStaffId`, and travels in the payload from then on
+   * — the rank and the queue are chosen, and each choice carries everything
+   * decided before it. A menu left for an hour therefore cannot add whoever was
+   * chosen an hour ago.
+   *
+   * Regions are deliberately not part of it. The row is created covering every
+   * region, which is exactly what `/staff_add 991001 Support Visa` does today
+   * with no regions given, and "Change regions" is on their row immediately
+   * afterwards.
+   *
+   * Ranks and queues are constants in this repository, so unlike a region their
+   * length is ours to guarantee. A test measures the longest with real values.
+   */
+  STAFF_ADD: 'SA',
   /**
    * A party's answer on an identity dispute, e.g. `DC:42:NotMine` — Feature A.
    *

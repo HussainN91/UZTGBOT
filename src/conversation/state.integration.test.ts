@@ -153,6 +153,40 @@ describe.skipIf(!TEST_DATABASE_URL)('conversation state', () => {
       await expect(loadState(db, CHAT)).resolves.toBeNull();
     });
   });
+
+  describe('the staff states', () => {
+    it('remembers which case somebody is writing about', async () => {
+      await saveState(db, '994001', {
+        kind: 'AwaitingCaseText',
+        action: 'reply',
+        reference: 'VISA-2026-00311',
+      });
+
+      expect(await loadState(db, '994001')).toEqual({
+        kind: 'AwaitingCaseText',
+        action: 'reply',
+        reference: 'VISA-2026-00311',
+      });
+    });
+
+    it('remembers that somebody is adding a staff member', async () => {
+      await saveState(db, '994001', { kind: 'AwaitingStaffId' });
+      expect(await loadState(db, '994001')).toEqual({ kind: 'AwaitingStaffId' });
+    });
+
+    /**
+     * A payload a newer build wrote, or an action this build has never had. It
+     * must read as "no state" rather than throw — throwing here breaks every
+     * subsequent message from that chat, not just this one.
+     */
+    it('reads an unknown action as no state at all', async () => {
+      await db.execute(sql`
+        INSERT INTO conversation_states (chat_id, state, payload, updated_at, expires_at)
+        VALUES ('994009', 'AwaitingCaseText', '{"action":"teleport","reference":"X"}'::jsonb, now(), now() + interval '1 hour')
+      `);
+      expect(await loadState(db, '994009')).toBeNull();
+    });
+  });
 });
 
 async function expiryOf(db: Database, chatId: string): Promise<number> {

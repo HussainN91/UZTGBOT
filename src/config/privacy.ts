@@ -57,8 +57,28 @@ import type { RetentionPeriods } from './retention.js';
  * on**, so teachers have been reading the punctuation. The markers are gone
  * rather than the formatting turned on: see the commit for that argument. A test
  * below asserts the notice contains no asterisk, because nothing protected this.
+ *
+ * `2026-08-03.1` is a rewording, and one change of substance inside it.
+ *
+ * The rewording was asked for on 3 August 2026 — *"the core of the message is
+ * fine i just don't like the way it is written"* — so what is held, what it is
+ * used for, who can see it and how long it is kept all say the same things
+ * afterwards. Three sentences that hung a clause off a dash became two sentences
+ * each; the headings stopped describing a filing cabinet with nobody at it; and
+ * the hand-wrapped lines went, because Telegram wraps for itself and a paragraph
+ * wrapped twice comes out ragged on a phone.
+ *
+ * The change of substance is the access-and-removal route. It named the support
+ * contact alone and now names **the regional admin first**, which is a person a
+ * teacher can reach and the one already handling their cases. The support number
+ * stays under it for the teacher who has no recorded region, because for them
+ * the first line names nobody.
+ *
+ * It cost a round of re-acceptance from every teacher who had already signed in,
+ * and it was done in the same pass as the sign-in prompt rather than separately
+ * for exactly that reason. Eight teachers on the day; 1,800 after launch.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-08-02.1';
+export const PRIVACY_NOTICE_VERSION = '2026-08-03.1';
 
 /**
  * One line of the retention paragraph.
@@ -108,10 +128,23 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
   return [
     '🔒 Privacy notice',
     '',
-    'Before you sign in, please read this.',
+    'Please read this before you sign in.',
     '',
-    'What is held',
-    '• The recruitment email address you use to verify.',
+    /**
+     * "What we keep", not "What is held" — and the same change runs through
+     * every heading below.
+     *
+     * The passive voice was describing a filing cabinet with nobody standing at
+     * it. A teacher reading a privacy notice is asking who has their email
+     * address, and a sentence with no subject declines to say. The Ministry
+     * holds it, so the notice now says we.
+     *
+     * The wording throughout was rewritten on 3 August 2026 at the head of
+     * project's request. **Nothing it promises changed** — every item, purpose,
+     * period and route below is the one that was there before.
+     */
+    'What we keep',
+    '• The recruitment email address you sign in with.',
     /**
      * Corrected 2 August 2026. This said "your Telegram chat id, and your name as
      * Telegram supplies it", and the second half had never been true — no path
@@ -121,17 +154,25 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * told the bot holds their Telegram name has been told something about
      * themselves that is not so.
      */
-    '• Your Telegram chat id. Your Telegram display name is not stored — the name',
-    '  held for you is the one on the Ministry’s recruitment records.',
-    '• The messages you send to this bot, and the support cases you open.',
+    /**
+     * Two sentences where there was one hung off a dash. The dash was carrying
+     * the correction — that we do *not* hold a Telegram name — as an aside, and
+     * it is the part a teacher is most likely to have assumed wrongly.
+     */
+    '• Your Telegram chat id. We do not keep your Telegram display name. The name we hold for you is the one on the Ministry’s recruitment records.',
+    '• The messages you send to this bot, and the cases you open.',
     '',
-    'What it is used for',
-    'Confirming you are a teacher recruited by the Ministry, and answering the',
-    'support cases you raise. It is not used for anything else.',
+    'What we use it for',
+    'To confirm you are a teacher the Ministry recruited, and to answer the cases you raise. Nothing else.',
     '',
     'Who can see it',
-    'Ministry support staff working your case. It is not shared outside the',
-    'Ministry, and it is held on a server located in Uzbekistan.',
+    'Ministry support staff working on your case. We do not share it outside the Ministry. It is held on a server in Uzbekistan.',
+    /**
+     * A blank line that did not need to be here before. Both paragraphs were
+     * hand-wrapped, so the eye found the break anyway; now that each is one long
+     * line, Telegram runs them together into a wall.
+     */
+    '',
     /**
      * Added 1 August 2026, before Feature A rather than after it.
      *
@@ -152,11 +193,9 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * reviewer is actually shown is each account's chat id, when it first
      * appeared, and when it was last active — so the notice says that.
      */
-    'If someone else tries to sign in as you, our staff will see each account’s',
-    'Telegram chat id, when it first appeared and when it was last used, so they',
-    'can decide which account is yours.',
+    'If someone else tries to sign in as you, our staff see each account’s Telegram chat id, when it first appeared and when it was last used. That is how they decide which account is yours.',
     '',
-    'How long it is kept',
+    'How long we keep it',
     ...retentionParagraph(periods),
     '',
     /**
@@ -168,12 +207,29 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * decision about access — but "nearly" is not a thing to leave in a legal
      * statement, and naming it costs eleven words.
      */
-    'A record of decisions our staff make about access — including any dispute',
-    'over who an account belongs to, and not your messages — is kept permanently,',
-    'so we can always answer who did what.',
+    'We keep a permanent record of the decisions our staff make about your access, including any dispute over who an account belongs to. That record does not include your messages. It is there so we can always say who did what.',
     '',
-    'Access and removal',
-    `To ask what is held about you, or to ask for it to be removed, contact ${supportContact}.`,
+    'Asking what we hold, or asking us to delete it',
+    /**
+     * The regional admin, named as the route — the head of project's decision on
+     * 3 August 2026, replacing the support number that stood here alone.
+     *
+     * It is the better first answer. A regional admin is a person a teacher can
+     * actually reach, and they are the staff member already handling that
+     * teacher's cases, so the request lands with somebody who can act on it
+     * rather than at a switchboard.
+     *
+     * **The number stays underneath it, and that is not caution.** This system
+     * has a real state in which a teacher has no recorded region — `/case`
+     * prints "region not recorded" against it, and it means every staff member
+     * can see their case because no one region owns it. For that teacher
+     * "your regional admin" names nobody at all. The same is true of a teacher
+     * whose access has ended, which is exactly when somebody asks to be
+     * forgotten. `supportContact` is validated at start-up and cannot be a
+     * placeholder, so the second line is always a route that exists.
+     */
+    'Contact your regional admin: the staff member responsible for the region you work in.',
+    `If you do not know who that is, contact ${supportContact}.`,
     '',
     `You can read this notice at any time with /privacy. All times are ${TIMEZONE}.`,
   ].join('\n');

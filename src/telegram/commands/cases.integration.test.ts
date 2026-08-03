@@ -690,4 +690,45 @@ describe.skipIf(!TEST_DATABASE_URL)('the case-reading commands', () => {
       expect(await logFor('994999')).toContain('/cases');
     });
   });
+
+  describe('the buttons under a case', () => {
+    it('gives a Support member the buttons they may use and no others', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00901',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+      });
+
+      const outcome = await send({
+        chatId: VISA_TASHKENT,
+        kind: 'text',
+        text: '/case VISA-2026-00901',
+      });
+
+      const keyboard = outcome.messages[0]?.keyboard ?? [];
+      const actions = keyboard.flat().map((b) => b.callback_data.split(':')[2] ?? '');
+
+      expect(actions).toContain('M');
+      expect(actions).toContain('SN');
+      expect(actions).toContain('MINE');
+      // case.assign floors at Program; VISA_TASHKENT is Support.
+      expect(actions).not.toContain('OWN');
+    });
+
+    it('carries the same buttons when the case is opened by tapping it', async () => {
+      await givenCase({
+        reference: 'VISA-2026-00902',
+        teacher: TASHKENT_TEACHER,
+        category: CASE_CATEGORY.VISA,
+      });
+
+      const outcome = await send({
+        chatId: VISA_TASHKENT,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.CASE_OPEN, 'VISA-2026-00902'),
+      });
+
+      expect(outcome.messages[0]?.keyboard?.length ?? 0).toBeGreaterThan(0);
+    });
+  });
 });

@@ -390,11 +390,27 @@ undone by putting the row back.
 
 **A privacy notice is shown before any data is collected.** `PRIVACY_NOTICE_TEXT`
 (Config.gs — flagged for manual review before go-live) is embedded in the
-verification prompt, and replying with an identifier is treated as
+verification prompt, and ~~replying with~~ **sending** an identifier is treated as
 acknowledgement. It is retrievable at any time with `/privacy`, which is
 teacher-facing and handled ahead of the staff dispatcher (same pattern as
 `/help`). The notice names the data held, its use, its audience, and the contact
 route for access/removal requests.
+
+> **Reworded 3 August 2026, at `PRIVACY_NOTICE_VERSION` `2026-08-03.1`.** The
+> instruction now comes **before** the notice rather than after it, and says
+> *"Enter your email address"* — it used to say *"reply with"*, which reads as a
+> Telegram reply, a real thing a teacher can do and the wrong one. The notice
+> still travels in the same message, so sending the address is still the
+> acknowledgement and cannot be separated from what was shown.
+>
+> **The access-and-removal route changed.** It named the support contact alone
+> and now names **the regional admin first** — a person a teacher can reach, and
+> the one already handling their cases. The support contact stays underneath it
+> for the teacher who has no recorded region, for whom the first line names
+> nobody.
+>
+> Everything else is the same promise in plainer words. See
+> `docs/plans/2026-08-03-buttons-for-cases-and-staff-design.md` §7.
 
 **The notice is now generated from the retention settings, and no number is
 typed into its text.** A settings row and a hard-coded sentence can disagree; a
@@ -769,6 +785,12 @@ Every one of these writes an audit row in the same transaction as the change
 (§13).
 
 ### 6.5 Command reference
+
+> **Since 3 August 2026 almost none of these has to be typed.** Every case action
+> and the adding of a staff member are buttons (§8.2), and a staff member working
+> normally never types a case reference. **The commands below all still work,
+> unchanged** — the buttons run them rather than replacing them, which is why
+> every rule stated here still holds however the action was started.
 
 **Recognition happens inside the message pipeline**, not in a separate command
 handler, so every command inherits the update claim, the chat lock and the
@@ -1350,15 +1372,121 @@ them: the last active System member keeps their rank, nobody removes themselves,
 and the person whose access changed is told. **A tap that changes a rank is not
 merely as authorised as `/staff_role`; it is `/staff_role`.**
 
-**The subject travels in the button, not in the bot's memory.** There is no
+**The subject travels in the button, not in the bot's memory.** ~~There is no
 staff-facing conversation state in this system and this part deliberately did not
-add one — a menu left for an hour would otherwise act on whoever was chosen an
+add one~~ — a menu left for an hour would otherwise act on whoever was chosen an
 hour ago. Every tap is a complete instruction, re-authorised and re-read from the
 database when it arrives.
+
+> **Corrected 3 August 2026.** There *is* a staff-facing conversation state now,
+> and it holds two things: which case somebody is writing about, and a chat id
+> being typed to add a staff member. See §8.2.1.
+>
+> **The rule this sentence was making still stands, and it is why the state holds
+> so little.** Nothing that a button can carry is ever remembered — every subject,
+> rank, queue, region and importance level still travels in the payload. Memory is
+> used only for the one thing a button cannot carry, which is a sentence somebody
+> is about to type.
 
 **Deactivate and reactivate share one slot**, showing opposite words, because
 they are one question. `/staff` still lists deactivated rows so they can be
 reached.
+
+### Adding a staff member — Part 5I, 3 August 2026
+
+`/staff_add` was the one staff command still typed in full. The list now carries
+`[ ➕ Add somebody ]` under it:
+
+```
+[ ➕ Add somebody ]  →  "Send me their Telegram chat id."
+                    →  you type   995500
+                    →  [ Observer ] [ Support ] [ Lead ] [ Program ] [ System ]
+                    →  [ Visa ] [ Travel ] [ Contract ] [ Accommodation ] [ All ] [ None ]
+```
+
+**The chat id is typed because it is the one thing only the person adding knows.**
+Everything after it is chosen, and each choice carries every choice before it in
+the payload.
+
+**Queue is asked, never guessed.** It decides which teachers' problems that person
+can read, and `/staff_add` has always refused to default it: doing so "would give
+somebody more than you asked for, and nothing in what you typed would show it".
+The refusal stands and answering it is now a tap.
+
+**Regions are not asked.** The new member covers every region, which is exactly
+what a typed `/staff_add 991001 Support Visa` does today with no regions given —
+so this grants nothing a typed command did not. `📍 Change regions` is on their
+row immediately afterwards.
+
+The last tap runs `/staff_add`, so the answer to a chat id that already has a row,
+and the notice telling the new member they have access, both come from the one
+place that has ever had them.
+
+### The case menu — Part 5I, 3 August 2026
+
+Opening a case now shows what can be done to it. Every action a staff member has
+is a button, and **no case reference is ever typed again**:
+
+```
+VISA-2026-00311
+Under review · Visa · importance Normal
+… the case in full …
+
+[ 💬 Reply to teacher ]          [ 📥 Ask them for something ]
+[ ✅ Close it ]                  [ 📝 Add a note ]
+[ 👤 Give it an owner ]          [ ❗ How serious is it ]
+[ 📅 Promised by ]               [ 😴 Snooze ]
+[ ⬅️ Back to my cases ]
+```
+
+**The keyboard is built from the rank of whoever is looking at it**, using `can()`
+— the same function that does the refusing. `case.assign` floors at Program while
+`case.update` floors at Support, so two people opening the same case see different
+buttons. A button shown and then refused is worse than no button.
+
+**The case's own state is the second filter.** `Reopen` is drawn only on a finished
+case and `Close` only on an open one, because they are the two answers to one
+question. `Add a note` and `How serious is it` are drawn on both: a note is a
+record rather than progress, and importance is the judgement most often made after
+a case is over — retention reads the marker and never the status.
+
+Four actions act on the tap or on one more tap: **Reopen**, **Give it an owner**
+(showing the staff who cover that queue and region), **How serious is it**
+(Normal / Urgent / Critical), and **Snooze** (7 / 14 / 30 days, or stop snoozing).
+
+Five need the staff member's words, and prompt for them: **Reply**, **Ask them for
+something**, **Add a note**, **Promised by**, and **Close**, which asks first
+whether the case was resolved.
+
+After any action the case comes back with its keyboard, so the next thing is
+another tap rather than another `/cases`.
+
+**Every typed command still works, unchanged.** Nothing was removed, and `/help`
+and `/whoami` still list them all.
+
+### 8.2.1 Waiting for words — the staff conversation state
+
+The first staff-facing conversation state in this system. It exists because a
+button cannot carry a sentence.
+
+Tapping `💬 Reply to teacher` stores one row saying *this chat is writing a reply
+to VISA-2026-00311*, and the staff member's next message becomes the reply. The
+row lives in `conversation_states` beside the teacher states, expires after
+`CONVERSATION_TTL_MINUTES` like everything else there, and needed no migration
+because `conversation_states.state` is free text on purpose.
+
+**While the bot is waiting, the next message is the words — even if it starts with
+a slash.** `/close the window in her flat is broken` reaches the teacher as
+written. Matched as a command it would be refused for having no reference and the
+sentence would be lost, so the check runs ahead of the command dispatcher, which
+nothing else in the router does.
+
+The cost is that no command works while the bot is waiting. There are three ways
+out: the Cancel button on the prompt, typing `/cancel`, and the expiry. The state
+is cleared **before** the command runs, so a command that fails cannot leave a
+chat still waiting.
+
+A teacher can never enter this state, so the teacher state machine is untouched.
 
 ### 8.3 Callback protocol
 
@@ -1371,6 +1499,9 @@ against the byte ceiling with real values rather than trusting an estimate.
 | `MENU:MAIN` / `MENU:FAQ` | Main menu / topic hub |
 | `MENU:<ACTION>` | `CHECK_CASE`, `CONTACT_SUPPORT`, `URGENT_CASE`, `SUBMIT_DOCS`, `MY_MANAGER` |
 | `SM:<chat id>[:<action>[:<value>]]` | Staff management by button (§8.2). Three depths in one prefix: a person, an action, a value. Re-authorised on every tap, and an acting tap runs the equivalent typed command rather than a copy of it |
+| `SA[:<chat id>[:<rank>[:<queue>]]]` | Adding a staff member (§8.2). The chat id is typed once; every choice after it carries the choices before it |
+| `CO:<reference>` | Open one case from a list |
+| `CA:<reference>[:<action>[:<value>]]` | One action on one case (§8.2). Same three depths as `SM`, and the same rule: an acting tap runs the equivalent typed command. `CA::MINE` carries no reference and means "back to my cases" |
 | `MENU:SIGN_IN` | Start sign-in — routed through the same `requireSignIn` that guards the gated actions, so a revoked chat is refused here too (§8.2) |
 | `CAT:<CODE>` | Enter an FAQ topic (`VISA`, `LIVING`, …) |
 | `PG:<CODE>:<page>` | Paged topic browsing |

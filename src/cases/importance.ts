@@ -24,6 +24,9 @@ export const parseImportance = (value: string): CaseImportance | null => {
   return CASE_IMPORTANCE_ORDER.find((level) => level.toLowerCase() === wanted) ?? null;
 };
 
+/** Every level, least serious first. The one order; `importanceList` renders it. */
+export const IMPORTANCE_ORDER = CASE_IMPORTANCE_ORDER;
+
 /**
  * The levels, for a message offering them.
  *
@@ -32,7 +35,7 @@ export const parseImportance = (value: string): CaseImportance | null => {
  * The case vocabulary was written out three times before `status.ts` collapsed
  * it into one list, and this is the same list one type along.
  */
-export const importanceList = (): string => CASE_IMPORTANCE_ORDER.join(', ');
+export const importanceList = (): string => IMPORTANCE_ORDER.join(', ');
 
 /** Where a level sits. Higher index is more serious. */
 const rankOf = (level: CaseImportance): number => CASE_IMPORTANCE_ORDER.indexOf(level);

@@ -69,8 +69,11 @@ import { CAPABILITY, can, floorFor } from '../staff/roles.js';
 import { CALLBACK, decodeCallback } from './callback-data.js';
 import {
   STAFF_DENIED,
+  routeCaseMenu,
+  routeStaffAdd,
   routeStaffCommand,
   routeStaffMenu,
+  routeStaffWriting,
   staffHelpSection,
 } from './commands/index.js';
 import { reply, scopeOf } from './commands/context.js';
@@ -360,6 +363,18 @@ async function routeText(
    * message was. Without it, refusing a command is a second route by which a
    * teacher's case detail reaches the interaction log.
    */
+  /**
+   * A staff member who was asked for words — the one place a staff path runs
+   * ahead of the command dispatcher.
+   *
+   * Guarded twice over: it fires only for `AwaitingCaseText`, which no teacher
+   * can ever be in, and `routeStaffWriting` returns null for a chat with no
+   * active staff row. So the teacher state machine below is untouched and its
+   * order is unchanged.
+   */
+  const writing = await routeStaffWriting(db, update.chatId, text, state, deps);
+  if (writing !== null) return writing;
+
   const staffOutcome = await routeStaffCommand(db, update.chatId, text, state, deps);
   if (staffOutcome !== null) return staffOutcome;
 
@@ -1046,6 +1061,21 @@ async function routeCallback(
       );
 
     /**
+     * One action on one case.
+     *
+     * The whole payload is handed over rather than picked apart here: it is a
+     * three-level menu and the router has no business knowing its levels. What
+     * it does know is the same thing it knows about every other staff tap —
+     * `null` means the tapper is not staff, and gets the ordinary menu rather
+     * than an answer confirming the button is real.
+     */
+    case CALLBACK.CASE_ACTION:
+      return (
+        (await routeCaseMenu(db, update.chatId, decoded.parts, state, deps))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
+    /**
      * Staff management by button — Part 5H.3.
      *
      * The whole payload is handed over rather than picked apart here: this is a
@@ -1057,6 +1087,18 @@ async function routeCallback(
     case CALLBACK.STAFF_MENU:
       return (
         (await routeStaffMenu(db, update.chatId, decoded.parts, state, deps))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
+    /**
+     * Adding a staff member by button — the flow `AwaitingStaffId` exists for.
+     * Same shape as `STAFF_MENU` just above: `null` means the tapper is not
+     * staff, and the ordinary menu is what they see instead of a confirmation
+     * that the button is real.
+     */
+    case CALLBACK.STAFF_ADD:
+      return (
+        (await routeStaffAdd(db, update.chatId, decoded.parts, state, deps))
         ?? only(update.chatId, await menuReplyFor(db, update.chatId))
       );
 

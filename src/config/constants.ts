@@ -375,6 +375,19 @@ export const CASE_NOTE_SHOWN_CHARS = 280;
 export const MAX_SNOOZE_DAYS = 90;
 
 /**
+ * The snooze lengths offered as buttons.
+ *
+ * Three, not a keypad. The point of a button is to remove a decision, and a
+ * staff member choosing between 13 and 14 days is doing arithmetic rather than
+ * work. `/snooze <ref> <days>` still takes any number up to `MAX_SNOOZE_DAYS`,
+ * so nothing is lost — this is the common case made one tap.
+ *
+ * Every value must stay at or below `MAX_SNOOZE_DAYS`, or a button would be
+ * drawn that `setSnooze` refuses. The test below is what holds that.
+ */
+export const SNOOZE_CHOICES = [7, 14, 30] as const;
+
+/**
  * How long a case may sit at `Action required` before the TEACHER is reminded.
  *
  * The teacher, not the staff member. A case waiting on the teacher is one the

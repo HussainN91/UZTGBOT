@@ -157,3 +157,62 @@ describe('decoding untrusted callback data', () => {
     expect(isCallback('MENU:FAQ', CALLBACK.MENU, 'FAQ')).toBe(true);
   });
 });
+
+describe('the case action prefix', () => {
+  /**
+   * `CONTRACT-2026-99999` is the longest reference this system can build: the
+   * longest category name, a four-digit year and a five-digit sequence. Measured
+   * with a real value rather than trusted to arithmetic.
+   */
+  const LONGEST_REFERENCE = 'CONTRACT-2026-99999';
+
+  /**
+   * **Each of these asserts the payload it built, not merely its length**, and
+   * the reason is worth keeping: written the obvious way — `byteLength(data)`
+   * under the limit and nothing else — every one of them passed while
+   * `CALLBACK.CASE_ACTION` did not exist at all.
+   *
+   * `vitest` transpiles rather than type-checks, so a missing property is
+   * `undefined` at runtime, `encodeCallback` stringifies it, and
+   * `"undefined:CONTRACT-2026-99999:M:Critical"` is 39 bytes — comfortably
+   * inside a 64-byte limit. The test was green over nothing, which is the one
+   * failure a test suite must not have, because somebody eventually trusts it.
+   *
+   * Asserting the whole string fixes it in the only way that stays fixed: the
+   * prefix being renamed, removed or mistyped changes the value, and the value
+   * is what is checked.
+   */
+  it('builds the longest importance payload, inside the limit', () => {
+    const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'M', 'Critical');
+    expect(data).toBe('CA:CONTRACT-2026-99999:M:Critical');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+
+  it('builds the longest owner payload, inside the limit', () => {
+    // Telegram ids are at most ten digits today; a spare digit costs nothing.
+    const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'OWN', '99999999999');
+    expect(data).toBe('CA:CONTRACT-2026-99999:OWN:99999999999');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+
+  it('builds the longest snooze payload, inside the limit', () => {
+    const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'SN', '30');
+    expect(data).toBe('CA:CONTRACT-2026-99999:SN:30');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+});
+
+describe('the staff add prefix', () => {
+  /**
+   * The payload it built, not merely its length. `vitest` transpiles rather
+   * than type-checks, so a `CALLBACK` member that does not exist is `undefined`
+   * at runtime, `encodeCallback` stringifies it, and a length-only assertion
+   * passes over nothing at all — which is exactly what happened to the three
+   * case-action tests above before they were rewritten this way.
+   */
+  it('builds the longest add payload, inside the limit', () => {
+    const data = encodeCallback(CALLBACK.STAFF_ADD, '9999999999', 'System', 'Accommodation');
+    expect(data).toBe('SA:9999999999:System:Accommodation');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+});

@@ -47,6 +47,7 @@ import { CAPABILITY } from '../../staff/roles.js';
 import { findStaff } from '../../staff/repository.js';
 import { findTeacher, teacherHasAccess } from '../../teachers/repository.js';
 import type { OutgoingMessage, RouterOutcome } from '../router.js';
+import { caseActionKeyboard } from './case-menu.js';
 import {
   type StaffCommand,
   type StaffContext,
@@ -449,7 +450,15 @@ export const oneCase: StaffCommand = {
       countNotes(db, row.reference),
     ]);
 
-    return reply(member.telegramId, renderCase(row, notes, noteTotal));
+    /**
+     * The keyboard is built from `member`, not from the case alone.
+     *
+     * Two people opening the same case see different buttons, because
+     * `case.assign` floors three ranks above `case.update` — and a button shown
+     * and then refused is worse than no button, because the person tapping it
+     * cannot tell whether they did something wrong.
+     */
+    return reply(member.telegramId, renderCase(row, notes, noteTotal), caseActionKeyboard(row, member));
   },
 };
 

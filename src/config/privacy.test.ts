@@ -27,6 +27,57 @@ describe('the privacy notice', () => {
       expect(notice).toContain(required);
     }
   });
+
+  /**
+   * The 3 August 2026 rewrite, held from the outside.
+   *
+   * A rewording is the one kind of change where every existing test can stay
+   * green while a promise quietly disappears — the notice would still mention
+   * email, cases and staff with an entire section missing. So each promise is
+   * asserted by the thing it actually says rather than by a keyword that
+   * survives anything.
+   */
+  it('still makes every promise it made before it was reworded', () => {
+    const notice = privacyNotice(CONTACT, SET);
+
+    // What we keep.
+    expect(notice).toContain('recruitment email address');
+    expect(notice).toContain('Telegram chat id');
+    expect(notice).toMatch(/do not keep your Telegram display name/i);
+    // Who can see it, and where it lives.
+    expect(notice).toMatch(/not share it outside the Ministry/i);
+    expect(notice).toContain('Uzbekistan');
+    // The dispute disclosure, added before the feature that needed it.
+    expect(notice).toMatch(/someone else tries to sign in as you/i);
+    // The permanent access record, which is none of the three periods.
+    expect(notice).toMatch(/permanent record/i);
+    // Reading it again, at any time.
+    expect(notice).toContain('/privacy');
+  });
+
+  /**
+   * The route out, which is the one section a teacher needs when they are
+   * unhappy — and therefore the one most worth a test of its own.
+   *
+   * Both lines are asserted. The regional admin is the answer for a teacher who
+   * has a region; the contact is the answer for one who has none, and this
+   * system has that state on purpose.
+   */
+  it('gives a teacher with no region a route out as well as one who has a region', () => {
+    const notice = privacyNotice(CONTACT, SET);
+    expect(notice).toMatch(/contact your regional admin/i);
+    expect(notice).toContain(CONTACT);
+  });
+
+  /**
+   * Not a style rule. The dash was carrying load-bearing clauses — that we do
+   * *not* hold a Telegram name, and that the permanent record excludes messages
+   * — as asides, which is the wrong place for the part a teacher would be most
+   * surprised by. Each is its own sentence now, and this keeps it that way.
+   */
+  it('hangs nothing important off a dash', () => {
+    expect(privacyNotice(CONTACT, SET)).not.toContain('—');
+  });
 });
 
 /**
@@ -114,12 +165,19 @@ describe('the retention paragraph', () => {
    * it". No path into this system has ever read a Telegram display name — the
    * name on a teacher's record is copied from the recruitment spreadsheet. This
    * is a legal statement, so it is asserted rather than left to a reader.
+   *
+   * The middle assertion moved on 3 August 2026 with the rewrite: the notice
+   * said "display name is not stored" and now says "we do not keep your Telegram
+   * display name". **The property is unchanged and so is this test's job** — the
+   * bot must deny holding a Telegram-supplied name, in whatever words the notice
+   * currently uses. Only the phrasing being matched was updated, because only
+   * the phrasing moved.
    */
   it('does not claim to hold a name that Telegram supplies', () => {
     const notice = privacyNotice(CONTACT, SET);
 
     expect(notice).not.toMatch(/name as Telegram supplies/i);
-    expect(notice).toMatch(/display name is not stored/i);
+    expect(notice).toMatch(/do not keep your Telegram display name/i);
     expect(notice).toMatch(/recruitment records/i);
   });
 
