@@ -166,19 +166,38 @@ describe('the case action prefix', () => {
    */
   const LONGEST_REFERENCE = 'CONTRACT-2026-99999';
 
-  it('fits the longest importance payload inside the limit', () => {
+  /**
+   * **Each of these asserts the payload it built, not merely its length**, and
+   * the reason is worth keeping: written the obvious way — `byteLength(data)`
+   * under the limit and nothing else — every one of them passed while
+   * `CALLBACK.CASE_ACTION` did not exist at all.
+   *
+   * `vitest` transpiles rather than type-checks, so a missing property is
+   * `undefined` at runtime, `encodeCallback` stringifies it, and
+   * `"undefined:CONTRACT-2026-99999:M:Critical"` is 39 bytes — comfortably
+   * inside a 64-byte limit. The test was green over nothing, which is the one
+   * failure a test suite must not have, because somebody eventually trusts it.
+   *
+   * Asserting the whole string fixes it in the only way that stays fixed: the
+   * prefix being renamed, removed or mistyped changes the value, and the value
+   * is what is checked.
+   */
+  it('builds the longest importance payload, inside the limit', () => {
     const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'M', 'Critical');
+    expect(data).toBe('CA:CONTRACT-2026-99999:M:Critical');
     expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
   });
 
-  it('fits the longest owner payload inside the limit', () => {
+  it('builds the longest owner payload, inside the limit', () => {
     // Telegram ids are at most ten digits today; a spare digit costs nothing.
     const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'OWN', '99999999999');
+    expect(data).toBe('CA:CONTRACT-2026-99999:OWN:99999999999');
     expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
   });
 
-  it('fits the longest snooze payload inside the limit', () => {
+  it('builds the longest snooze payload, inside the limit', () => {
     const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'SN', '30');
+    expect(data).toBe('CA:CONTRACT-2026-99999:SN:30');
     expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
   });
 });
