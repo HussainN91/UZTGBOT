@@ -13,7 +13,12 @@
  * recoverable by anything — the teacher is holding a reference number for a case
  * that does not exist.
  */
-import { Bot, type Api, type Context } from 'grammy';
+import { Bot, HttpError, type Api, type Context } from 'grammy';
+import {
+  TELEGRAM_API_ATTEMPTS,
+  TELEGRAM_API_BACKOFF_MS,
+  TELEGRAM_TIMEOUT_SECONDS,
+} from '../config/constants.js';
 import { env } from '../config/env.js';
 import { getDb } from '../db/index.js';
 import type { Database } from '../db/index.js';
@@ -23,11 +28,59 @@ import type { Alerter } from '../sync/alerts.js';
 import type { TelegramLookup } from '../staff/repository.js';
 import { telegramAlerter } from './alerter.js';
 import { verdictForChat } from './chat-gate.js';
+import { withRetry } from './api-retry.js';
 import { claimUpdate, releaseUpdate } from './dedup.js';
 import type { InboundUpdate, RouterOutcome } from './router.js';
 import { route } from './router.js';
 import { send, sendDocument } from './send.js';
 import type { InlineKeyboard } from './keyboards.js';
+
+/**
+ * Every Telegram client this system builds, with one shared set of rules.
+ *
+ * **Stated once, on purpose.** Two processes construct a client and both make
+ * exactly the same calls to the same intermittently stalling route, so a timeout
+ * configured in one place and forgotten in the other is a bot that is fixed in
+ * the web process and still hanging for minutes in the worker. `createApi` and
+ * `createBot` below both come through here.
+ *
+ * Two things are applied.
+ *
+ * **A timeout**, because grammY's default is 500 seconds. That is a sensible
+ * library default and quite wrong for this system: measured on the live server
+ * on 3 August 2026, a healthy call has a median of 214ms, so anything still
+ * outstanding after fifteen seconds has stalled and is not going to finish.
+ *
+ * **A retry, but only for failures that never reached Telegram.** `HttpError` is
+ * grammY's wrapper for a network-level failure, meaning the request did not
+ * arrive, so asking again costs nothing. A `GrammyError` is Telegram *answering*
+ * with a refusal, and repeating that only asks a question already answered — at
+ * best wasted, at worst a second identical message to a teacher.
+ *
+ * **The trade being made, stated rather than hidden.** A timeout is not proof
+ * that nothing was sent; a request could in principle be delivered and its reply
+ * lost, and the retry would then double it. This project has already argued that
+ * trade once and landed the same way, in `releaseUpdate`: a lost message is the
+ * worse failure and is the one that actually happens. The evidence here points
+ * the same way, because the stalls appear at connection time while the route is
+ * not completing at all.
+ */
+function configuredBot(): Bot {
+  const bot = new Bot(env().TELEGRAM_BOT_TOKEN, {
+    client: { timeoutSeconds: TELEGRAM_TIMEOUT_SECONDS },
+  });
+
+  bot.api.config.use(async (prev, method, payload, signal) =>
+    withRetry(
+      () => prev(method, payload, signal),
+      { attempts: TELEGRAM_API_ATTEMPTS, backoffMs: TELEGRAM_API_BACKOFF_MS },
+      (err) => err instanceof HttpError,
+      (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    ),
+  );
+
+  return bot;
+}
 
 /**
  * A Telegram client with no handlers, for processes that only ever send.
@@ -37,7 +90,7 @@ import type { InlineKeyboard } from './keyboards.js';
  * double-process every message.
  */
 export function createApi(): Api {
-  return new Bot(env().TELEGRAM_BOT_TOKEN).api;
+  return configuredBot().api;
 }
 
 function toReplyMarkup(keyboard: InlineKeyboard | undefined) {
@@ -164,7 +217,7 @@ function stripBotMention(text: string): string {
 }
 
 export function createBot(): Bot {
-  const bot = new Bot(env().TELEGRAM_BOT_TOKEN);
+  const bot = configuredBot();
   const alerter = telegramAlerter(bot.api);
   const supportContact = env().SUPPORT_CONTACT;
 

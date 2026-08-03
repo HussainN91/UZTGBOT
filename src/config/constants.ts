@@ -449,6 +449,39 @@ export const ANNOUNCEMENT_BATCH = 200;
 export const ANNOUNCEMENT_MAX_ATTEMPTS = 5;
 
 /**
+ * How long a single Telegram API call may take before the bot stops waiting.
+ *
+ * **grammY's own default is 500 seconds**, which is the right default for a
+ * library and quite wrong here. Measured from inside the container on the live
+ * server on 3 August 2026, a call to Telegram has a median of 214ms and a p90 of
+ * 287ms, so anything still outstanding after fifteen seconds is not slow, it is
+ * a stall that is not going to finish. Waiting out the default meant a teacher
+ * could sit in silence for minutes.
+ *
+ * Fifteen is roughly fifty times the p90 and comfortably below the 20 and 60
+ * second stalls that were actually observed, so it cuts the stalls without ever
+ * troubling a healthy call.
+ */
+export const TELEGRAM_TIMEOUT_SECONDS = 15;
+
+/**
+ * Total attempts for one Telegram API call, including the first.
+ *
+ * The stalls are in the path rather than at Telegram: from the same container in
+ * the same minute, Cloudflare and Google answered 40 calls each without one,
+ * while Telegram hung for 21 seconds. A fresh call immediately after a stall
+ * succeeded in about 230ms, which is exactly the shape retrying is for.
+ *
+ * Three attempts with the backoff below bounds the worst case at roughly 32
+ * seconds before the bot gives up and raises an alarm, against the several
+ * minutes it could previously spend on a single message.
+ */
+export const TELEGRAM_API_ATTEMPTS = 3;
+
+/** The wait before a second attempt, doubled for the third. */
+export const TELEGRAM_API_BACKOFF_MS = 500;
+
+/**
  * How long the per-recipient delivery rows of a finished announcement are kept.
  *
  * A constant rather than a settings key, deliberately (D33). It governs
