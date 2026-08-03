@@ -210,7 +210,12 @@ describe.skipIf(!TEST_DATABASE_URL)('one tap on a case menu', () => {
       text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-09999', 'M'),
     });
 
-    expect(hidden.messages[0]?.text).toBe(missing.messages[0]?.text);
+    // The reference itself is echoed back in the refusal, so it is stripped
+    // before comparing — the same normalisation the sibling test in
+    // cases.integration.test.ts applies for the identical reason.
+    expect(hidden.messages[0]?.text.replace('ACCOM-2026-00914', 'X')).toBe(
+      missing.messages[0]?.text.replace('VISA-2026-09999', 'X'),
+    );
   });
 
   it('sends somebody with no staff row the ordinary teacher menu', async () => {
