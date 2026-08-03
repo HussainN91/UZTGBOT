@@ -157,3 +157,28 @@ describe('decoding untrusted callback data', () => {
     expect(isCallback('MENU:FAQ', CALLBACK.MENU, 'FAQ')).toBe(true);
   });
 });
+
+describe('the case action prefix', () => {
+  /**
+   * `CONTRACT-2026-99999` is the longest reference this system can build: the
+   * longest category name, a four-digit year and a five-digit sequence. Measured
+   * with a real value rather than trusted to arithmetic.
+   */
+  const LONGEST_REFERENCE = 'CONTRACT-2026-99999';
+
+  it('fits the longest importance payload inside the limit', () => {
+    const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'M', 'Critical');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+
+  it('fits the longest owner payload inside the limit', () => {
+    // Telegram ids are at most ten digits today; a spare digit costs nothing.
+    const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'OWN', '99999999999');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+
+  it('fits the longest snooze payload inside the limit', () => {
+    const data = encodeCallback(CALLBACK.CASE_ACTION, LONGEST_REFERENCE, 'SN', '30');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+});

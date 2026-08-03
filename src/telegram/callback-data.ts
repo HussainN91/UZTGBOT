@@ -120,6 +120,33 @@ export const CALLBACK = {
    */
   CASE_OPEN: 'CO',
   /**
+   * One action on one case — `CA:<reference>[:<action>[:<value>]]`.
+   *
+   * The same three depths as `STAFF_MENU`, for the same reasons and by
+   * deliberate copy:
+   *
+   * ```
+   * CA:VISA-2026-00311           → the case, with its keyboard
+   * CA:VISA-2026-00311:M         → which level of importance?
+   * CA:VISA-2026-00311:M:Urgent  → do it
+   * ```
+   *
+   * **The reference travels in the payload rather than in conversation state.**
+   * A menu sits in a chat for ever, and one holding "whichever case we were
+   * looking at" would act on a case chosen an hour ago. A self-contained payload
+   * cannot.
+   *
+   * It is not a permission and carries none. Every acting tap is executed by
+   * handing the equivalent typed command to the same dispatcher a typed command
+   * goes through, so a payload replayed by somebody demoted last week buys
+   * exactly nothing.
+   *
+   * `CA:CONTRACT-2026-99999:OWN:99999999999` is 38 bytes against the 64-byte
+   * limit, and `CONTRACT-2026-99999` is the longest reference this system can
+   * build. Tests measure all three shapes with real values.
+   */
+  CASE_ACTION: 'CA',
+  /**
    * Staff management by button — Part 5H.3. `SM:<chat id>[:<action>[:<value>]]`.
    *
    * Three depths in one prefix, because they are one journey:
