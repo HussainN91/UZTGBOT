@@ -37,6 +37,7 @@ import {
   scopeOf,
 } from './context.js';
 import { ANNOUNCE_COMMANDS } from './announce.js';
+import { caseMenuView } from './case-menu.js';
 import { CASE_COMMANDS } from './cases.js';
 import { OPS_COMMANDS } from './ops.js';
 import { parseCommand } from './parse.js';
@@ -186,6 +187,69 @@ export async function routeStaffMenu(
   return {
     messages: [...done.messages, ...list.messages],
     alerts: [...done.alerts, ...list.alerts],
+  };
+}
+
+/**
+ * One tap on a case menu.
+ *
+ * It lives here rather than beside the menu it draws, for `routeStaffMenu`'s
+ * reason: the acting taps run by handing the equivalent typed command to
+ * `routeStaffCommand` above, and `case-menu.ts` cannot call that without a
+ * cycle. **The consequence is the safety argument for the whole part.** A tap
+ * that closes a case is not merely *as* authorised as `/close`; it **is**
+ * `/close`, so the refusal on an already-finished case, the warning when a
+ * teacher can no longer read the message, and the row recording who did it all
+ * come from the one place that has ever had them.
+ *
+ * The gate is `case.view`, which is the least any of these needs — the action's
+ * own capability is checked again inside `routeStaffCommand` when the command
+ * runs, which is what refuses a Support member the owner button they were never
+ * shown. Silence for no staff row, a plain answer for a rank too low: the same
+ * shape as the dispatcher above, and for the same reasons.
+ */
+export async function routeCaseMenu(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'case menu', state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.CASE_VIEW)) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'case menu', state);
+    return reply(chatId, refusalText('/case', CAPABILITY.CASE_VIEW, member.role));
+  }
+
+  const step = await caseMenuView(db, chatId, scopeOf(member), parts);
+  if (step.kind === 'show') return step.outcome;
+
+  const done = await routeStaffCommand(db, chatId, step.command, state, deps);
+  if (done === null) return null;
+
+  /**
+   * The command's answer first, then the case again.
+   *
+   * The first message says what changed, or refuses with a reason only the
+   * command knows. The case follows so the next action is another tap rather
+   * than another `/cases` — which is the entire point of the part.
+   *
+   * `/mycases` is the one exception: it *is* a list, so re-showing a case after
+   * it would be showing a case nobody asked for.
+   */
+  if (step.command === '/mycases') return done;
+
+  const [reference = ''] = parts;
+  const again = await routeStaffCommand(db, chatId, `/case ${reference}`, state, deps);
+
+  return {
+    messages: [...done.messages, ...(again?.messages ?? [])],
+    alerts: [...done.alerts, ...(again?.alerts ?? [])],
   };
 }
 
