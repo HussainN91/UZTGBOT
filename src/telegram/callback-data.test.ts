@@ -201,3 +201,18 @@ describe('the case action prefix', () => {
     expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
   });
 });
+
+describe('the staff add prefix', () => {
+  /**
+   * The payload it built, not merely its length. `vitest` transpiles rather
+   * than type-checks, so a `CALLBACK` member that does not exist is `undefined`
+   * at runtime, `encodeCallback` stringifies it, and a length-only assertion
+   * passes over nothing at all — which is exactly what happened to the three
+   * case-action tests above before they were rewritten this way.
+   */
+  it('builds the longest add payload, inside the limit', () => {
+    const data = encodeCallback(CALLBACK.STAFF_ADD, '9999999999', 'System', 'Accommodation');
+    expect(data).toBe('SA:9999999999:System:Accommodation');
+    expect(byteLength(data)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+  });
+});

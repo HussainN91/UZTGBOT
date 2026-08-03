@@ -178,6 +178,25 @@ export const CALLBACK = {
    */
   STAFF_MENU: 'SM',
   /**
+   * Adding a staff member — `SA[:<chat id>[:<rank>[:<queue>]]]`.
+   *
+   * The one flow in this system whose first step cannot be a button, because
+   * the chat id is the single thing only the person adding knows. So the id is
+   * typed once, into `AwaitingStaffId`, and travels in the payload from then on
+   * — the rank and the queue are chosen, and each choice carries everything
+   * decided before it. A menu left for an hour therefore cannot add whoever was
+   * chosen an hour ago.
+   *
+   * Regions are deliberately not part of it. The row is created covering every
+   * region, which is exactly what `/staff_add 991001 Support Visa` does today
+   * with no regions given, and "Change regions" is on their row immediately
+   * afterwards.
+   *
+   * Ranks and queues are constants in this repository, so unlike a region their
+   * length is ours to guarantee. A test measures the longest with real values.
+   */
+  STAFF_ADD: 'SA',
+  /**
    * A party's answer on an identity dispute, e.g. `DC:42:NotMine` — Feature A.
    *
    * **The claim travels; the party does not.** Who is answering is the chat the

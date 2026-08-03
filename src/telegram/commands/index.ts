@@ -41,7 +41,7 @@ import { caseMenuView, commandForCaseText } from './case-menu.js';
 import { CASE_COMMANDS } from './cases.js';
 import { OPS_COMMANDS } from './ops.js';
 import { parseCommand } from './parse.js';
-import { PEOPLE_COMMANDS, staffMenuList, staffMenuView } from './staff.js';
+import { PEOPLE_COMMANDS, staffAddView, staffMenuList, staffMenuView } from './staff.js';
 
 export type { StaffCommand, StaffContext };
 
@@ -269,6 +269,51 @@ export async function routeCaseMenu(
 }
 
 /**
+ * The add-somebody flow.
+ *
+ * `staff.manage` floors at System and is checked here before anything is shown,
+ * so somebody who guesses the payload is refused at the first step rather than
+ * after choosing a rank. It is checked again inside `/staff_add` when the last
+ * tap runs — the rule is enforced twice on purpose, exactly as it is for every
+ * other staff button.
+ */
+export async function routeStaffAdd(
+  db: Database,
+  chatId: string,
+  parts: readonly string[],
+  state: ConversationState | null,
+  deps: RouterDeps,
+): Promise<RouterOutcome | null> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'staff add', state);
+    return null;
+  }
+
+  if (!can(member, CAPABILITY.STAFF_MANAGE)) {
+    await logInteraction(db, chatId, STAFF_DENIED, 'staff add', state);
+    return reply(chatId, refusalText('/staff_add', CAPABILITY.STAFF_MANAGE, member.role));
+  }
+
+  const step = staffAddView(chatId, parts);
+
+  if (step.kind === 'ask') {
+    await saveState(db, chatId, { kind: 'AwaitingStaffId' });
+    return step.outcome;
+  }
+  if (step.kind === 'show') return step.outcome;
+
+  const done = await routeStaffCommand(db, chatId, step.command, state, deps);
+  if (done === null) return null;
+
+  const list = await staffMenuList(db, chatId);
+  return {
+    messages: [...done.messages, ...list.messages],
+    alerts: [...done.alerts, ...list.alerts],
+  };
+}
+
+/**
  * A staff member's next message, when they were asked for one.
  *
  * **It runs ahead of the command dispatcher, which nothing else does**, and that
@@ -291,7 +336,8 @@ export async function routeStaffWriting(
   state: ConversationState | null,
   deps: RouterDeps,
 ): Promise<RouterOutcome | null> {
-  if (state === null || state.kind !== 'AwaitingCaseText') return null;
+  if (state === null) return null;
+  if (state.kind !== 'AwaitingCaseText' && state.kind !== 'AwaitingStaffId') return null;
 
   const member = await findStaff(db, chatId);
   if (member === null) {
@@ -303,15 +349,30 @@ export async function routeStaffWriting(
 
   if (text.trim().toLowerCase() === '/cancel') {
     await clearState(db, chatId);
-    return reply(chatId, `Cancelled. Nothing was changed on ${state.reference}.`);
+    return reply(
+      chatId,
+      state.kind === 'AwaitingStaffId'
+        ? 'Cancelled. Nobody was added.'
+        : `Cancelled. Nothing was changed on ${state.reference}.`,
+    );
   }
 
   /**
-   * Cleared before the command runs, not after. A command that throws would
-   * otherwise leave the chat still waiting, and the staff member's next message
-   * — quite possibly "what happened?" — would be sent to a teacher.
+   * Cleared before anything runs, on every path, and that ordering is the point.
+   * A command that throws would otherwise leave the chat still waiting, and the
+   * staff member's next message — quite possibly "what happened?" — would be
+   * sent to a teacher.
    */
   await clearState(db, chatId);
+
+  /**
+   * The typed chat id. It is not validated here: `/staff_add` already refuses a
+   * value that is not a chat id, and `addStaff` already answers a row that
+   * exists. Validating here would be the second copy of both.
+   */
+  if (state.kind === 'AwaitingStaffId') {
+    return routeStaffAdd(db, chatId, [text.trim()], null, deps);
+  }
 
   const done = await routeStaffCommand(
     db,

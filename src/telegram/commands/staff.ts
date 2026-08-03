@@ -1520,6 +1520,17 @@ const backToStaffButton: InlineButton = {
 };
 
 /**
+ * The one thing `/staff` could not do by button until now.
+ *
+ * It sits under the list rather than beside each person, because it is about
+ * nobody — every other button in this menu names a subject and this one cannot.
+ */
+const addSomebodyButton: InlineButton = {
+  text: '➕ Add somebody',
+  callback_data: encodeCallback(CALLBACK.STAFF_ADD),
+};
+
+/**
  * What can be done to one person.
  *
  * Deactivate and reactivate are the same slot showing opposite words, because
@@ -1688,10 +1699,10 @@ export async function staffMenuList(db: Database, chatId: string): Promise<Route
         ? `Staff — the first ${String(shown)} of ${String(everybody.length)}`
         : `Staff (${String(everybody.length)})`,
       '',
-      'Tap somebody to change their rank, queue or regions.',
+      'Tap somebody to change their rank, queue or regions, or add somebody new.',
       ...(shown < everybody.length ? ['', '/staff lists everybody as text.'] : []),
     ].join('\n'),
-    staffListKeyboard(everybody),
+    [...staffListKeyboard(everybody), [addSomebodyButton]],
   );
 }
 
@@ -1785,6 +1796,88 @@ function toggledRegions(member: StaffRecord, region: string): string {
     ? member.regions.filter((r) => r.toLowerCase() !== region.toLowerCase())
     : [...member.regions, region];
   return next.length === 0 ? 'clear' : next.join(', ');
+}
+
+/**
+ * What one tap on the add-somebody flow should produce.
+ *
+ * The same show-or-run split as `StaffMenuStep`, plus the one step that has to
+ * ask for a typed value — and `ask` is a third kind rather than a `show` that
+ * happens to save a state, because a state written from inside a function that
+ * claims only to render is the kind of side effect nobody finds later.
+ */
+export type StaffAddStep =
+  | { readonly kind: 'show'; readonly outcome: RouterOutcome }
+  | { readonly kind: 'ask'; readonly outcome: RouterOutcome }
+  | { readonly kind: 'run'; readonly command: string };
+
+/**
+ * One tap on the add-somebody flow, resolved.
+ *
+ * **Nothing here creates a staff row.** The last tap runs `/staff_add`, which is
+ * the single place that knows what a queue means, refuses a rank it does not
+ * recognise, answers a chat id that already has a row, and tells the new member
+ * they have access. A second copy of any of that is what this shape exists to
+ * avoid.
+ */
+export function staffAddView(chatId: string, parts: readonly string[]): StaffAddStep {
+  const [subject = '', role = '', queue = ''] = parts;
+
+  if (subject === '') {
+    return {
+      kind: 'ask',
+      outcome: reply(
+        chatId,
+        [
+          'Send me their Telegram chat id.',
+          '',
+          'It is the number rather than an @handle. If they have ever written to this',
+          'bot it is on their case; otherwise any “what is my id” bot will tell them.',
+        ].join('\n'),
+        [[{ text: '✖️ Cancel', callback_data: encodeCallback(CALLBACK.STAFF_MENU) }]],
+      ),
+    };
+  }
+
+  if (role === '') {
+    return {
+      kind: 'show',
+      outcome: reply(
+        chatId,
+        `Adding ${subject}. Which rank?`,
+        addChoiceKeyboard(STAFF_ROLE_ORDER.map((r) => ({ label: r, parts: [subject, r] }))),
+      ),
+    };
+  }
+
+  if (queue === '') {
+    return {
+      kind: 'show',
+      outcome: reply(
+        chatId,
+        [
+          `Adding ${subject} as ${role}. Which queue?`,
+          '',
+          'The queue decides which teachers’ problems they can read, so it is asked',
+          'rather than guessed — defaulting it would give somebody more than you asked',
+          'for, and nothing on this screen would show it.',
+        ].join('\n'),
+        addChoiceKeyboard(ALL_QUEUES.map((q) => ({ label: q, parts: [subject, role, q] }))),
+      ),
+    };
+  }
+
+  return { kind: 'run', command: `/staff_add ${subject} ${role} ${queue}` };
+}
+
+function addChoiceKeyboard(
+  choices: readonly { readonly label: string; readonly parts: readonly string[] }[],
+): InlineKeyboard {
+  const rows: InlineKeyboardRow[] = choices.map((c) => [
+    { text: c.label, callback_data: encodeCallback(CALLBACK.STAFF_ADD, ...c.parts) },
+  ]);
+  rows.push([backToStaffButton]);
+  return rows;
 }
 
 // ---------------------------------------------------------------------------

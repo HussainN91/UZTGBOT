@@ -70,6 +70,7 @@ import { CALLBACK, decodeCallback } from './callback-data.js';
 import {
   STAFF_DENIED,
   routeCaseMenu,
+  routeStaffAdd,
   routeStaffCommand,
   routeStaffMenu,
   routeStaffWriting,
@@ -1086,6 +1087,18 @@ async function routeCallback(
     case CALLBACK.STAFF_MENU:
       return (
         (await routeStaffMenu(db, update.chatId, decoded.parts, state, deps))
+        ?? only(update.chatId, await menuReplyFor(db, update.chatId))
+      );
+
+    /**
+     * Adding a staff member by button — the flow `AwaitingStaffId` exists for.
+     * Same shape as `STAFF_MENU` just above: `null` means the tapper is not
+     * staff, and the ordinary menu is what they see instead of a confirmation
+     * that the button is real.
+     */
+    case CALLBACK.STAFF_ADD:
+      return (
+        (await routeStaffAdd(db, update.chatId, decoded.parts, state, deps))
         ?? only(update.chatId, await menuReplyFor(db, update.chatId))
       );
 

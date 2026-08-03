@@ -605,6 +605,73 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
     });
   });
 
+  describe('adding somebody by button', () => {
+    it('walks from the id through rank and queue to a staff row', async () => {
+      const start = await send({
+        chatId: SYSTEM,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.STAFF_ADD),
+      });
+      expect(start.messages[0]?.text).toContain('chat id');
+
+      const afterId = await send({ chatId: SYSTEM, kind: 'text', text: '995500' });
+      const rankLabels = labelsOf(afterId);
+      expect(rankLabels).toContain('Support');
+
+      const afterRank = await send({
+        chatId: SYSTEM,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.STAFF_ADD, '995500', 'Support'),
+      });
+      const queueLabels = labelsOf(afterRank);
+      expect(queueLabels).toContain('Visa');
+
+      await send({
+        chatId: SYSTEM,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.STAFF_ADD, '995500', 'Support', 'Visa'),
+      });
+
+      const rows = await db.execute<{ role: string; queue: string; regions: string[] }>(
+        sql`SELECT role, queue, regions FROM staff WHERE telegram_id = '995500'`,
+      );
+      expect(rows.rows[0]?.role).toBe('Support');
+      expect(rows.rows[0]?.queue).toBe('Visa');
+      // Regions are not asked for; empty means every region, never none.
+      expect(rows.rows[0]?.regions).toEqual([]);
+    });
+
+    it('refuses the whole flow to somebody who may not manage staff', async () => {
+      const outcome = await send({
+        chatId: SUPPORT_MEMBER,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.STAFF_ADD, '995501', 'System', 'All'),
+      });
+
+      expect(outcome.messages[0]?.text).toContain('not available at your rank');
+      const rows = await db.execute(sql`SELECT 1 FROM staff WHERE telegram_id = '995501'`);
+      expect(rows.rows).toHaveLength(0);
+    });
+
+    /**
+     * The typed id is not validated by the flow — `/staff_add` already answers a
+     * chat id that has a row, and duplicating that check here would be a second
+     * copy of it. This proves the existing answer is what comes back.
+     */
+    it('hands an existing chat id to the command that already answers for it', async () => {
+      await send({
+        chatId: SYSTEM,
+        kind: 'callback',
+        text: encodeCallback(CALLBACK.STAFF_ADD, SUPPORT_MEMBER, 'Support', 'Visa'),
+      });
+
+      const rows = await db.execute<{ count: string }>(
+        sql`SELECT count(*) AS count FROM staff WHERE telegram_id = ${SUPPORT_MEMBER}`,
+      );
+      expect(rows.rows[0]?.count).toBe('1');
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Identity disputes — Feature A
   // -------------------------------------------------------------------------
