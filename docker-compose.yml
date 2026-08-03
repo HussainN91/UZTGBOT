@@ -59,6 +59,23 @@ services:
     env_file: [.env]
     environment:
       TZ: Asia/Tashkent
+      # Resolve IPv4 before IPv6 when talking to Telegram.
+      #
+      # api.telegram.org publishes both an A and an AAAA record, and this server
+      # has no IPv6 route at all. Left to itself Node sometimes picks the IPv6
+      # address, tries to reach something unreachable, and then waits out the
+      # operating system's TCP connect timeout before falling back.
+      #
+      # Measured on 3 August 2026, from inside this container: 100 calls with the
+      # default order produced a median of 214ms and two pathological calls, one
+      # hanging 20 seconds and one failing after 60. Forty calls with this flag
+      # produced none, and a better p90 (287ms against 406ms). Every reply the
+      # bot sends goes down this path, so a bad roll is a teacher waiting a full
+      # minute for a message that normally takes a fifth of a second.
+      #
+      # Nothing is given up by forcing IPv4 here, because there is no working
+      # IPv6 on this host to prefer. Remove it if the server ever gains one.
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +102,10 @@ services:
     env_file: [.env]
     environment:
       TZ: Asia/Tashkent
+      # Same reason as the web service above. The worker sends every digest,
+      # every announcement and every reminder, so it makes more Telegram calls
+      # than the web process does.
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
     depends_on:
       postgres:
         condition: service_healthy
