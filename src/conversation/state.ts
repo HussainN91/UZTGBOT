@@ -87,6 +87,37 @@ const conversationStateSchema = z.discriminatedUnion('kind', [
    * than a migration nobody wrote.
    */
   z.object({ kind: z.literal('AwaitingUrgentDetail'), attempts }),
+  /**
+   * A staff member writing the words for an action they tapped.
+   *
+   * **The first staff-facing conversation state in this system.** Everything
+   * above it is a teacher's. It exists because a button cannot carry a sentence:
+   * tapping "Reply to teacher" has to be followed by the sentence, and something
+   * has to remember which case it belongs to in between.
+   *
+   * The reference is held rather than the case, so nothing goes stale — the case
+   * is re-read when the message arrives, through `findCase` under the writer's
+   * own scope, exactly as a tap is. `action` is the command the message becomes.
+   *
+   * It expires with everything else after `CONVERSATION_TTL_MINUTES`, which is
+   * the point: a staff member who taps Reply and then goes home does not have
+   * their next message tomorrow sent to a teacher.
+   */
+  z.object({
+    kind: z.literal('AwaitingCaseText'),
+    action: z.enum(['reply', 'await', 'note', 'due', 'close', 'close-unresolved']),
+    reference: z.string(),
+  }),
+  /**
+   * Adding a staff member, and waiting for the one thing that cannot be a
+   * button.
+   *
+   * It carries nothing. The chat id being typed *is* the whole payload, and
+   * everything chosen afterwards travels in the button that chose it, for
+   * `CALLBACK.STAFF_MENU`'s reason: a menu left for an hour must not act on
+   * whoever was chosen an hour ago.
+   */
+  z.object({ kind: z.literal('AwaitingStaffId') }),
 ]);
 
 export type ConversationState = z.infer<typeof conversationStateSchema>;
