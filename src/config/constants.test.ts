@@ -11,6 +11,8 @@ import {
   CASE_TOPIC_CHOICES,
   FAQ_CONFIDENT_SCORE,
   FAQ_MATCH_MIN_SCORE,
+  MAX_SNOOZE_DAYS,
+  SNOOZE_CHOICES,
   caseTopicByKey,
 } from './constants.js';
 
@@ -73,4 +75,10 @@ describe('the categories a teacher can file under', () => {
  */
 it('keeps the confidence floor above the match floor', () => {
   expect(FAQ_CONFIDENT_SCORE).toBeGreaterThan(FAQ_MATCH_MIN_SCORE);
+});
+
+it('offers no snooze button longer than a snooze may be', () => {
+  for (const days of SNOOZE_CHOICES) {
+    expect(days).toBeLessThanOrEqual(MAX_SNOOZE_DAYS);
+  }
 });
