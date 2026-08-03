@@ -1,8 +1,22 @@
 # Buttons for cases, and adding staff: the design
 
-**Date:** 3 August 2026 · **Status: DESIGNED, NOT BUILT.** Belongs to
-`2026-08-01-identity-and-urgent-design.md`, which stays the plan of record. This document
-supersedes that plan's Part 5G §"What gets a button, and what cannot" and its Part 5C — see §2.
+**Date:** 3 August 2026 · **Status: ✅ BUILT — branch `feature/case-and-staff-buttons`, commits
+`eee9e61`…`bd7a81b`.** Belongs to `2026-08-01-identity-and-urgent-design.md`, which stays the plan of
+record. This document supersedes that plan's Part 5G §"What gets a button, and what cannot" and its
+Part 5C — see §2.
+
+```
+1,319 tests across 71 files · 0 failed · 0 skipped · 259 seconds
+typecheck clean · build clean · lint 0 warnings · deps zero cycles, zero layer violations
+```
+
+**Every number above was run on 3 August 2026 against the tree as committed.** The suite gained 155
+tests; nothing was removed.
+
+> **Designed first, built second.** The design below is as it was approved. Where building it
+> changed something, the change is marked inline rather than written over the top — §7 carries the
+> one change of substance the head of project made during the build, and §13 carries what building
+> it found.
 
 > Asked for by the head of project on 3 August 2026. Their words, because they set the whole scope:
 > *"it is a big hassle to constantly keep typing the case number everytime"*, and — when asked
@@ -276,10 +290,53 @@ acknowledges it — the property the current ordering was chosen for is kept, no
 
 ### The notice itself
 
-Rewritten with the `humanizer` skill. **The content is not being changed** — the head of project's
-words were *"the core of the message is fine i just don't like the way it is written"*. What is
-held, what it is used for, who can see it, how long it is kept, the dispute sentence and the access
-route all say the same things afterwards.
+Rewritten with the `humanizer` skill. ~~**The content is not being changed**~~ — the head of
+project's words were *"the core of the message is fine i just don't like the way it is written"*.
+What is held, what it is used for, who can see it, how long it is kept, the dispute sentence and the
+access route all say the same things afterwards.
+
+> ### ⚠️ CORRECTED, 3 August 2026 — one thing in the content did change
+>
+> The rewrite was shown to the head of project before it landed, as promised above. They asked for
+> the access-and-removal route to be changed: *"instead, tell them to contact their regional admin …
+> the one who is responsible for the region the user is in."*
+>
+> It was first put to them that removing the route altogether would leave the notice describing what
+> is collected with no way for anybody to ask about it or get out. They did not remove it — they
+> **replaced the contact with the regional admin**, which is a better first answer than the one that
+> was there: a regional admin is a person a teacher can actually reach, and they are already
+> handling that teacher's cases, so the request lands with somebody who can act on it.
+>
+> **The support number was kept underneath it, and that choice was made without asking.** This
+> system has a real state in which a teacher has no recorded region — `/case` prints "region not
+> recorded" against it, and it is *why* every staff member can see that teacher's case. For them
+> "your regional admin" names nobody. The same is true of a teacher whose access has ended, which is
+> exactly when somebody asks to be forgotten. `supportContact` is validated at start-up and cannot
+> be a placeholder, so the second line is always a route that exists.
+>
+> So the notice now reads:
+>
+> ```
+> Asking what we hold, or asking us to delete it
+> Contact your regional admin: the staff member responsible for the region you work in.
+> If you do not know who that is, contact +998 71 000 0000.
+> ```
+>
+> A test asserts **both** lines, for the two different teachers each one is for.
+
+Three other things changed in how it reads, beyond word choice, and all three were approved before
+they landed:
+
+- **The dashes went.** Three sentences hung a clause off a dash, and each dash was carrying the part
+  a teacher was most likely to have assumed wrongly — that the bot does *not* hold a Telegram
+  display name, and that the permanent access record excludes their messages. Each is its own
+  sentence now, and a test keeps it that way.
+- **The headings name a subject.** "What is held" and "It is not shared" describe a filing cabinet
+  with nobody standing at it. A teacher asking who has their email address is owed an answer, so it
+  says what **we** keep and what **we** do.
+- **The hand-wrapped lines went.** The text was wrapped by hand at about seventy characters. Telegram
+  wraps for itself, so on a phone every paragraph wrapped twice and came out ragged. One blank line
+  had to be added where the hand wrapping had been doing the work of a paragraph break.
 
 Two constraints the rewrite must not break, both already protected by tests in `src/config/`:
 
@@ -420,3 +477,78 @@ run happens once, after piece 2.
 - **Teacher-facing wording beyond the sign-in prompt**, per decision 3.
 - **Any database migration**, any change to who can see what, and any change to a capability floor.
 - **`CASE_LIST_BUTTON_CAP`**, which stays at 8.
+
+---
+
+## 13. What building it cost, and the three faults it found
+
+Built on 3 August 2026 across five sittings, each one a fresh worker holding only the tasks in front
+of it. The estimate was three days including tests. **Every fault below was found by running
+something**, and two of them were found only because a step that was supposed to go red went green.
+
+### ⚠️ Fault 1 — three new tests were green over a prefix that did not exist
+
+The byte-budget tests written with `CALLBACK.CASE_ACTION` asserted only that the payload **fitted**
+inside 64 bytes. `vitest` transpiles rather than type-checks, so a `CALLBACK` member that does not
+exist is `undefined` at runtime; `encodeCallback` stringifies it, and
+`"undefined:CONTRACT-2026-99999:M:Critical"` is 39 bytes against a limit of 64.
+
+**All three passed before the prefix was written.** Nobody would have noticed, because they went on
+passing afterwards too. It surfaced only because the red step of the cycle did not go red and that
+was reported rather than shrugged at.
+
+They now assert the payload they built. Proved by setting the prefix to `XX` and watching exactly
+those three go red before restoring it — `CLAUDE.md`'s rule that a checker must be made to fail on
+purpose before it is believed, applied to a checker this project had just written. Commit `417f821`.
+
+**The other prefixes in `callback-data.test.ts` are measured the same length-only way.** None is
+green over nothing today, because each was written against a member that already existed — but the
+shape is the same and the next one added would inherit it. Left alone rather than widened into an
+unrelated change, and written down here instead.
+
+### ⚠️ Fault 2 — a refusal test that could never have passed
+
+The scope test compared the refusal for a case in another queue against the refusal for a case that
+does not exist, asserting they are identical — which is the property that stops the bot confirming a
+teacher filed something. But each refusal **echoes its own reference**, so the two strings could
+never be equal no matter how correct the code was.
+
+The sibling test in `cases.integration.test.ts` had solved this years of commits earlier by
+normalising both sides first. That was copied. Commit `7082acb`.
+
+### ⚠️ Fault 3 — a fixture using a case status that does not exist
+
+The `/cancel` test set up a case at `Submitted`. `case_status` is a PostgreSQL enum and its values
+are `New, Received, Under review, Action required, Escalated, Completed, Closed, Duplicate`. The
+insert threw. Caught immediately, and it is in this list only because a plan that names a value
+without checking the schema will name a wrong one again.
+
+### The ordering decision, proved rather than asserted
+
+The one genuinely new mechanism here is that a staff member writing a reply has their next message
+treated as **content, even when it begins with a slash** — so `/close the window in her flat is
+broken` reaches the teacher as written instead of being half-matched as a command and thrown away.
+That rests entirely on `routeStaffWriting` running **ahead of** the command dispatcher in
+`routeText`, which is a two-line ordering that a later refactor could reverse without anything
+looking wrong.
+
+It was checked by moving the branch after the dispatcher and running the suite. **Exactly one test
+went red, and it was the right one.** The ordering is held by a test rather than by the comment
+explaining it.
+
+### What was cheaper than the estimate, and what was not
+
+The buttons themselves were as cheap as the head of project said they would be — *"it is only just
+taking a preexisting function and making it into a button"* — and that was the correct reading. Nine
+buttons is a keyboard function and a `switch`, because Part 5H.3 had already built the pattern.
+
+The cost was where the estimate said: the writing states, which had no precedent anywhere in this
+system, and the tests, which are most of every change here. The suite gained **155 tests** against
+roughly 900 lines of source.
+
+### What the head of project has not seen yet
+
+**None of it has been run against the live bot.** Piece 1 was built to be tried early and the branch
+was carried straight through to the end instead, so the first person to tap `💬 Reply to teacher` on
+a real case will be them. The button layout in §4 is the thing most worth their eye: it was approved
+as a description and has never been looked at as a screen.

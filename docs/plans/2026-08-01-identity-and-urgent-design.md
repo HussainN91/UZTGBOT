@@ -405,9 +405,20 @@ roughly half a day either way, not additional.
 
 # PART 5 — Raised, not designed
 
-## C. Interactive `/staff_add` (~1.5 days)
+## C. Interactive `/staff_add` — ✅ **BUILT, 3 August 2026**
 
-Type `/staff_add <chatID>`, then choose rank from a menu, then region.
+> Built as part of `docs/plans/2026-08-03-buttons-for-cases-and-staff-design.md` §6, in about half a
+> day rather than the 1.5 estimated here — because the staff-facing conversation state this section
+> correctly identified as the real cost was built once and shared with the case menu, exactly as the
+> paragraph below argues it should be.
+>
+> **One departure from the shape described here:** the flow asks for rank and then **queue**, and
+> does not ask for region at all. Queue cannot be skipped — it decides which teachers' problems
+> somebody can read, and `/staff_add` has always refused to guess it. Regions are left at "every
+> region", which is what a typed `/staff_add 991001 Support Visa` already does when regions are
+> omitted, and "Change regions" sits on the new member's row immediately afterwards.
+
+~~Type `/staff_add <chatID>`, then choose rank from a menu, then region.~~
 
 **The real cost is not the menus.** Conversation states are currently a
 *teacher-facing* machine — `AwaitingIdentifier`, `AwaitingCaseDetail` and so on.
@@ -870,12 +881,26 @@ now answered**:
   out, that is this decision showing, and the fix is a marker on the row rather
   than reopening the question.
 
-### What gets a button, and what cannot
+### ~~What gets a button, and what cannot~~ — **SUPERSEDED, 3 August 2026**
 
-**One tap, no typing - build these:** open a case, take it (assign to self),
-mark urgent, close, reopen.
+> **Everything below is no longer in force.** `/reply`, `/note`, `/due`, `/snooze` and `/close` are
+> all buttons now. See `docs/plans/2026-08-03-buttons-for-cases-and-staff-design.md`, which is the
+> design of record for the case menu.
+>
+> **The reasoning below was right; its conclusion went out of date.** The estimate behind it was made
+> before Part 5H.3 existed, and 5H.3 built the harder half — a tap resolves to the typed command it
+> stands for and the dispatcher runs it. Free text turned out to be that same pattern plus one row in
+> `conversation_states`, a table that already had the expiry and needed no migration. It cost about a
+> day.
+>
+> Left in place rather than deleted, because the argument it makes — that a staff-facing multi-step
+> flow should be built once and deliberately, and not smuggled in behind a button — is exactly what
+> was then done.
 
-**Needs typing - leave as commands:** `/reply`, `/note`, `/due`, `/snooze`.
+~~**One tap, no typing - build these:** open a case, take it (assign to self),
+mark urgent, close, reopen.~~
+
+~~**Needs typing - leave as commands:** `/reply`, `/note`, `/due`, `/snooze`.~~
 
 The split is not arbitrary. Anything carrying free text needs the bot to remember
 *"this staff member is now writing a reply to case X"*, and **conversation state
