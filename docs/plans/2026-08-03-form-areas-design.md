@@ -1,7 +1,24 @@
 # Form areas: a complaint and its paperwork, together — the design
 
-**Date:** 3 August 2026 · **Status: DESIGNED, NOT BUILT.** Belongs to
-`2026-08-01-identity-and-urgent-design.md`, which stays the plan of record.
+**Date:** 3 August 2026 · **Status: ✅ BUILT on 4 August 2026 — commits `80f1a50`…`3fa4342` on
+`main`.** Belongs to `2026-08-01-identity-and-urgent-design.md`, which stays the plan of record.
+
+```
+1,346 tests across 71 files · 0 failed · 0 skipped · 259 seconds
+typecheck clean · build clean · lint 0 warnings · deps zero cycles, zero layer violations
+```
+
+**Every number above was run on 4 August 2026 against the tree as committed.** The suite gained 27
+tests; nothing was removed. The dependency graph is byte-identical to before — no new modules and no
+new edges between them.
+
+> **Designed first, built second.** The design below is as it was approved. Where building it changed
+> something, the change is struck through with the correction against it rather than written over the
+> top — §11 carries everything building it found, including the one part of §6 that is **not built**.
+
+> ### ⚠️ One thing in §6 was not built
+>
+> "Tell the case's owner, if it has one" when a submission attaches to a complaint. See §11.
 
 > Asked for by the head of project on 3 August 2026, in three pieces over one conversation. Their
 > words for the shape of it, because they settle the whole design:
@@ -190,7 +207,7 @@ look for that teacher's **open case in the same form area**, and if there is one
 
 - add a note recording that the submission arrived, with its sheet row
 - clear the "no form yet" flag on the case
-- tell the case's owner, if it has one
+- ~~tell the case's owner, if it has one~~ — **not built. See §11.**
 
 and only create a case when there is no open one — which is the path a teacher who submits without
 ever writing a message still takes, unchanged.
@@ -255,3 +272,73 @@ filing twice.
 - **No change to `EmailColumnError`'s refusal to guess** when `EMAIL_COLUMN` is empty.
 - **Nothing deleted from `form_links`.** The retired test rows stay as history and simply go quiet.
 - **No change to how a teacher reaches Submit Documents**, or to the two gates in front of it.
+
+---
+
+## 11. What building it found — 4 August 2026
+
+### ⚠️ The one thing that is not built
+
+**§6's "tell the case's owner, if it has one" when a submission attaches.** The implementation plan
+never carried it — its task 5 lists the note, the flag and the marker and stops there, and neither
+the plan's tests nor §9's list of what proves it works mentions the owner. So it was designed,
+dropped in planning, and the gap survived into the build.
+
+It is not a line of code away. `sync/form-responses.ts` is a layer-2 store, and **stores must not
+send**. Its only outbound path is the staff `Alerter`, which writes to the operations channel rather
+than to one person's chat — telling a named owner needs the message to be *returned* to something in
+layer 3, and nothing above this sync is listening. The sync is driven by the worker, not by a
+teacher's message, so there is no reply to attach it to.
+
+**This needs a decision rather than an afternoon**, and the case is not silent meanwhile: the note is
+on the case, `awaiting_form` is cleared, and anybody opening it sees the paperwork arrived.
+
+### What changed while building, and why
+
+| # | Change |
+|---|---|
+| 1 | **`findEmailColumn`'s third parameter is required, not defaulted.** Every one of the six existing call sites now has to answer "is a column named here?", which is the `mainMenuKeyboard` rule — make the wrong thing impossible to write rather than merely tested for. |
+| 2 | **There was no test asserting the word "Reword".** The plan said to search for one and update it. It does not exist; the two tests guarding that message assert the headings and the reason, and both survive the rewording untouched. So an assertion was **added** instead — the message must name the tab, both headings, and `EMAIL_COLUMN`, and must *not* contain "Reword". The advice that would damage a correct question cannot come back unnoticed. |
+| 3 | **`AwaitingFormComplaint` carries `attempts` as well as `formType`.** The plan's snippet omitted it. The shared retry helper counts attempts, and without the field a teacher sending photographs would be held at the prompt for the whole life of the state — the exact fault `handleUrgentDetail` already records having had. |
+| 4 | **`chooseDocForm` gained a `chatId` parameter.** It has to write the conversation state, and it had no way to say whose. |
+| 5 | **`handleCaseDetail` was split rather than reused.** The plan says "route it through the same helper `AwaitingCaseDetail` uses"; there was no such helper — the filing path *was* `handleCaseDetail`. It is now `fileTypedCase`, taking the resolved category and optional area, with `handleCaseDetail` and `handleFormComplaint` as its two thin callers. One expression of the D11 announce rule, the attempt counter and the revoked-mid-conversation recovery, not two. |
+| 6 | **The router test went in `router.integration.test.ts`**, which drives `route` end to end, rather than the FAQ handler file the plan offered. `form_links` was added to that file's `TRUNCATE` and to `notify.integration.test.ts`'s — the fault that file's own comment records: a feature that starts reading a table breaks every test file that does not clean it. |
+| 7 | **Two migrations, `0012_form_areas` and `0013_case_form_area`.** Both read before accepting; three `ADD COLUMN` and two `ADD COLUMN` respectively, and nothing else. |
+
+### Tests added beyond the plan
+
+Six, each guarding something the plan's own reasoning depends on but did not check:
+
+- **The three columns update on a second sync, not only insert on the first.** Set-on-insert-only is
+  the classic `onConflictDoUpdate` omission, and it would leave MoPSE editing a cell that silently
+  never took effect.
+- **The same two-email-column tab is refused when nothing is named**, which is what proves the named
+  column is doing the work rather than luck.
+- **An attach is as idempotent as a create** — re-reading the tab must not add a note to the
+  complaint every ten minutes. The marker's primary key is the guarantee and the new path had to be
+  shown to keep it.
+- **The notice says the form is in** once `awaiting_form` is cleared, not merely that it is missing.
+- **A case whose area has left the sheet still notifies**, naming the raw code. That is the whole
+  reason `form_type` is not a foreign key, and nothing else asserted it.
+- **A form with no `PREPARE` is unchanged**, including that it captures nothing the teacher types
+  next — which is what keeps this feature from altering Submit Documents for everybody.
+
+### On the verification, honestly
+
+**The tests were written before their code, but not run before it.** The head of project asked
+mid-session for one run at the end rather than a run per task, which was built as asked. The cost is
+that no new test was watched failing for the right reason at the moment it was written.
+
+That was paid back afterwards rather than waived: the two load-bearing behaviours — the retired-form
+rule and the named email column — were **broken on purpose** and the suite re-run. Exactly five tests
+failed and each mapped to the behaviour broken; "reads a form that is still on the sheet" correctly
+went on passing. Then both were restored and the suite went green again. A test that has never been
+seen to fail is not yet a test, and these have now been seen to fail.
+
+### On the commits
+
+**Task 1 ships alone, as intended**, and was reconstructed and verified in isolation — typecheck
+clean and 35 tests green with nothing else from this work in the tree — before being committed. The
+remaining tasks collapsed into one commit: building everything before committing anything meant the
+test files carried several tasks at once, and separating them further would have needed the same
+surgery for changes that ship together anyway.

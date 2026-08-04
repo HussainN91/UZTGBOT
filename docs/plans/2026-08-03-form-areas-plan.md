@@ -1,5 +1,13 @@
 # Form areas — Implementation Plan
 
+> **✅ EXECUTED on 4 August 2026, commits `80f1a50`…`3fa4342`.** All ten tasks except one item:
+> §6's "tell the case's owner" was never in this plan's steps and is **not built**. The design
+> document's §11 carries that gap, the seven changes made while building, the six tests added beyond
+> this plan, and an honest note on the verification — the tests were written before their code but
+> run only at the end, at the head of project's request, and the two load-bearing behaviours were
+> broken on purpose afterwards to prove the tests could fail. **Read the design's §11, not this
+> plan, for what was actually built.**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
