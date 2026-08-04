@@ -1744,23 +1744,40 @@ work moving rather than as work disappearing.**
 ## 4.18 Publishing a document form, the whole procedure
 
 **Do all six steps. Steps 3 and 4 are the ones that go wrong**, and when they do
-the bot looks perfectly healthy while quietly reading nothing.
+the bot looks perfectly healthy while quietly reading nothing. Step 7 is not part
+of publishing a form — it is how to retire one without losing anybody's documents.
 
 The bot never receives a file. Teachers fill in a Google Form; the documents stay
 in Google; what the bot reads back is the fact that somebody submitted, and who.
 
 ### 1. Build the form in Google Forms
 
-Whatever questions you need. One rule, and it is the only one:
+Whatever questions you need. There is one rule about the email question, and it
+has two ways of being satisfied:
 
-> **Exactly one question must have the word "email" in its title, and it must be
-> the one asking for the teacher's recruitment email.**
+> **Either exactly one question has the word "email" in its title — or you tell
+> the bot which question is the right one, in the `EMAIL_COLUMN` column of the
+> `FORMS` tab.**
 
-"Your email address", "Recruitment email" and "E-mail" all work, because the bot ignores
-capitals, spaces and hyphens. What breaks it is a **second** question mentioning
-email, such as "Your supervisor's email": the bot then cannot tell which address
-identifies the teacher, and it refuses that form's responses rather than guess.
-Filing somebody's documents under their supervisor is worse than not filing them.
+If only one question mentions email, you need do nothing: "Your email address",
+"Recruitment email" and "E-mail" all work, because the bot ignores capitals,
+spaces and hyphens.
+
+**More than one question mentioning email is normal and is not a mistake.** Every
+one of our four real forms has several, for two entirely ordinary reasons. Google's
+own **Collect email addresses** setting adds a hidden `Email Address` column, and
+the form usually asks for the address as a question as well — so there are two
+before you have done anything. Then a form that sensibly asks for a school contact
+email, or an emergency contact email while somebody is on leave, has three or four.
+
+Those are the right questions to ask. **Do not reword them.** Fill in
+`EMAIL_COLUMN` instead — step 4 — and the bot will stop guessing and use the
+question you named.
+
+If several questions mention email and you have *not* named one, the bot refuses
+that form's responses entirely and the operations chat says so, listing the
+headings it found. It refuses rather than guessing because filing somebody's
+documents under their supervisor is worse than not filing them.
 
 **Make the email question required.** A submission with no address can never be
 matched to anybody.
@@ -1789,17 +1806,66 @@ and easier to get right later. Do it now, before step 4, not after.
 
 ### 4. Add the row to the `FORMS` tab
 
-| Column | What goes in it |
-|---|---|
-| `TYPE` | A short code in capitals with no spaces or punctuation, such as `PASSPORT` or `VISA`. This travels inside the button, so it must be short and plain |
-| `BUTTON_TEXT` | What the teacher sees on the button. An emoji is fine, for example `🛂 Passport copy` |
-| `URL` | The form's link, from **Send → 🔗** in Google Forms. Must start with `https://` |
-| `RESPONSES_TAB` | **The exact tab name from step 3.** These two must match perfectly |
-| `ACTIVE` | `TRUE` to show it, `FALSE` to hide it |
+| Column | Needed? | What goes in it |
+|---|---|---|
+| `TYPE` | yes | A short code in capitals with no spaces or punctuation, such as `PASSPORT` or `VISA`. This travels inside the button, so it must be short and plain |
+| `BUTTON_TEXT` | yes | What the teacher sees on the button. An emoji is fine, for example `🛂 Passport copy` |
+| `URL` | yes | The form's link, from **Send → 🔗** in Google Forms. Must start with `https://` |
+| `RESPONSES_TAB` | no | **The exact tab name from step 3.** These two must match perfectly |
+| `ACTIVE` | no | `TRUE` to show it, `FALSE` to hide it. Blank means shown |
+| `CATEGORY` | no | Which area a complaint raised here is filed under. Blank means `Contact Support`. See below |
+| `PREPARE` | no | What the teacher should gather, shown above the link. **Filling this in turns the form into an area** — see below |
+| `EMAIL_COLUMN` | no | The exact heading of the question holding the teacher's own email address |
 
 Leave `RESPONSES_TAB` blank if the form is not linked yet. The button still
 appears and teachers can still submit, but the bot will not read anything back
 until you fill it in.
+
+**Finding the right `EMAIL_COLUMN`.** Open the responses spreadsheet, look along
+the top row, and copy the heading of the question that asks the teacher for *their
+own* address — not the school's, not an emergency contact's. Copy it character for
+character. **Including a trailing space if there is one**, which there often is,
+because Google keeps whatever was typed when the form was built. If you get it
+wrong the operations chat tells you the heading it looked for and lists every
+heading that is actually there, so it is a one-minute fix rather than a mystery.
+
+Leave `EMAIL_COLUMN` blank when only one question mentions email. Nothing changes.
+
+### 4a. Form areas — a complaint and its paperwork together
+
+**Fill in `PREPARE` and the form stops being just a link.** The teacher is shown
+what to gather, then the link, then asked to say what they need — and what they
+type opens a case with the paperwork attached to it when it arrives. Before this,
+a teacher with a problem could either submit documents or describe the problem,
+and nothing joined the two.
+
+`CATEGORY` decides who works it. It must be one of the areas the bot already has:
+
+`Visa` · `Travel and Arrival` · `Contract Signing` · `Accommodation` ·
+`Submit Documents` · `Contact Support`
+
+**A category the bot does not have is rejected with its row number** and the other
+rows still sync, so a typo costs you one form rather than all of them.
+
+This is the mapping we recommend, and it is yours to change in the sheet at any
+time — no developer needed:
+
+| The button says | Filed under |
+|---|---|
+| Accommodation | `Accommodation` |
+| Reimbursement | `Travel and Arrival` |
+| Holiday Leave | `Contact Support` |
+| Medical Leave | `Contact Support` |
+
+Holiday Leave and Medical Leave get a button with their own name but no area of
+their own, which is deliberate: a new area needs its own queue, its own staff and
+its own reference numbers, and two of those do not exist yet. The button is what
+the teacher sees, and the filing happens quietly behind it.
+
+**Keep `PREPARE` short.** It is read on a phone, in a chat, before the teacher
+leaves for the form. The list of documents, the filename to use, and one warning
+is about right. Sample fees, tables and paste-here boxes belong in the Google Doc
+the teacher is about to open, not in a chat message.
 
 ### 5. Wait ten minutes
 
@@ -1821,6 +1887,29 @@ minutes:
 **If nothing appears**, it is almost always step 2 or step 4: the responses went
 to a different spreadsheet, or `RESPONSES_TAB` does not match the tab name.
 Compare the two, character for character.
+
+### 7. Retiring a form — leave the row on the sheet for a day
+
+> **The bot stops reading a form the moment it leaves the sheet.** A submission
+> that arrives after you remove the row is never filed, and nobody is told — not
+> the teacher and not the staff.
+>
+> **So when you stop telling teachers about a form, leave its row on the `FORMS`
+> tab for a day**, with `RESPONSES_TAB` still filled in. Set `ACTIVE` to `FALSE`
+> if you want the button gone immediately; that hides it from teachers while the
+> bot goes on reading. Then delete the row the next day, once anything already
+> submitted has been swept up.
+
+This changed on 3 August 2026 and it was a deliberate trade. The bot used to keep
+reading a form for ever after it was switched off, exactly so that last night's
+submissions were never lost. But nothing ever ended that: a test form retired
+weeks earlier was still being read every ten minutes, its response tab no longer
+existed, and every single attempt raised a critical alert. That was the
+notification noise, and it had no way of stopping short of editing the database by
+hand.
+
+The cost of the fix is the paragraph above, and one day of patience is what pays
+it.
 
 > ### ⚠️ Never delete or reorder rows in a responses tab
 >
