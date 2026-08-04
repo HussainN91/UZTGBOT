@@ -35,10 +35,26 @@ sudo usermod -aG docker "$USER"   # log out and back in
 ## 2. Fetch the code and configure it
 
 ```bash
-git clone <this repository> /opt/mopse-bot
-cd /opt/mopse-bot
+git clone <this repository> /home/ubuntu/UZTGBOT
+cd /home/ubuntu/UZTGBOT
 cp .env.example .env
 ```
+
+> ### The directory is `/home/ubuntu/UZTGBOT` on the live server
+>
+> **This document said `/opt/mopse-bot` until 4 August 2026 and that directory has
+> never existed.** It sent a person to the wrong folder, and the same wrong path
+> was in the backup cron line below — so a backup scheduled by copying it would
+> have failed every night, writing to a log nobody reads.
+>
+> **On any server, find the real directory rather than trusting this file:**
+>
+> ```bash
+> docker compose ls
+> ```
+>
+> The `CONFIG FILES` column gives the full path to `docker-compose.yml`, and the
+> directory holding it is the one every command here means.
 
 Fill in `.env`. Generate the webhook secret rather than inventing one:
 
@@ -185,6 +201,25 @@ loopback for exactly this, so use `127.0.0.1` with the same credentials.
 **Record the passphrase somewhere that is not this server.** An encrypted backup
 whose passphrase died with the machine is not a backup.
 
+> ### Quote any `.env` value containing spaces, braces or quotes
+>
+> **`backup.sh` reads `.env` with the shell, and Docker Compose does not.** Compose
+> has its own parser and is happy with an unquoted value; the shell treats spaces
+> as separators and braces as syntax. So a value that works perfectly for the
+> running bot can still make the backup script emit errors while sourcing the file.
+>
+> This is not hypothetical — on the live server
+> `GOOGLE_SERVICE_ACCOUNT_JSON` holds raw JSON, unquoted, and sourcing `.env`
+> reports `type:: command not found`. Nothing uses that variable in the backup
+> path, so it does no harm today. It would if the broken line sat above one the
+> script needs.
+>
+> Wrap such values in single quotes:
+>
+> ```
+> GOOGLE_SERVICE_ACCOUNT_JSON='{"type": "service_account", ...}'
+> ```
+
 Run one by hand and watch it succeed:
 
 ```bash
@@ -202,8 +237,24 @@ sudo crontab -e
 
 ```cron
 CRON_TZ=Asia/Tashkent
-30 2 * * * cd /opt/mopse-bot && ./deploy/backup.sh >> /var/log/mopse-backup.log 2>&1
+30 2 * * * /home/ubuntu/UZTGBOT/deploy/backup.sh >> /var/log/mopse-backup.log 2>&1
 ```
+
+**Use the script's full path, and do not put a `cd` in front of it.** `backup.sh`
+works out its own location, so it runs correctly from anywhere — which means the
+`cd` was never needed and was one more place for the path to be wrong. It was
+wrong, and `cd` to a directory that does not exist takes the whole line down with
+it while cron carries on reporting nothing.
+
+**Check the next morning that it actually ran**, rather than assuming a saved
+crontab is a working backup:
+
+```bash
+tail -20 /var/log/mopse-backup.log
+```
+
+An empty or missing log at 03:00 Tashkent means the line never ran — almost
+always a wrong path.
 
 ### Then test the restore
 
