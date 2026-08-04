@@ -17,7 +17,7 @@
  * whichever feature read it, and a misspelled topic made that answer permanently
  * unreachable with no error anywhere.
  */
-import { faqTopicByLabel, faqTopicLabels } from '../config/constants.js';
+import { CASE_CATEGORY, faqTopicByLabel, faqTopicLabels } from '../config/constants.js';
 import { normaliseText } from '../faq/normalise.js';
 import { CALLBACK, callbackPartProblem } from '../telegram/callback-data.js';
 
@@ -92,6 +92,20 @@ export interface FormRow {
   readonly url: string;
   readonly responsesTab: string | null;
   readonly active: boolean;
+  /**
+   * The existing case category a complaint in this area is filed under, or null
+   * for `Contact Support`.
+   *
+   * **A category, never a queue.** `QUEUE_FOR_CATEGORY` already turns one into
+   * the other, and naming the queue here would put a second answer to "who works
+   * this" beside it. Two answers drift, and the one that drifts is the one
+   * nobody was looking at.
+   */
+  readonly category: string | null;
+  /** What to gather, shown above the form link. Null means no such message. */
+  readonly prepare: string | null;
+  /** The exact heading of the teacher's own email column. See `findEmailColumn`. */
+  readonly emailColumn: string | null;
 }
 
 const FAQ_COLUMNS = [
@@ -264,50 +278,86 @@ function urlProblem(value: string): string | null {
 }
 
 /**
- * The responses tab does not name its own email column, and cannot.
+ * The responses tab cannot name its own email column, so the FORMS tab does.
  *
  * Google heads each column with the QUESTION as it was typed when the form was
  * built, so the email column is "Your email address" in one form and
  * "Recruitment email" in the next. There is no fixed name to require.
  *
- * The rule is therefore: **exactly one** column heading may contain the word
- * "email", and that is the one.
+ * Without `EMAIL_COLUMN` the rule is: **exactly one** column heading may contain
+ * the word "email", and that is the one. Two matches is an error rather than a
+ * guess, and that is the point of this class. A form asking both "Your email"
+ * and "Your supervisor's email" would otherwise be read by position — and filing
+ * a teacher's documents under their supervisor is a silent, plausible, wrong
+ * answer, which is the worst kind this system produces. Nought matches is the
+ * same refusal for the opposite reason.
  *
- * Two matches is an error rather than a guess, and that is the point of this
- * class. A form asking both "Your email" and "Your supervisor's email" would
- * otherwise be read by position — and filing a teacher's documents under their
- * supervisor is a silent, plausible, wrong answer, which is the worst kind this
- * system produces. Nought matches is the same refusal for the opposite reason.
- *
- * The runbook states the whole rule in one sentence: the email question must
- * have the word "email" in its title, and no other question may.
+ * **The refusal was always right; what was missing was somewhere to put the
+ * answer.** All four of MoPSE's real forms have several email columns for
+ * entirely normal reasons, so before `EMAIL_COLUMN` existed the only advice this
+ * class could give was to reword the questions — which would have damaged
+ * questions that were asking exactly the right thing.
  */
 export class EmailColumnError extends Error {
   constructor(
     readonly tab: string,
     readonly matches: readonly string[],
+    /** The heading `EMAIL_COLUMN` asked for, when it asked for one. */
+    readonly wanted?: string,
+    /** Every heading in the tab, so the sheet's owner can see what to name. */
+    readonly headings?: readonly string[],
   ) {
     super(
-      matches.length === 0
-        ? `The "${tab}" tab has no column whose heading contains "email", so no submission in it ` +
-          `can be matched to a teacher. Add an email question to the form — its title must contain ` +
-          `the word "email" — or correct RESPONSES_TAB if this is the wrong tab. Nothing was filed.`
-        : `The "${tab}" tab has ${matches.length} columns whose headings contain "email": ` +
-          `${matches.join(', ')}. Only one may, or the bot cannot tell which address identifies the ` +
-          `teacher — and filing their documents under somebody else is worse than not filing them. ` +
-          `Reword the others. Nothing was filed.`,
+      wanted !== undefined
+        ? `The "${tab}" tab has no column called "${wanted}", which is what EMAIL_COLUMN names for ` +
+          `this form. Its columns are: ${(headings ?? []).map((h) => `"${h.trim()}"`).join(', ')}. ` +
+          `Correct EMAIL_COLUMN on the FORMS tab, or rename the question to match. Nothing was filed.`
+        : matches.length === 0
+          ? `The "${tab}" tab has no column whose heading contains "email", so no submission in it ` +
+            `can be matched to a teacher. Add an email question to the form — its title must contain ` +
+            `the word "email" — or correct RESPONSES_TAB if this is the wrong tab. Nothing was filed.`
+          : `The "${tab}" tab has ${matches.length} columns whose headings contain "email": ` +
+            `${matches.join(', ')}. The bot cannot tell which address identifies the teacher, and ` +
+            `filing their documents under somebody else is worse than not filing them. ` +
+            `Set EMAIL_COLUMN on this form's row in the FORMS tab to the exact heading of the ` +
+            `teacher's own address. Nothing was filed.`,
     );
     this.name = 'EmailColumnError';
   }
 }
 
 /**
- * Find the one column that identifies the teacher.
+ * Which column holds the teacher's own email address.
  *
- * Exported for its own test: this is the rule the whole upward pipeline hangs
- * on, and it deserves to be provable without a spreadsheet.
+ * **`named` is the answer when there is one, and the reason it had to exist is
+ * that the four real forms all have several.** Google's "Collect email
+ * addresses" setting adds a column, each form also asks for the address as a
+ * question, and two of them ask for a school contact email and an emergency
+ * contact email besides. All four are reasonable questions and all four contain
+ * the word.
+ *
+ * Named columns are matched **exactly, after trimming, and nothing is inferred**
+ * — not a substring, not a case-insensitive guess. A convention would be the
+ * mistake this whole module avoids: the person who owns the sheet cannot correct
+ * a rule they cannot see, and here the rule decides whose documents get filed.
+ *
+ * With no name, the old behaviour is unchanged: exactly one heading containing
+ * the letters `email`, and a refusal otherwise. So no sheet that works today
+ * changes meaning, and `EmailColumnError` goes on refusing to guess — which was
+ * always right and was never the fault.
  */
-export function findEmailColumn(tab: string, header: readonly string[]): number {
+export function findEmailColumn(
+  tab: string,
+  header: readonly string[],
+  named: string | null,
+): number {
+  if (named !== null && named.trim() !== '') {
+    const wanted = named.trim();
+    const at = header.findIndex((h) => h.trim() === wanted);
+    if (at === -1) throw new EmailColumnError(tab, [], wanted, header);
+    return at;
+  }
+
   const matches: string[] = [];
   let found = -1;
   header.forEach((name, i) => {
@@ -335,9 +385,13 @@ export function findEmailColumn(tab: string, header: readonly string[]): number 
  * Identity here is the row number, never the address, which is also why
  * `form_submissions` is keyed on it.
  */
-export function parseResponsesTab(tab: string, raw: readonly string[][]): ParseResult<ResponseRow> {
+export function parseResponsesTab(
+  tab: string,
+  raw: readonly string[][],
+  emailColumn: string | null = null,
+): ParseResult<ResponseRow> {
   const header = (raw[0] ?? []).map((h) => h.trim());
-  const emailAt = findEmailColumn(tab, header);
+  const emailAt = findEmailColumn(tab, header, emailColumn);
   const timestampAt = header.findIndex((h) => h.toLowerCase() === 'timestamp');
 
   const rows: ResponseRow[] = [];
@@ -435,6 +489,30 @@ export function parseFormsTab(raw: readonly string[][]): ParseResult<FormRow> {
       continue;
     }
 
+    const category = cell(raw_row, headers.get('CATEGORY'));
+    const prepare = cell(raw_row, headers.get('PREPARE'));
+    const emailColumn = cell(raw_row, headers.get('EMAIL_COLUMN'));
+
+    /**
+     * A category nobody has is rejected with its row number rather than filed
+     * under something plausible. The Apps Script version let a misspelled
+     * category through and the answer was permanently unreachable with nothing
+     * reported anywhere — that is the failure this whole parser is shaped
+     * around, and a form area is no different from an FAQ row here.
+     *
+     * Rejected before `seen.add`, with the other rejection branches, so a bad
+     * row never claims its TYPE from a good row further down the sheet.
+     */
+    const categories = Object.values(CASE_CATEGORY) as string[];
+    if (category !== '' && !categories.includes(category)) {
+      rejections.push({
+        row: rowNumber,
+        reason: `CATEGORY "${category}" is not an area this bot has, so complaints here would go nowhere. The areas are: ${categories.join(', ')}.`,
+        value: type,
+      });
+      continue;
+    }
+
     seen.add(type);
     const responsesTab = cell(raw_row, headers.get('RESPONSES_TAB'));
     rows.push({
@@ -444,6 +522,9 @@ export function parseFormsTab(raw: readonly string[][]): ParseResult<FormRow> {
       url,
       responsesTab: responsesTab === '' ? null : responsesTab,
       active: parseActive(cell(raw_row, headers.get('ACTIVE'))),
+      category: category === '' ? null : category,
+      prepare: prepare === '' ? null : prepare,
+      emailColumn: emailColumn === '' ? null : emailColumn,
     });
   }
 

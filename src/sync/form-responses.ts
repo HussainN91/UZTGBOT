@@ -15,12 +15,19 @@
  * **The bot never accepts, holds or stores a file.** The documents stay in
  * Google; what arrives here is the fact that they were sent, and by whom.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { createCase } from '../cases/service.js';
 import { CASE_CATEGORY } from '../config/constants.js';
 import { withChatLock } from '../conversation/lock.js';
 import type { Database } from '../db/index.js';
-import { formSubmissions, rosterEntries, syncRuns, teachers } from '../db/schema.js';
+import {
+  cases,
+  formSubmissions,
+  OPEN_CASE_STATUSES,
+  rosterEntries,
+  syncRuns,
+  teachers,
+} from '../db/schema.js';
 import { addNote } from '../cases/notes.js';
 import { formsWithResponses, type FormWithResponses } from '../forms/repository.js';
 import { log } from '../log.js';
@@ -112,7 +119,7 @@ export async function syncFormResponses(
      */
     try {
       const raw = await reader.readTab(form.responsesTab);
-      const parsed = parseResponsesTab(form.responsesTab, raw);
+      const parsed = parseResponsesTab(form.responsesTab, raw, form.emailColumn);
       rowsSeen += Math.max(raw.length - 1, 0);
       for (const r of parsed.rejections) {
         rejections.push({ ...r, reason: `${form.buttonText}: ${r.reason}` });
@@ -180,34 +187,97 @@ export async function syncFormResponses(
          */
         await withChatLock(db, match.chatId, async (tx) => {
           const t = tx;
-          const created = await createCase(t, {
-            chatId: match.chatId,
-            category: CASE_CATEGORY.SUBMIT_DOCS,
-            detail: `Submitted “${form.buttonText}” through the online form.`,
-          });
 
           /**
-           * A note on every submission, including one that joined an existing
-           * case. `createCase` returns the open case in the same category within
-           * 24 hours rather than opening a second — which is right, since three
-           * forms in a morning is one piece of work — but without this note the
-           * second and third submissions would be invisible to whoever picks it
-           * up. The teacher is the author because the teacher is who did it.
+           * The complaint this package belongs to, if the teacher wrote one.
+           *
+           * **Matched on the area as well as the teacher.** A teacher may have an
+           * open accommodation complaint and an open reimbursement complaint at
+           * once, and putting the reimbursement package on the accommodation case
+           * is the kind of wrong that looks right on every screen.
+           *
+           * Newest first, because a teacher who raised the same complaint twice
+           * means the later one.
            */
-          await addNote(
-            t,
-            created.reference,
-            `Submitted “${form.buttonText}”` +
-              (row.submittedAt === null ? '' : ` on ${row.submittedAt}`) +
-              `. The documents are in the form's responses, not in this system.`,
-            match.chatId,
-          );
+          const open = await t
+            .select({ reference: cases.reference })
+            .from(cases)
+            .where(
+              and(
+                eq(cases.teacherChatId, match.chatId),
+                eq(cases.formType, form.type),
+                inArray(cases.status, [...OPEN_CASE_STATUSES]),
+              ),
+            )
+            .orderBy(desc(cases.createdAt))
+            .limit(1);
+
+          const joined = open[0];
+          let reference: string;
+
+          if (joined === undefined) {
+            /**
+             * Nobody wrote anything — the teacher went straight to the form. This
+             * is the original path and it is unchanged: a case of its own, under
+             * `Submit Documents`.
+             */
+            const created = await createCase(t, {
+              chatId: match.chatId,
+              category: CASE_CATEGORY.SUBMIT_DOCS,
+              detail: `Submitted “${form.buttonText}” through the online form.`,
+            });
+            reference = created.reference;
+
+            /**
+             * A note on every submission, including one that joined an existing
+             * case. `createCase` returns the open case in the same category within
+             * 24 hours rather than opening a second — which is right, since three
+             * forms in a morning is one piece of work — but without this note the
+             * second and third submissions would be invisible to whoever picks it
+             * up. The teacher is the author because the teacher is who did it.
+             */
+            await addNote(
+              t,
+              reference,
+              `Submitted “${form.buttonText}”` +
+                (row.submittedAt === null ? '' : ` on ${row.submittedAt}`) +
+                `. The documents are in the form's responses, not in this system.`,
+              match.chatId,
+            );
+          } else {
+            reference = joined.reference;
+
+            /**
+             * The paperwork caught up with the complaint. The note carries the
+             * sheet row because that is the only handle anybody has on the actual
+             * documents — they are in Google and this system never holds them.
+             */
+            await addNote(
+              t,
+              reference,
+              `The “${form.buttonText}” submission has arrived` +
+                (row.submittedAt === null ? '' : ` on ${row.submittedAt}`) +
+                `. It is row ${row.sheetRow} of the form's responses; the documents are in the ` +
+                `form, not in this system.`,
+              match.chatId,
+            );
+
+            /**
+             * Cleared in the same transaction as the marker, so the case can never
+             * say "still waiting" about a submission that has been filed. The
+             * marker's primary key is what rolls both back together.
+             */
+            await t
+              .update(cases)
+              .set({ awaitingForm: false })
+              .where(eq(cases.reference, reference));
+          }
 
           await t.insert(formSubmissions).values({
             formType: form.type,
             sheetRow: row.sheetRow,
             outcome: SUBMISSION_OUTCOME.FILED,
-            caseReference: created.reference,
+            caseReference: reference,
             submitterEmail: row.email,
             submittedAt: parseTimestamp(row.submittedAt),
           });

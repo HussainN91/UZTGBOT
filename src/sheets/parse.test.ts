@@ -382,37 +382,112 @@ describe('forms parsing', () => {
   });
 });
 
+describe('the three columns that make a form an area', () => {
+  const HEADER = ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY', 'PREPARE', 'EMAIL_COLUMN'];
+  const row = (over: Record<string, string> = {}): string[] => [
+    over['TYPE'] ?? 'REIMBURSE',
+    over['BUTTON_TEXT'] ?? 'Reimbursement',
+    over['URL'] ?? 'https://forms.gle/abc',
+    over['RESPONSES_TAB'] ?? 'REIMBURSE_RESPONSES',
+    over['ACTIVE'] ?? 'TRUE',
+    over['CATEGORY'] ?? 'Travel and Arrival',
+    over['PREPARE'] ?? 'Have your receipts ready as one PDF.',
+    over['EMAIL_COLUMN'] ?? 'Email Address',
+  ];
+
+  it('reads all three', () => {
+    const result = parseFormsTab([HEADER, row()]);
+    expect(result.rows[0]?.category).toBe('Travel and Arrival');
+    expect(result.rows[0]?.prepare).toBe('Have your receipts ready as one PDF.');
+    expect(result.rows[0]?.emailColumn).toBe('Email Address');
+  });
+
+  it('treats all three as absent when blank', () => {
+    const result = parseFormsTab([HEADER, row({ CATEGORY: '', PREPARE: '', EMAIL_COLUMN: '' })]);
+    expect(result.rows[0]?.category).toBeNull();
+    expect(result.rows[0]?.prepare).toBeNull();
+    expect(result.rows[0]?.emailColumn).toBeNull();
+  });
+
+  /**
+   * A sheet written before this feature must go on working untouched. The three
+   * columns are optional in the same way RESPONSES_TAB already is.
+   */
+  it('does not require any of the three columns to exist at all', () => {
+    const old = ['TYPE', 'BUTTON_TEXT', 'URL'];
+    const result = parseFormsTab([old, ['DOC', 'Documents', 'https://forms.gle/abc']]);
+    expect(result.rejections).toHaveLength(0);
+    expect(result.rows[0]?.category).toBeNull();
+  });
+
+  /**
+   * The rule that stops an area being silently unreachable. It is the same
+   * failure a misspelled FAQ topic causes, and it is answered the same way:
+   * reject the row with its number, name the real values, and let every other
+   * row sync.
+   */
+  it('rejects a category this build does not have, and keeps the other rows', () => {
+    const result = parseFormsTab([
+      HEADER,
+      row({ TYPE: 'GOOD' }),
+      row({ TYPE: 'BAD', CATEGORY: 'Dentistry' }),
+    ]);
+
+    expect(result.rows.map((r) => r.type)).toEqual(['GOOD']);
+    expect(result.rejections).toHaveLength(1);
+    expect(result.rejections[0]?.reason).toContain('Dentistry');
+    expect(result.rejections[0]?.reason).toContain('Travel and Arrival');
+  });
+});
+
 describe('finding the email column in a form responses tab', () => {
   /**
    * Google heads each column with the question as it was typed, so there is no
    * fixed name to require. Exactly one heading may contain "email".
    */
   it('finds the column however the question was worded', () => {
-    expect(findEmailColumn('T', ['Timestamp', 'Recruitment email', 'Passport'])).toBe(1);
-    expect(findEmailColumn('T', ['Timestamp', 'Your Email Address'])).toBe(1);
-    expect(findEmailColumn('T', ['E-MAIL'])).toBe(0);
+    expect(findEmailColumn('T', ['Timestamp', 'Recruitment email', 'Passport'], null)).toBe(1);
+    expect(findEmailColumn('T', ['Timestamp', 'Your Email Address'], null)).toBe(1);
+    expect(findEmailColumn('T', ['E-MAIL'], null)).toBe(0);
   });
 
   it('refuses when two questions mention email rather than guessing between them', () => {
-    expect(() => findEmailColumn('VISA_RESPONSES', ['Your email', "Supervisor's email"])).toThrow(
-      EmailColumnError,
-    );
+    expect(() =>
+      findEmailColumn('VISA_RESPONSES', ['Your email', "Supervisor's email"], null),
+    ).toThrow(EmailColumnError);
   });
 
-  it('names both clashing headings so the form can be corrected', () => {
+  /**
+   * The advice in this message changed on 3 August 2026 and the change is the
+   * point of it. It used to end *"Only one may … Reword the others."* — the only
+   * advice available before `EMAIL_COLUMN` existed, and now the harmful one:
+   * following it means rewording "School contact email or telephone number"
+   * until it no longer contains the word "email", which damages a question that
+   * is asking exactly the right thing.
+   *
+   * What the test protected before is kept — the message names the tab and lists
+   * the offending headings, so somebody can act on it without opening the
+   * spreadsheet twice — and the new advice is now protected alongside it.
+   */
+  it('names the tab, both clashing headings, and the setting that resolves them', () => {
     try {
-      findEmailColumn('VISA_RESPONSES', ['Your email', "Supervisor's email"]);
+      findEmailColumn('VISA_RESPONSES', ['Your email', "Supervisor's email"], null);
       expect.unreachable('should have thrown');
     } catch (err) {
-      expect((err as Error).message).toMatch(/Your email/);
-      expect((err as Error).message).toMatch(/Supervisor's email/);
-      expect((err as Error).message).toMatch(/Nothing was filed/);
+      const message = (err as Error).message;
+      expect(message).toMatch(/VISA_RESPONSES/);
+      expect(message).toMatch(/Your email/);
+      expect(message).toMatch(/Supervisor's email/);
+      expect(message).toMatch(/EMAIL_COLUMN/);
+      expect(message).toMatch(/Nothing was filed/);
+      // The advice that would damage a correct question is gone for good.
+      expect(message).not.toMatch(/Reword/);
     }
   });
 
   it('says filing under the wrong person is the reason, not tidiness', () => {
     try {
-      findEmailColumn('T', ['Your email', 'Manager email']);
+      findEmailColumn('T', ['Your email', 'Manager email'], null);
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as Error).message).toMatch(/worse than not filing them/);
@@ -420,18 +495,95 @@ describe('finding the email column in a form responses tab', () => {
   });
 
   it('refuses when no question mentions email', () => {
-    expect(() => findEmailColumn('VISA_RESPONSES', ['Timestamp', 'Passport'])).toThrow(
+    expect(() => findEmailColumn('VISA_RESPONSES', ['Timestamp', 'Passport'], null)).toThrow(
       EmailColumnError,
     );
   });
 
   it('tells the operator how to fix an absent column', () => {
     try {
-      findEmailColumn('VISA_RESPONSES', ['Timestamp']);
+      findEmailColumn('VISA_RESPONSES', ['Timestamp'], null);
       expect.unreachable('should have thrown');
     } catch (err) {
       expect((err as Error).message).toMatch(/RESPONSES_TAB/);
       expect((err as Error).message).toMatch(/must contain/);
+    }
+  });
+});
+
+describe('finding the teacher’s email column', () => {
+  /**
+   * MoPSE's four live forms, as their response sheets actually read on
+   * 3 August 2026. Every one has more than one heading containing "email", so
+   * every one of them filed nothing at all.
+   *
+   * Two causes and both are normal. Google's "Collect email addresses" adds an
+   * `Email Address` column, and each form also asks for the address as a
+   * question. Holiday and Medical then ask for a school contact email and an
+   * emergency contact email, which are the right questions to ask.
+   *
+   * The trailing space on the emergency heading is real. It is kept because a
+   * fixture tidied up is a fixture that stops matching the thing it stands for.
+   */
+  const HOLIDAY = [
+    'Timestamp',
+    'Email Address',
+    'Full name as shown on your Passport',
+    'Email address',
+    'Emergency email / phone number while on leave ',
+    'School contact email or telephone number',
+  ];
+  const MEDICAL = [
+    'Timestamp',
+    'Email Address',
+    'Full name as shown on your passport',
+    'Email address',
+    'School contact email or telephone number',
+  ];
+  const ACCOMMODATION = ['Timestamp', 'Email Address', 'Full Name', 'Email Address'];
+  const REIMBURSEMENT = ['Timestamp', 'Email Address', 'Full Name', 'Email Address'];
+
+  it('refuses each of the four real forms when no column is named', () => {
+    for (const header of [HOLIDAY, MEDICAL, ACCOMMODATION, REIMBURSEMENT]) {
+      expect(() => findEmailColumn('TAB', header, null)).toThrow(EmailColumnError);
+    }
+  });
+
+  it('finds the named column in each of the four', () => {
+    expect(findEmailColumn('TAB', HOLIDAY, 'Email address')).toBe(3);
+    expect(findEmailColumn('TAB', MEDICAL, 'Email address')).toBe(3);
+    // Both candidates read `Email Address` exactly, so the first is the answer
+    // and naming it is the only way to say which was meant.
+    expect(findEmailColumn('TAB', ACCOMMODATION, 'Email Address')).toBe(1);
+    expect(findEmailColumn('TAB', REIMBURSEMENT, 'Email Address')).toBe(1);
+  });
+
+  it('still finds a single unnamed column, so no existing sheet changes meaning', () => {
+    expect(findEmailColumn('TAB', ['Timestamp', 'Your email'], null)).toBe(1);
+  });
+
+  it('matches a named heading after trimming, and infers nothing else', () => {
+    expect(findEmailColumn('TAB', ['Timestamp', '  Email address  '], 'Email address')).toBe(1);
+    // Not a substring match: naming a column means naming it.
+    expect(() => findEmailColumn('TAB', ['Timestamp', 'Email address'], 'Email')).toThrow(
+      EmailColumnError,
+    );
+  });
+
+  /**
+   * The message is the whole value of this branch. A named column that is not
+   * there must say what it looked for and what it found, or somebody is left
+   * comparing a spreadsheet against a silence.
+   */
+  it('names the column it wanted and lists the ones that exist', () => {
+    try {
+      findEmailColumn('LEAVE_RESPONSES', ['Timestamp', 'Email address'], 'E-mail');
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toContain('E-mail');
+      expect(message).toContain('Email address');
+      expect(message).toContain('LEAVE_RESPONSES');
     }
   });
 });

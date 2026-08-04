@@ -311,6 +311,16 @@ export const formLinks = pgTable(
      * who owns the sheet.
      */
     responsesTab: text('responses_tab'),
+    /**
+     * The existing case category a complaint in this area files under, or null
+     * for `Contact Support`. A cell rather than a constant, so MoPSE can move an
+     * area between queues without a deployment.
+     */
+    category: text('category'),
+    /** What a teacher is told to gather, shown above the form link. */
+    prepare: text('prepare'),
+    /** Which column of the response tab holds the teacher's own address. */
+    emailColumn: text('email_column'),
     active: boolean('active').notNull().default(true),
     /** When the sync last saw this row in the sheet. */
     syncedAt: tsz('synced_at').notNull().defaultNow(),
@@ -566,6 +576,24 @@ export const cases = pgTable(
     urgentRequestedAt: tsz('urgent_requested_at'),
     urgentConfirmedBy: chatId('urgent_confirmed_by'),
     urgentConfirmedAt: tsz('urgent_confirmed_at'),
+    /**
+     * The form area this case was raised in, or null for a case raised any other
+     * way. Not a foreign key to `form_links`: an area MoPSE retires must not take
+     * the cases raised under it with it, and `form_submissions` already keeps its
+     * `form_type` for the same reason.
+     */
+    formType: text('form_type'),
+    /**
+     * Raised in a form area, and the paperwork has not arrived.
+     *
+     * Written true when a teacher writes their complaint, cleared when their
+     * submission turns up. It is what lets staff be told **immediately** and
+     * still know the difference — the head of project chose telling them at once
+     * over waiting to see whether a form followed, because a complaint invisible
+     * to staff while the teacher believes it is being handled is the worse
+     * failure.
+     */
+    awaitingForm: boolean('awaiting_form').notNull().default(false),
     /** When whoever holds this case said it would be done. */
     dueAt: tsz('due_at'),
     /** Suppresses chasing until this passes. Never suppresses the case itself. */

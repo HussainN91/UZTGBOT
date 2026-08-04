@@ -83,7 +83,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       TRUNCATE cases, teachers, roster_entries, case_sequences, conversation_states,
                messages, faq_entries, urgent_codes, urgent_code_attempts,
                identity_dispute_parties, identity_disputes, staff, audit_log,
-               processed_updates, settings CASCADE
+               processed_updates, settings, form_links CASCADE
     `);
     clearSettingsCache();
     await db.execute(sql`
@@ -940,6 +940,129 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       expect(firstText(outcome)).toContain('which of these is it about');
       const rows = await db.execute(sql`SELECT reference FROM cases`);
       expect(rows.rows).toHaveLength(0);
+    });
+  });
+
+  /**
+   * A form area — a button with a name of its own that files under a category
+   * the bot already has.
+   *
+   * The whole of the feature, from a teacher's side: they are shown what to
+   * gather, given the link, asked what they need, and their message opens a case
+   * that says the paperwork is still to come.
+   */
+  describe('a complaint and its paperwork, together', () => {
+    const REIMBURSE = encodeCallback(CALLBACK.DOC_TYPE, 'REIMBURSE');
+
+    /** A form area. `PREPARE` is what makes it one. */
+    const publishArea = async (prepare: string | null = 'Have your receipts ready as one PDF.'): Promise<void> => {
+      await db.execute(sql`
+        INSERT INTO form_links (type, sheet_row, button_text, url, category, prepare, active)
+        VALUES ('REIMBURSE', 1, 'Reimbursement', 'https://forms.gle/abc',
+                'Travel and Arrival', ${prepare}, true)
+      `);
+    };
+
+    it('shows the paperwork, the link, and files what the teacher then writes', async () => {
+      await verify();
+      await publishArea();
+
+      const shown = await tap(REIMBURSE);
+      expect(firstText(shown)).toContain('Have your receipts ready as one PDF.');
+      expect(firstText(shown)).toContain('forms.gle');
+      expect(firstText(shown)).toContain('tell us what you need');
+
+      const filed = await text('the embassy charged me twice for the visa');
+      expect(firstText(filed)).toContain('has been opened');
+
+      const rows = await db.execute<{
+        category: string;
+        form_type: string;
+        awaiting_form: boolean;
+        detail: string;
+      }>(sql`SELECT category, form_type, awaiting_form, detail FROM cases`);
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]?.category).toBe('Travel and Arrival');
+      expect(rows.rows[0]?.form_type).toBe('REIMBURSE');
+      expect(rows.rows[0]?.awaiting_form).toBe(true);
+      expect(rows.rows[0]?.detail).toBe('the embassy charged me twice for the visa');
+    });
+
+    /**
+     * An empty `CATEGORY` means Contact Support — the general queue, which is
+     * where Holiday Leave and Medical Leave are meant to land. It is the whole
+     * of decision 3: a button with a name of its own and no new category behind
+     * it.
+     */
+    it('files under Contact Support when the area names no category', async () => {
+      await verify();
+      await db.execute(sql`
+        INSERT INTO form_links (type, sheet_row, button_text, url, prepare, active)
+        VALUES ('HOLIDAY', 1, 'Holiday Leave', 'https://forms.gle/h',
+                'Have your dates ready.', true)
+      `);
+
+      await tap(encodeCallback(CALLBACK.DOC_TYPE, 'HOLIDAY'));
+      await text('my head teacher will not approve three days in October');
+
+      const rows = await db.execute<{ category: string; form_type: string }>(
+        sql`SELECT category, form_type FROM cases`,
+      );
+      expect(rows.rows[0]?.category).toBe('Contact Support');
+      expect(rows.rows[0]?.form_type).toBe('HOLIDAY');
+    });
+
+    /**
+     * A plain document form is untouched. It has no `PREPARE`, so it says what
+     * it always said and captures nothing the teacher types next — which is what
+     * keeps this feature from changing Submit Documents for everybody.
+     */
+    it('leaves a form with no paperwork message exactly as it was', async () => {
+      await verify();
+      await publishArea(null);
+
+      const shown = await tap(REIMBURSE);
+      expect(firstText(shown)).toContain('You do not need to send anything back to me');
+
+      const after = await text('how long does a visa take');
+      expect(firstText(after)).not.toContain('has been opened');
+      const rows = await db.execute(sql`SELECT reference FROM cases`);
+      expect(rows.rows).toHaveLength(0);
+    });
+
+    /**
+     * The area is re-read when the message arrives, never trusted from the
+     * state. A form withdrawn while the teacher was typing must not still file
+     * under it — and the teacher must be told rather than left with silence.
+     */
+    it('does not file under an area that was withdrawn while they were typing', async () => {
+      await verify();
+      await publishArea();
+      await tap(REIMBURSE);
+
+      await db.execute(sql`UPDATE form_links SET active = false WHERE type = 'REIMBURSE'`);
+
+      const outcome = await text('the embassy charged me twice');
+      expect(firstText(outcome)).toContain('no longer available');
+      const rows = await db.execute(sql`SELECT reference FROM cases`);
+      expect(rows.rows).toHaveLength(0);
+      expect(await loadState(db, CHAT)).toBeNull();
+    });
+
+    /**
+     * Assert the refusal, not the absence. The button sits in a teacher's
+     * scrollback for ever, so a chat that has never signed in tapping it must be
+     * refused rather than merely not shown it.
+     */
+    it('refuses the button from a chat that has not signed in', async () => {
+      await publishArea();
+      await text('/start', SECOND_CHAT);
+
+      const outcome = await tap(REIMBURSE, SECOND_CHAT);
+      expect(firstText(outcome)).not.toContain('Have your receipts ready');
+      expect(await loadState(db, SECOND_CHAT)).not.toMatchObject({
+        kind: 'AwaitingFormComplaint',
+      });
     });
   });
 });

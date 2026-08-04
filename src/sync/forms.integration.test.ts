@@ -19,6 +19,7 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { createCase } from '../cases/service.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { anonymiseFormSubmissions } from '../retention/purge.js';
@@ -136,6 +137,46 @@ describe.skipIf(!TEST_DATABASE_URL)('documents against a real database', () => {
       expect(report.rejections[0]?.row).toBe(3);
       expect(await db.select().from(schema.formLinks)).toHaveLength(2);
       expect(alerter.alerts.some((a) => a.body.includes('Row 3'))).toBe(true);
+    });
+
+    it('carries the area, the paperwork and the email column into the database', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY', 'PREPARE', 'EMAIL_COLUMN'],
+            ['REIMBURSE', 'Reimbursement', 'https://forms.gle/abc', 'REIMBURSE_RESPONSES', 'TRUE',
+             'Travel and Arrival', 'Have your receipts ready.', 'Email Address'],
+          ],
+        }),
+      );
+
+      const rows = await db.select().from(schema.formLinks);
+      expect(rows[0]?.category).toBe('Travel and Arrival');
+      expect(rows[0]?.prepare).toBe('Have your receipts ready.');
+      expect(rows[0]?.emailColumn).toBe('Email Address');
+    });
+
+    /**
+     * The three must update on a second sync as well as insert on the first.
+     * Set on insert and never again is the classic `onConflictDoUpdate` omission,
+     * and it would leave MoPSE editing a cell that never took effect.
+     */
+    it('updates the three when the sheet changes, not only on the first sync', async () => {
+      const header = ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY', 'PREPARE', 'EMAIL_COLUMN'];
+      const before = ['REIMBURSE', 'Reimbursement', 'https://forms.gle/abc', 'REIMBURSE_RESPONSES',
+                      'TRUE', 'Travel and Arrival', 'Receipts please.', 'Email Address'];
+      const after = ['REIMBURSE', 'Reimbursement', 'https://forms.gle/abc', 'REIMBURSE_RESPONSES',
+                     'TRUE', 'Accommodation', 'Receipts and your lease.', 'Email address'];
+
+      await syncForms(db, readerReturning({ FORMS: [header, before] }));
+      await syncForms(db, readerReturning({ FORMS: [header, after] }));
+
+      const rows = await db.select().from(schema.formLinks);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.category).toBe('Accommodation');
+      expect(rows[0]?.prepare).toBe('Receipts and your lease.');
+      expect(rows[0]?.emailColumn).toBe('Email address');
     });
 
     it('records the run so an operator can see what happened', async () => {
@@ -336,6 +377,69 @@ describe.skipIf(!TEST_DATABASE_URL)('documents against a real database', () => {
       expect(alerter.alerts.some((a) => a.title.includes('could not be read'))).toBe(true);
     });
 
+    /**
+     * The fault this whole feature started from, end to end: a real response tab
+     * with two email columns files nothing until one is named, and files normally
+     * once it is.
+     */
+    it('files a submission from a tab with two email columns, once one is named', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'EMAIL_COLUMN'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/abc', 'ACCOM_RESPONSES', 'TRUE', 'Email address'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+
+      const report = await syncFormResponses(
+        db,
+        readerReturning({
+          ACCOM_RESPONSES: [
+            ['Timestamp', 'Email Address', 'Full Name', 'Email address'],
+            ['t', 'personal@gmail.com', 'A Teacher', 'a@example.com'],
+          ],
+        }),
+      );
+
+      expect(report.filed).toBe(1);
+    });
+
+    /**
+     * The other half of the same fault, and the one that proves the named column
+     * is doing the work rather than luck: the same tab with nothing named files
+     * nothing at all, and says why.
+     */
+    it('refuses that same tab when no column is named', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/abc', 'ACCOM_RESPONSES', 'TRUE'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+      const alerter = collectingAlerter();
+
+      const report = await syncFormResponses(
+        db,
+        readerReturning({
+          ACCOM_RESPONSES: [
+            ['Timestamp', 'Email Address', 'Full Name', 'Email address'],
+            ['t', 'personal@gmail.com', 'A Teacher', 'a@example.com'],
+          ],
+        }),
+        { alerter },
+      );
+
+      expect(report.filed).toBe(0);
+      expect(alerter.alerts.some((a) => a.body.includes('EMAIL_COLUMN'))).toBe(true);
+    });
+
     it('refuses a whole tab whose email column is ambiguous, and says so', async () => {
       await publishForm();
       await signedInTeacher('950001', 'a@example.com');
@@ -408,6 +512,128 @@ describe.skipIf(!TEST_DATABASE_URL)('documents against a real database', () => {
         readerReturning({ PASSPORT_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] }),
       );
       expect(report.filed).toBe(1);
+    });
+  });
+
+  describe('a submission joins an open complaint in its own area', () => {
+    it('attaches to the case the teacher already opened, rather than opening a second', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'ACCOM_RESPONSES', 'TRUE', 'Accommodation'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+
+      // The teacher's own complaint, filed by typing.
+      const opened = await createCase(db, {
+        chatId: '950001',
+        category: 'Accommodation',
+        detail: 'the boiler has not worked since I arrived',
+        formType: 'ACCOM',
+      });
+
+      await syncFormResponses(
+        db,
+        readerReturning({ ACCOM_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] }),
+      );
+
+      const cases = await db.select().from(schema.cases);
+      expect(cases).toHaveLength(1);
+      expect(cases[0]?.reference).toBe(opened.reference);
+      expect(cases[0]?.awaitingForm).toBe(false);
+
+      const notes = await db.select().from(schema.caseNotes);
+      expect(notes.some((n) => n.body.includes('submission'))).toBe(true);
+    });
+
+    /**
+     * The area is part of the match, not just the teacher. A reimbursement package
+     * must not land on an accommodation complaint.
+     */
+    it('does not attach to an open case in a different area', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'ACCOM_RESPONSES', 'TRUE', 'Accommodation'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+      await createCase(db, {
+        chatId: '950001',
+        category: 'Travel and Arrival',
+        detail: 'my flight money',
+        formType: 'REIMBURSE',
+      });
+
+      await syncFormResponses(
+        db,
+        readerReturning({ ACCOM_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] }),
+      );
+
+      expect(await db.select().from(schema.cases)).toHaveLength(2);
+    });
+
+    it('still opens a case for a teacher who submits without writing anything', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'ACCOM_RESPONSES', 'TRUE', 'Accommodation'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+
+      const report = await syncFormResponses(
+        db,
+        readerReturning({ ACCOM_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] }),
+      );
+
+      expect(report.filed).toBe(1);
+      expect(await db.select().from(schema.cases)).toHaveLength(1);
+    });
+
+    /**
+     * The property the whole marker exists for, held through the new path. An
+     * attach must be as idempotent as a create — re-reading the tab must not add
+     * a second note to the complaint every ten minutes.
+     */
+    it('attaches once however many times the tab is read', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'CATEGORY'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'ACCOM_RESPONSES', 'TRUE', 'Accommodation'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+      await createCase(db, {
+        chatId: '950001',
+        category: 'Accommodation',
+        detail: 'the boiler has not worked since I arrived',
+        formType: 'ACCOM',
+      });
+      const reader = readerReturning({
+        ACCOM_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')],
+      });
+
+      const first = await syncFormResponses(db, reader);
+      const second = await syncFormResponses(db, reader);
+
+      expect(first.filed).toBe(1);
+      expect(second.filed).toBe(0);
+      expect(second.alreadySeen).toBe(1);
+      expect(await db.select().from(schema.caseNotes)).toHaveLength(1);
     });
   });
 

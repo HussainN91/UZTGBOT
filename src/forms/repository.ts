@@ -14,6 +14,17 @@ export interface FormLink {
   readonly type: string;
   readonly buttonText: string;
   readonly url: string;
+  /**
+   * The existing case category a complaint in this area files under, or null for
+   * `Contact Support`. A category and never a queue — `QUEUE_FOR_CATEGORY`
+   * already turns one into the other, and a second answer to "who works this"
+   * would drift from the first.
+   */
+  readonly category: string | null;
+  /** What a teacher is told to gather, shown above the link. Null means no such message. */
+  readonly prepare: string | null;
+  /** The exact heading of the teacher's own email column in the responses tab. */
+  readonly emailColumn: string | null;
 }
 
 /**
@@ -38,7 +49,14 @@ export interface FormWithResponses extends FormLink {
  */
 export async function activeForms(db: Database): Promise<FormLink[]> {
   const rows = await db
-    .select({ type: formLinks.type, buttonText: formLinks.buttonText, url: formLinks.url })
+    .select({
+      type: formLinks.type,
+      buttonText: formLinks.buttonText,
+      url: formLinks.url,
+      category: formLinks.category,
+      prepare: formLinks.prepare,
+      emailColumn: formLinks.emailColumn,
+    })
     .from(formLinks)
     .where(eq(formLinks.active, true))
     .orderBy(asc(formLinks.sheetRow), asc(formLinks.type));
@@ -55,7 +73,14 @@ export async function activeForms(db: Database): Promise<FormLink[]> {
  */
 export async function activeFormByType(db: Database, type: string): Promise<FormLink | null> {
   const rows = await db
-    .select({ type: formLinks.type, buttonText: formLinks.buttonText, url: formLinks.url })
+    .select({
+      type: formLinks.type,
+      buttonText: formLinks.buttonText,
+      url: formLinks.url,
+      category: formLinks.category,
+      prepare: formLinks.prepare,
+      emailColumn: formLinks.emailColumn,
+    })
     .from(formLinks)
     .where(and(eq(formLinks.type, type), eq(formLinks.active, true)))
     .limit(1);
@@ -87,6 +112,9 @@ export async function formsWithResponses(db: Database): Promise<FormWithResponse
       type: formLinks.type,
       buttonText: formLinks.buttonText,
       url: formLinks.url,
+      category: formLinks.category,
+      prepare: formLinks.prepare,
+      emailColumn: formLinks.emailColumn,
       responsesTab: formLinks.responsesTab,
     })
     .from(formLinks)

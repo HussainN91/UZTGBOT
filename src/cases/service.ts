@@ -67,6 +67,20 @@ export interface CreateCaseRequest {
   /** The teacher's own words. Stored, never echoed back, never logged. */
   readonly detail: string;
   /**
+   * The form area this case was raised in, when it was raised in one.
+   *
+   * Its presence is what sets `awaiting_form`: a case opened in an area is
+   * opened because the teacher wrote a complaint, and the paperwork by
+   * definition has not arrived yet. The response sync clears the flag when it
+   * does.
+   *
+   * **Deliberately not part of the de-duplication read below.** Adding it would
+   * let one teacher open two cases in the same category inside the 24-hour
+   * window by using two areas, which is the double-tap this window exists to
+   * absorb.
+   */
+  readonly formType?: string;
+  /**
    * There used to be an `escalate` flag here, and its removal on 1 August 2026
    * is the whole shape of the urgent gate.
    *
@@ -166,6 +180,13 @@ export async function createCase(
     status: 'New',
     importance: 'Normal',
     lastActor: request.chatId,
+    formType: request.formType ?? null,
+    /**
+     * True exactly when this case was raised in a form area, because a case
+     * raised there is raised by the teacher writing, before they submit. The
+     * response sync clears it when the submission arrives.
+     */
+    awaitingForm: request.formType !== undefined,
     ...(owner === null ? {} : { owner }),
   });
 

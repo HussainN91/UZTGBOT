@@ -118,6 +118,16 @@ const conversationStateSchema = z.discriminatedUnion('kind', [
    * whoever was chosen an hour ago.
    */
   z.object({ kind: z.literal('AwaitingStaffId') }),
+  /**
+   * Shown a form area's paperwork and its link, and now writing the complaint
+   * that goes with it.
+   *
+   * The area is held rather than the case, because there is no case yet — the
+   * message they are about to type is what creates it. It expires with
+   * everything else, and a teacher who wanders off simply files nothing, which
+   * is the right outcome for an unfinished sentence.
+   */
+  z.object({ kind: z.literal('AwaitingFormComplaint'), formType: z.string(), attempts }),
 ]);
 
 export type ConversationState = z.infer<typeof conversationStateSchema>;

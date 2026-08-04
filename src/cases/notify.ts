@@ -110,7 +110,7 @@ export async function notifyNewCase(
   }
 
   const chosen = actors.slice(0, NEW_CASE_NOTIFY_CAP);
-  const filedAt = await filedAtInTashkent(db, notice.reference);
+  const facts = await caseFacts(db, notice.reference);
 
   /**
    * D25, step 2a. Only a case still at `New` moves — the guard is inside
@@ -120,7 +120,7 @@ export async function notifyNewCase(
   await markCaseReceived(db, notice.reference);
   await logFanOut(db, notice.reference, 'STAFF_NOTIFIED_NEW', chosen.length, actors.length);
 
-  const text = noticeText(notice, region, filedAt);
+  const text = noticeText(notice, region, facts);
   return {
     messages: chosen.map((chatId) => ({
       chatId,
@@ -393,22 +393,61 @@ async function teacherIdentity(
   return { name: row?.name ?? null, identifier: row?.identifier ?? null };
 }
 
+/** The form area a case was raised in, if it was raised in one. */
+interface FormArea {
+  /** What a teacher saw on the button, so staff and teacher name it the same way. */
+  readonly label: string;
+  readonly awaitingForm: boolean;
+}
+
+interface CaseFacts {
+  readonly filedAt: string;
+  readonly area: FormArea | null;
+}
+
 /**
- * The case's filing time, formatted by the database in Tashkent.
+ * The two things a new-case notice needs from the case row itself.
  *
- * Formatted in SQL rather than parsed into a `Date` and rendered here, for the
- * reason `StrandedCode.usedAt` records: `db.execute` hands back the raw string
+ * **The filing time is formatted by the database in Tashkent**, for the reason
+ * `StrandedCode.usedAt` records: `db.execute` hands back the raw string
  * PostgreSQL sent, because drizzle installs its own type parsers and does not
  * parse timestamps the way `pool.query` does. Doing it in SQL means the value is
  * never a `Date` that only looks like one, and the person reading gets their own
- * clock rather than the server's UTC.
+ * clock rather than the server's UTC. Nothing else read here is a timestamp —
+ * one boolean and two text columns — which is the only reason this query is safe
+ * to have grown.
+ *
+ * **`form_links` is LEFT joined, and the raw `form_type` is the fallback.** An
+ * area MoPSE retires must not stop its existing cases notifying, which is why
+ * `cases.form_type` is deliberately not a foreign key. A notice reading
+ * "REIMBURSE" is worse than one reading "Reimbursement" and very much better
+ * than no notice at all.
  */
-async function filedAtInTashkent(db: Database, reference: string): Promise<string> {
-  const rows = await db.execute<{ filed_at: string }>(sql`
-    SELECT to_char(created_at AT TIME ZONE ${TIMEZONE}, 'DD Mon YYYY, HH24:MI') AS filed_at
-    FROM cases WHERE reference = ${reference}
+async function caseFacts(db: Database, reference: string): Promise<CaseFacts> {
+  const rows = await db.execute<{
+    filed_at: string;
+    form_type: string | null;
+    button_text: string | null;
+    awaiting_form: boolean;
+  }>(sql`
+    SELECT to_char(c.created_at AT TIME ZONE ${TIMEZONE}, 'DD Mon YYYY, HH24:MI') AS filed_at,
+           c.form_type AS form_type,
+           f.button_text AS button_text,
+           c.awaiting_form AS awaiting_form
+    FROM cases c
+    LEFT JOIN form_links f ON f.type = c.form_type
+    WHERE c.reference = ${reference}
   `);
-  return rows.rows[0]?.filed_at ?? 'unknown';
+  const row = rows.rows[0];
+  if (row === undefined) return { filedAt: 'unknown', area: null };
+
+  return {
+    filedAt: row.filed_at,
+    area:
+      row.form_type === null
+        ? null
+        : { label: row.button_text ?? row.form_type, awaitingForm: row.awaiting_form },
+  };
 }
 
 /**
@@ -418,13 +457,29 @@ async function filedAtInTashkent(db: Database, reference: string): Promise<strin
  * the message: the recipient can read the case or take it without typing a
  * reference from memory.
  */
-function noticeText(notice: NewCaseNotice, region: string | null, filedAt: string): string {
+function noticeText(notice: NewCaseNotice, region: string | null, facts: CaseFacts): string {
   return [
     `🆕 New case — ${notice.reference}`,
     '',
     `Category: ${notice.category}`,
     `Region: ${region ?? 'not recorded'}`,
-    `Filed: ${filedAt} (Tashkent)`,
+    `Filed: ${facts.filedAt} (Tashkent)`,
+    /**
+     * One line, and only for a case raised in a form area.
+     *
+     * Whether the paperwork has arrived is the thing a person picking this up
+     * most needs to know, because it decides what they do next: chase the
+     * teacher, or read what they sent. A case raised any other way says nothing
+     * here at all — a line reading "no paperwork" on a case that was never about
+     * paperwork is noise, and noise is how a notice stops being read.
+     */
+    ...(facts.area === null
+      ? []
+      : [
+          facts.area.awaitingForm
+            ? `📄 ${facts.area.label} — the form has not arrived yet. The teacher was given the link.`
+            : `📄 ${facts.area.label} — the form has been submitted.`,
+        ]),
     '',
     `/case ${notice.reference} — read it, including what the teacher wrote`,
     `/assign ${notice.reference} <telegram id> — give it an owner`,

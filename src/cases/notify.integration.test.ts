@@ -90,7 +90,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
     await db.execute(sql`
       TRUNCATE cases, teachers, roster_entries, case_sequences, conversation_states,
                messages, faq_entries, urgent_codes, urgent_code_attempts,
-               processed_updates, settings, staff, audit_log CASCADE
+               processed_updates, settings, staff, audit_log, form_links CASCADE
     `);
 
     await db.execute(sql`
@@ -423,6 +423,95 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       const second = await send({ chatId: TASHKENT_TEACHER, kind: 'text', text: DETAIL });
 
       expect(second.messages).toHaveLength(1);
+    });
+  });
+
+  /**
+   * A complaint raised in a form area. Whether the paperwork has arrived is what
+   * decides the recipient's next move — chase the teacher, or read what they
+   * sent — so it is on the notice rather than one command away.
+   */
+  describe('a complaint raised in a form area', () => {
+    const ACCOM_TEACHER_CHAT = TASHKENT_TEACHER;
+
+    /** File a case in an area and announce it, in one transaction. */
+    const fileInArea = async (
+      formType: string,
+      category: string,
+    ): Promise<NotificationOutcome> =>
+      withChatLock(db, ACCOM_TEACHER_CHAT, async (tx) => {
+        const created = await createCase(tx, {
+          chatId: ACCOM_TEACHER_CHAT,
+          category: category as never,
+          detail: DETAIL,
+          formType,
+        });
+        return notifyNewCase(tx, {
+          reference: created.reference,
+          category,
+          teacherChatId: ACCOM_TEACHER_CHAT,
+        });
+      });
+
+    beforeEach(async () => {
+      await db.execute(sql`
+        INSERT INTO form_links (type, sheet_row, button_text, url, category, prepare, active)
+        VALUES ('REIMBURSE', 1, 'Reimbursement', 'https://forms.gle/abc',
+                'Accommodation', 'Receipts as one PDF.', true)
+      `);
+    });
+
+    it('tells staff the paperwork has not arrived yet', async () => {
+      const notices = await fileInArea('REIMBURSE', CASE_CATEGORY.ACCOMMODATION);
+      const body = notices.messages[0]?.text ?? '';
+
+      expect(body).toContain('Reimbursement');
+      expect(body).toMatch(/form has not arrived/i);
+    });
+
+    it('says the form is in once the submission has been filed against the case', async () => {
+      const notices = await withChatLock(db, ACCOM_TEACHER_CHAT, async (tx) => {
+        const created = await createCase(tx, {
+          chatId: ACCOM_TEACHER_CHAT,
+          category: CASE_CATEGORY.ACCOMMODATION,
+          detail: DETAIL,
+          formType: 'REIMBURSE',
+        });
+        // What the response sync does when the package turns up.
+        await tx.execute(
+          sql`UPDATE cases SET awaiting_form = false WHERE reference = ${created.reference}`,
+        );
+        return notifyNewCase(tx, {
+          reference: created.reference,
+          category: CASE_CATEGORY.ACCOMMODATION,
+          teacherChatId: ACCOM_TEACHER_CHAT,
+        });
+      });
+
+      const body = notices.messages[0]?.text ?? '';
+      expect(body).toMatch(/form has been submitted/i);
+      expect(body).not.toMatch(/has not arrived/i);
+    });
+
+    it('says nothing about paperwork on a case raised any other way', async () => {
+      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.ACCOMMODATION);
+      const body = outcome.messages[0]?.text ?? '';
+      expect(body).not.toMatch(/📄|form has not arrived|form has been submitted/);
+    });
+
+    /**
+     * An area MoPSE retires must not stop its existing cases notifying, which is
+     * why `cases.form_type` is deliberately not a foreign key. The notice falls
+     * back to the raw code — worse to read than "Reimbursement", and very much
+     * better than no notice at all.
+     */
+    it('still notifies, naming the raw code, when the area has left the sheet', async () => {
+      const notices = await fileInArea('GONE_AWAY', CASE_CATEGORY.ACCOMMODATION);
+      const body = notices.messages[0]?.text ?? '';
+
+      expect(notices.messages.length).toBeGreaterThan(0);
+      expect(body).toContain('GONE_AWAY');
+      expect(body).toMatch(/form has not arrived/i);
     });
   });
 });

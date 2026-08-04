@@ -30,10 +30,12 @@
  * A failed commit after a confirmation message is not.
  */
 import {
+  CASE_CATEGORY,
   CASE_TOPIC_CHOICES,
   MAX_CASE_DETAIL_ATTEMPTS,
   REGION_CONFIRM_AFTER_DAYS,
   URGENT_CASE_CATEGORY,
+  type CaseCategory,
   caseTopicByKey,
 } from '../config/constants.js';
 import { PRIVACY_NOTICE_VERSION } from '../config/privacy.js';
@@ -383,6 +385,8 @@ async function routeText(
       return handleIdentifier(db, update.chatId, text, state, deps);
     case 'AwaitingCaseDetail':
       return handleCaseDetail(db, update.chatId, text, state, deps);
+    case 'AwaitingFormComplaint':
+      return handleFormComplaint(db, update.chatId, text, state, deps);
     case 'AwaitingUrgentDetail':
       return handleUrgentDetail(db, update.chatId, text, state, deps);
     case 'AwaitingCaseTopic':
@@ -692,6 +696,21 @@ async function resumeAfterSignIn(
   return mainMenuReply('signedIn');
 }
 
+/**
+ * The two states that end in a teacher's typed words becoming a case.
+ *
+ * `AwaitingFormComplaint` joined `AwaitingCaseDetail` here rather than getting a
+ * filing path of its own. Everything that makes this branch correct — the
+ * attempt counter, the empty-message guard, the revoked-mid-conversation
+ * recovery, the D11 rule about announcing only a genuinely new case — would
+ * otherwise have to be written a second time, and the second copy is the one
+ * that drifts.
+ */
+type TypedCaseState = Extract<
+  ConversationState,
+  { kind: 'AwaitingCaseDetail' | 'AwaitingFormComplaint' }
+>;
+
 async function handleCaseDetail(
   db: Database,
   chatId: string,
@@ -699,13 +718,71 @@ async function handleCaseDetail(
   state: Extract<ConversationState, { kind: 'AwaitingCaseDetail' }>,
   deps: RouterDeps,
 ): Promise<RouterOutcome> {
+  return fileTypedCase(db, chatId, text, { category: state.category }, state, deps);
+}
+
+/**
+ * A complaint raised in a form area, filed once the teacher has written it.
+ *
+ * **The area is re-read here rather than trusted from the state.** A form
+ * withdrawn while the teacher was typing must not still file under it — the same
+ * reason `activeFormByType` re-checks the active flag when a scrollback button
+ * is tapped, and the reason a case is never filed against a payload alone.
+ */
+async function handleFormComplaint(
+  db: Database,
+  chatId: string,
+  text: string,
+  state: Extract<ConversationState, { kind: 'AwaitingFormComplaint' }>,
+  deps: RouterDeps,
+): Promise<RouterOutcome> {
+  const form = await activeFormByType(db, state.formType);
+  if (form === null) {
+    await clearState(db, chatId);
+    return only(chatId, {
+      text:
+        'That form is no longer available, so I have not opened a case.\n\n' +
+        'Open Submit Documents again for the current list, or tap Main Menu to ' +
+        'raise this another way.',
+      keyboard: backToMenuKeyboard(),
+    });
+  }
+
+  /**
+   * An empty `CATEGORY` means `Contact Support` — the general queue, which is
+   * where a complaint with no area of its own belongs.
+   *
+   * A value the build does not recognise falls back to the same place rather
+   * than refusing. `parseFormsTab` rejects an unknown category with its row
+   * number, so one should never reach the database; if a rollback ever leaves an
+   * older build reading a newer sheet, filing the teacher's words somewhere a
+   * person will read them beats losing them.
+   */
+  const known = Object.values(CASE_CATEGORY) as string[];
+  const category: CaseCategory =
+    form.category !== null && known.includes(form.category)
+      ? (form.category as CaseCategory)
+      : CASE_CATEGORY.CONTACT_SUPPORT;
+
+  return fileTypedCase(db, chatId, text, { category, formType: form.type }, state, deps);
+}
+
+async function fileTypedCase(
+  db: Database,
+  chatId: string,
+  text: string,
+  filing: { readonly category: CaseCategory; readonly formType?: string },
+  state: TypedCaseState,
+  deps: RouterDeps,
+): Promise<RouterOutcome> {
   if (text === '') return retryCaseDetail(db, chatId, state, deps, 'I did not get any text.');
 
   try {
     const result = await createCase(db, {
       chatId,
-      category: state.category,
+      category: filing.category,
       detail: text,
+      ...(filing.formType === undefined ? {} : { formType: filing.formType }),
     });
     await clearState(db, chatId);
 
@@ -721,7 +798,7 @@ async function handleCaseDetail(
     const notice = result.isNew
       ? await notifyNewCase(db, {
           reference: result.reference,
-          category: state.category,
+          category: filing.category,
           teacherChatId: chatId,
         })
       : NO_NOTIFICATION;
@@ -760,7 +837,7 @@ async function handleCaseDetail(
 async function retryCaseDetail(
   db: Database,
   chatId: string,
-  state: Extract<ConversationState, { kind: 'AwaitingCaseDetail' }>,
+  state: TypedCaseState,
   deps: RouterDeps,
   because: string,
 ): Promise<RouterOutcome> {
@@ -971,7 +1048,7 @@ async function routeCallback(
     case CALLBACK.DOC_TYPE:
       return (await requireSignIn(db, update.chatId, MENU_ACTION.SUBMIT_DOCS, deps))
         ?? (await requireReconsent(db, update.chatId, MENU_ACTION.SUBMIT_DOCS, deps))
-        ?? only(update.chatId, await chooseDocForm(db, first, deps));
+        ?? only(update.chatId, await chooseDocForm(db, update.chatId, first, deps));
 
     /**
      * The re-consent accept button — D32.
@@ -1788,8 +1865,22 @@ async function submitDocsReply(db: Database, deps: RouterDeps): Promise<Reply> {
  * The email warning is repeated here and not only on the list. This is the last
  * message before the teacher leaves Telegram, and matching the submission back
  * to a person depends entirely on their typing the address the roster holds.
+ *
+ * **A form with `PREPARE` set is a form area, and it asks for a message.** The
+ * teacher is shown what to gather, then the link, then a request to say what they
+ * need — and what they type opens a case. That is the whole of "a complaint and
+ * its paperwork, together": before this, a teacher with a problem could submit
+ * documents or describe the problem, and nothing joined the two.
+ *
+ * A form with no `PREPARE` behaves exactly as it always did, which is what keeps
+ * plain document forms unchanged.
  */
-async function chooseDocForm(db: Database, type: string, deps: RouterDeps): Promise<Reply> {
+async function chooseDocForm(
+  db: Database,
+  chatId: string,
+  type: string,
+  deps: RouterDeps,
+): Promise<Reply> {
   if (await isMaintenanceMode(db)) {
     return {
       text:
@@ -1805,6 +1896,24 @@ async function chooseDocForm(db: Database, type: string, deps: RouterDeps): Prom
       text:
         'That form is no longer available.\n\n' +
         'It may have been replaced — open Submit Documents again for the current list.',
+      keyboard: backToMenuKeyboard(),
+    };
+  }
+
+  if (form.prepare !== null) {
+    await saveState(db, chatId, {
+      kind: 'AwaitingFormComplaint',
+      formType: form.type,
+      attempts: 0,
+    });
+    return {
+      text:
+        `${form.buttonText}\n\n` +
+        `${form.prepare}\n\n` +
+        `${form.url}\n\n` +
+        '⚠️ The form asks for your email. Use the same address you signed in here ' +
+        'with — that is how we know the documents are yours.\n\n' +
+        'Now tell us what you need, and we will open a case for you.',
       keyboard: backToMenuKeyboard(),
     };
   }
