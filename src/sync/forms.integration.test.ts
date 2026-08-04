@@ -357,11 +357,49 @@ describe.skipIf(!TEST_DATABASE_URL)('documents against a real database', () => {
       expect(alerter.alerts.some((a) => a.body.includes("Supervisor's email"))).toBe(true);
     });
 
-    it('still reads a form that staff have switched off', async () => {
-      // Its submissions from last night are still somebody's documents.
+    /**
+     * Reversed on 3 August 2026, and the comment it replaces was right.
+     *
+     * It read: *"Its submissions from last night are still somebody's
+     * documents."* That is true, and the head of project chose the other side of
+     * it anyway with the cost stated — a form retired at 9am, whose last
+     * submission arrived at 11pm the night before and has not yet been swept,
+     * loses that submission silently. Nobody is told, not the teacher and not
+     * staff.
+     *
+     * What was bought is that a form retired weeks ago stops raising a critical
+     * alert every ten minutes for ever, which is what the old rule did: removing
+     * a row from the sheet only marks it inactive, and nothing ever stopped
+     * reading it.
+     *
+     * The habit that mitigates it is in RUNBOOK.md §4.18 — leave a retired
+     * form's row on the sheet, with its RESPONSES_TAB intact, for a day after
+     * you stop advertising it. That is a process rather than a guarantee, which
+     * is exactly why the cost is written here rather than only in the design.
+     */
+    it('does not read a form that staff have switched off', async () => {
       await syncForms(
         db,
         readerReturning({ FORMS: [FORMS_HEADER, formRow('PASSPORT', 'PASSPORT_RESPONSES', 'FALSE')] }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+
+      const report = await syncFormResponses(
+        db,
+        readerReturning({ PASSPORT_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] }),
+      );
+      expect(report.filed).toBe(0);
+      expect(report.formsRead).toBe(0);
+    });
+
+    /**
+     * The other half, and the one that proves this is not simply "read nothing".
+     * A form still on the sheet is still read.
+     */
+    it('reads a form that is still on the sheet', async () => {
+      await syncForms(
+        db,
+        readerReturning({ FORMS: [FORMS_HEADER, formRow('PASSPORT', 'PASSPORT_RESPONSES', 'TRUE')] }),
       );
       await signedInTeacher('950001', 'a@example.com');
 

@@ -65,11 +65,21 @@ export async function activeFormByType(db: Database, type: string): Promise<Form
 /**
  * The forms whose responses the bot can read.
  *
- * Inactive forms are included deliberately, and this is the one place the active
- * flag is ignored. A form switched off this morning may still have submissions
- * from last night that nobody has filed yet, and dropping them would lose a
- * teacher's documents silently — which is the failure this whole stage exists to
- * prevent.
+ * **Active forms only, since 3 August 2026, and the rule this replaced was not
+ * silly.** It ignored `active` deliberately, so that a form switched off this
+ * morning still had last night's submissions filed — losing a teacher's
+ * documents silently is the failure this whole stage exists to prevent.
+ *
+ * What sank it is that the rule had no end. Removing a row from the FORMS tab
+ * only sets `active = false`; the row stays for ever. So a form retired weeks
+ * ago was still read on every sync, its response tab no longer existed, and each
+ * failure raised a **critical** alert — for ever, with no way to stop it short
+ * of editing the database by hand. That is what the head of project reported.
+ *
+ * The cost is stated rather than hidden: a submission arriving between the last
+ * sweep and the moment a form is retired is now lost silently. The head of
+ * project was told that and chose it over a grace period. `RUNBOOK.md` §4.18
+ * carries the habit that mitigates it, and a habit is not a guarantee.
  */
 export async function formsWithResponses(db: Database): Promise<FormWithResponses[]> {
   const rows = await db
@@ -80,7 +90,7 @@ export async function formsWithResponses(db: Database): Promise<FormWithResponse
       responsesTab: formLinks.responsesTab,
     })
     .from(formLinks)
-    .where(isNotNull(formLinks.responsesTab))
+    .where(and(eq(formLinks.active, true), isNotNull(formLinks.responsesTab)))
     .orderBy(asc(formLinks.sheetRow), asc(formLinks.type));
   return rows.filter((r): r is FormWithResponses => r.responsesTab !== null);
 }
