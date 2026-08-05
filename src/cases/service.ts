@@ -97,6 +97,21 @@ export interface CreateCaseResult {
   readonly reference: string;
   /** False when an open case in the same category already existed. */
   readonly isNew: boolean;
+  /**
+   * The staff member this case was given to, or null when nobody covers it.
+   *
+   * **Returned because notification now writes to exactly this person (D1), and
+   * this is the only place the choice is made.** `notifyNewCase` used to ask who
+   * could work the case and write to all of them, up to twenty people; on a
+   * four-person team that was three or four phones for one teacher's problem.
+   * Recomputing a recipient list there would be a second answer to a question
+   * that already has one here.
+   *
+   * On the deduplicated path it is the **existing** case's owner rather than a
+   * fresh choice, because nothing is being assigned. Nothing is announced on that
+   * path either, so it is reported rather than acted on.
+   */
+  readonly owner: string | null;
 }
 
 /**
@@ -124,7 +139,7 @@ export async function createCase(
   }
 
   const existing = await db
-    .select({ reference: cases.reference })
+    .select({ reference: cases.reference, owner: cases.owner })
     .from(cases)
     .where(
       and(
@@ -138,7 +153,7 @@ export async function createCase(
     .limit(1);
 
   const found = existing[0];
-  if (found !== undefined) return { reference: found.reference, isNew: false };
+  if (found !== undefined) return { reference: found.reference, isNew: false, owner: found.owner };
 
   const reference = await allocateReference(db, request.category);
 
@@ -190,7 +205,7 @@ export async function createCase(
     ...(owner === null ? {} : { owner }),
   });
 
-  return { reference, isNew: true };
+  return { reference, isNew: true, owner };
 }
 
 /**

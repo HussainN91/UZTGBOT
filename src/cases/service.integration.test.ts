@@ -37,7 +37,14 @@ describe.skipIf(!TEST_DATABASE_URL)('cases', () => {
   beforeEach(async () => {
     pool ??= new pg.Pool({ connectionString: TEST_DATABASE_URL });
     db ??= drizzle(pool, { schema }) as unknown as Database;
-    await db.execute(sql`TRUNCATE cases, teachers, roster_entries, case_sequences CASCADE`);
+    /**
+     * `staff` is in this list for the reason `urgent.integration.test.ts`
+     * records having learned the hard way: a row left behind by another file was
+     * harmless until automatic assignment made the staff table load-bearing
+     * inside `createCase`, and then it was silently chosen as the owner of a case
+     * this file believed nobody covered.
+     */
+    await db.execute(sql`TRUNCATE cases, teachers, roster_entries, case_sequences, staff CASCADE`);
     await db.execute(sql`
       INSERT INTO roster_entries (identifier, name, region, active)
       VALUES (${IDENTIFIER}, 'Case Tester', 'Tashkent', true)
@@ -79,6 +86,66 @@ describe.skipIf(!TEST_DATABASE_URL)('cases', () => {
       await expect(
         createCase(db, { chatId: '950098', category: CASE_CATEGORY.VISA, detail: DETAIL }),
       ).rejects.toBeInstanceOf(TeacherNotVerifiedError);
+    });
+
+    it('reports the owner it chose, so the notice can go to one person', async () => {
+      /**
+       * D1. Notification used to work out its own recipients and write to all of
+       * them, which is how one teacher's problem reached four phones. The owner
+       * is decided here and nowhere else, so it travels out of here rather than
+       * being asked for a second time somewhere it could be answered differently.
+       */
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, regions, active)
+        VALUES ('950201', 'A Support', 'Support', 'All', ARRAY[]::text[], true)
+      `);
+
+      const created = await createCase(db, {
+        chatId: CHAT,
+        category: CASE_CATEGORY.VISA,
+        detail: DETAIL,
+      });
+
+      expect(created.owner).toBe('950201');
+    });
+
+    it('reports a null owner when nobody covers the case', async () => {
+      // Not a failure. It means no active staff member holds this queue in this
+      // region, the case waits in /cases unassigned, and the operations chat is
+      // told rather than a person.
+      const created = await createCase(db, {
+        chatId: CHAT,
+        category: CASE_CATEGORY.VISA,
+        detail: DETAIL,
+      });
+
+      expect(created.owner).toBeNull();
+    });
+
+    it('reports the existing owner when it returns a case rather than opening one', async () => {
+      // Nothing is assigned on the duplicate path and nothing is announced, so
+      // this is reported rather than acted on. Returning null here would read as
+      // "nobody covers it", which would be a lie about a case that has an owner.
+      /**
+       * **Two staff members, and the second one is the point.** With one
+       * candidate this test passes whether the duplicate path reads the existing
+       * owner or works one out afresh, so it would prove nothing. After the first
+       * case, `950201` holds one and `950202` holds none, so a recomputation
+       * would return `950202` and this fails.
+       */
+      await db.execute(sql`
+        INSERT INTO staff (telegram_id, name, role, queue, regions, active) VALUES
+          ('950201', 'First Support',  'Support', 'All', ARRAY[]::text[], true),
+          ('950202', 'Second Support', 'Support', 'All', ARRAY[]::text[], true)
+      `);
+      const first = await createCase(db, { chatId: CHAT, category: CASE_CATEGORY.VISA, detail: DETAIL });
+
+      const again = await createCase(db, { chatId: CHAT, category: CASE_CATEGORY.VISA, detail: DETAIL });
+
+      expect(again.isNew).toBe(false);
+      expect(again.reference).toBe(first.reference);
+      expect(again.owner).toBe(first.owner);
+      expect(again.owner).toBe('950201');
     });
   });
 
