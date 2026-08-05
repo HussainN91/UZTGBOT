@@ -38,7 +38,7 @@ import { NEW_CASE_NOTIFY_CAP, TIMEZONE } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import { logInteraction } from '../log/interactions.js';
 import { CAPABILITY } from '../staff/roles.js';
-import { regionalRecipients, staffCovering } from '../staff/recipients.js';
+import { staffCovering } from '../staff/recipients.js';
 import type { Alert } from '../sync/alerts.js';
 import { regionFor } from '../teachers/region.js';
 import { CALLBACK, encodeCallback } from '../telegram/callback-data.js';
@@ -180,11 +180,15 @@ export interface UrgentRequestNotice {
 /**
  * Tell a regional coordinator that a teacher has asked for priority.
  *
- * **Filtered on `urgent.issue`, not on `case.update`.** They are being asked to
- * exercise the first, and the two are not the same set: `urgent.issue` is
- * floored at `Support` deliberately — the person a teacher reaches is whoever is
- * on the desk, and a decision that needs a Lead is a decision that arrives after
- * the thing it was about.
+ * **Sent to the owner alone since 5 August 2026 (D1).** It went to everybody in
+ * the region who held `urgent.issue`, which on this team overlapped almost
+ * entirely with everybody who had just been told the case existed.
+ *
+ * The person who will do the work is the person who decides whether it jumps the
+ * queue. That is a narrowing of who decides, and it is not a lowering of the bar:
+ * the owner holds `case.update`, which floors at `Support`, exactly where
+ * `urgent.issue` floors. One Support member could always decide this alone. What
+ * has changed is which one, and that it is now the one with the case.
  *
  * **This message names the teacher, which nothing else in this file does.** The
  * header rule — "the teacher's words are never in here" — still holds and is
@@ -194,73 +198,67 @@ export interface UrgentRequestNotice {
  * however they normally would", and a coordinator who has to run `/case` before
  * they can tell who is asking is one who will confirm without checking.
  *
- * Falls back to System when no staff member covers the region, and says so. A
- * teacher in a region nobody covers must not have their request land nowhere;
- * see `regionalRecipients`.
+ * A case with no owner raises an alert to the operations chat instead. D5 says
+ * that cannot happen while any staff row covers every region, which every one of
+ * them does today, so reaching it means a staff row is wrong.
  */
 export async function notifyUrgentRequest(
   db: Database,
   notice: UrgentRequestNotice,
 ): Promise<NotificationOutcome> {
   const region = await regionFor(db, notice.teacherChatId);
-  const recipients = await regionalRecipients(db, {
-    capability: CAPABILITY.URGENT_ISSUE,
-    region,
-  });
 
-  if (recipients.chatIds.length === 0) {
+  if (notice.owner === null) {
     await logFanOut(db, notice.reference, 'STAFF_NOTIFIED_URGENT_REQUEST', 0, 0);
     return { messages: [], alerts: [noCoordinatorAlert(notice.reference, region)] };
   }
 
   const who = await teacherIdentity(db, notice.teacherChatId);
-  const chosen = recipients.chatIds.slice(0, NEW_CASE_NOTIFY_CAP);
-  await logFanOut(
-    db,
-    notice.reference,
-    'STAFF_NOTIFIED_URGENT_REQUEST',
-    chosen.length,
-    recipients.chatIds.length,
-  );
+  const facts = await caseFacts(db, notice.reference);
+  await logFanOut(db, notice.reference, 'STAFF_NOTIFIED_URGENT_REQUEST', 1, 1);
 
+  /**
+   * Four lines, from about twelve.
+   *
+   * **The teacher's name goes first, on its own line.** A person asked for help;
+   * the category is only how it is filed. That ordering is the one deliberate
+   * piece of shape in this message.
+   *
+   * **The roster identifier came out**, and the argument that put it there has
+   * expired rather than been overruled. It was included because checking who was
+   * asking meant typing a command first, so a coordinator would confirm without
+   * looking. Opening the case is one tap now.
+   *
+   * The paragraph explaining what a priority request is came out too. The person
+   * reading this has the two buttons in front of them and has done it before.
+   */
   const text = [
-    `⏫ Priority requested — ${notice.reference}`,
+    '⏫ Priority asked for',
     '',
-    `Teacher: ${who.name ?? 'name not on the roster'}`,
-    `Identifier: ${who.identifier ?? 'not recorded'}`,
-    `Region: ${region ?? 'not recorded'}`,
-    '',
-    notice.isNew
-      ? 'They have opened a case and asked for it to be treated as a priority.'
-      : 'They have added to a case they already had open and asked for it to be treated as a priority.',
-    '',
-    'It is filed at normal importance until you decide. Check with them however',
-    'you normally would, then confirm below if it should jump the queue.',
-    '',
-    ...(recipients.viaSystemFallback
-      ? [
-          '⚠️ You are being asked because NO active staff member covers this region.',
-          'That is a staffing gap, not a routing quirk — somebody needs the region.',
-          '',
-        ]
-      : []),
-    `/case ${notice.reference} — read it, including what the teacher wrote`,
+    who.name ?? 'Name not on the roster',
+    [notice.reference, region ?? 'region not recorded', facts.filedAt].join(' · '),
   ].join('\n');
 
   return {
-    messages: chosen.map((chatId) => ({
-      chatId,
-      text,
-      purpose: 'an urgent-priority request awaiting a decision',
-      keyboard: [
-        [
-          {
-            text: '⏫ Confirm urgent',
-            callback_data: encodeCallback(CALLBACK.URGENT_CONFIRM, notice.reference),
-          },
+    messages: [
+      {
+        chatId: notice.owner,
+        text,
+        purpose: 'an urgent-priority request awaiting a decision',
+        keyboard: [
+          [
+            {
+              text: '📂 Open case',
+              callback_data: encodeCallback(CALLBACK.CASE_OPEN, notice.reference),
+            },
+            {
+              text: '⏫ Make it a priority',
+              callback_data: encodeCallback(CALLBACK.URGENT_CONFIRM, notice.reference),
+            },
+          ],
         ],
-      ],
-    })),
+      },
+    ],
     alerts: [],
   };
 }
@@ -276,10 +274,18 @@ export async function notifyUrgentRequest(
  * completely.
  *
  * So the overlap is removed, and the request message is the one kept. It carries
- * the reference, the teacher's identity and the button; the new-case notice
- * carries strictly less. Sending both would put two messages about one case in
- * one person's chat a second apart, which is how somebody learns that the second
- * one is noise — and the second one is the one with the decision in it.
+ * the teacher's identity and the buttons; the new-case notice carries strictly
+ * less. Sending both would put two messages about one case in one person's chat a
+ * second apart, which is how somebody learns that the second one is noise, and
+ * the second one is the one with the decision in it.
+ *
+ * **This strip stopped being an optimisation on 5 August 2026 and became the
+ * thing holding the promise.** It was written when the two audiences merely
+ * overlapped, so at worst it saved somebody a duplicate. Under D1 both messages
+ * go to the same person by construction: the owner. Without this, the one change
+ * that exists to stop a phone going off twice for one teacher would itself send
+ * two messages a second apart. Do not remove it, and do not let it become
+ * conditional.
  *
  * A request landing on a case the teacher already had open announces nothing to
  * the queue at all: staff were told when it was filed, and paging them again for
@@ -385,17 +391,15 @@ export async function notifyUrgentConfirmed(
 function noCoordinatorAlert(reference: string, region: string | null): Alert {
   return {
     severity: 'critical',
-    title: 'A teacher asked for priority and nobody can decide it',
+    title: 'A teacher asked for priority and the case has no owner',
     body: [
       `Case: ${reference}`,
       `Region: ${region ?? 'not recorded'}`,
       '',
-      'No active staff member holds urgent.issue — not in this region, and not at',
-      'System either, which is the fallback. The case is filed and the teacher has',
-      'their reference, but it is sitting at normal importance and the request will',
-      'stay pending until somebody with the rank exists.',
+      'The case is filed and the teacher has their reference. It is at normal',
+      'importance and the request waits until somebody owns the case.',
       '',
-      'Add a Support member, or check that the System rows are still active.',
+      'Widen a staff member’s queue or regions, or add somebody.',
     ].join('\n'),
   };
 }

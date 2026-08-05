@@ -450,8 +450,49 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       expect(staffTold[0]?.purpose).toMatch(/urgent|priority/i);
       // The teacher's own words stay behind /case, which records who read them.
       expect(staffTold.every((m) => !m.text.includes('burst pipe'))).toBe(true);
-      // And the button is what makes the message actionable.
-      expect(staffTold[0]?.keyboard?.[0]?.[0]?.callback_data ?? '').toContain('UC:');
+      // And the buttons are what make the message actionable. Two now: open the
+      // case, or grant the priority without opening it.
+      const buttons = (staffTold[0]?.keyboard?.[0] ?? []).map((b) => b.callback_data);
+      expect(buttons.some((data) => data.startsWith('CO:'))).toBe(true);
+      expect(buttons.some((data) => data.startsWith('UC:'))).toBe(true);
+    });
+
+    it('sends one message, not two, when a case is filed and made urgent at once', async () => {
+      /**
+       * **The failure this whole phase would otherwise have introduced.**
+       *
+       * Both notices go to the owner now, so without the overlap strip in
+       * `notifyUrgentRequestOnCase` a teacher filing a case and asking for
+       * priority in the same breath would put two messages in one person's chat a
+       * second apart. That is the exact thing D1 exists to stop, arriving through
+       * the change that implements it.
+       */
+      await saveState(db, TASHKENT_TEACHER, { kind: 'AwaitingUrgentDetail', attempts: 0 });
+
+      const asked = await send({
+        chatId: TASHKENT_TEACHER,
+        kind: 'text',
+        text: 'the landlord has locked me out and it is dark',
+      });
+
+      // messages[0] is the teacher's own confirmation.
+      const staffTold = asked.messages.slice(1);
+      expect(staffTold).toHaveLength(1);
+      expect(staffTold[0]?.text).toContain('Priority asked for');
+    });
+
+    it('asks the owner about priority, and says nothing about staffing', async () => {
+      await saveState(db, TASHKENT_TEACHER, { kind: 'AwaitingUrgentDetail', attempts: 0 });
+
+      const asked = await send({ chatId: TASHKENT_TEACHER, kind: 'text', text: 'no heating' });
+      const body = asked.messages[1]?.text ?? '';
+
+      // §7. Nothing in capitals, no warning block, no dash, and no sentence
+      // telling a caseworker about a staffing gap they cannot do anything about.
+      expect(body).not.toContain('—');
+      expect(body).not.toMatch(/staffing gap|NO active staff/);
+      expect(body).toContain('Tashkent Teacher');
+      expect(body.split('\n').filter((line) => line.trim() !== '')).toHaveLength(3);
     });
 
     it('does not page everybody again when a teacher taps twice', async () => {
