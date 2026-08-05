@@ -364,17 +364,10 @@ export async function notifyUrgentConfirmed(
   if (recipients.length === 0) return NO_NOTIFICATION;
 
   const text = [
-    `⏫ Case marked urgent — ${notice.reference}`,
+    `⏫ Marked urgent by ${notice.confirmedBy}`,
     '',
-    `Confirmed by: ${notice.confirmedBy}`,
-    notice.owner === null
-      ? 'Nobody owns this case yet.'
-      : `Owner: ${notice.owner}`,
-    '',
-    'It is now at Escalated and appears in /urgent.',
-    '',
-    `/case ${notice.reference} — read it, including what the teacher wrote`,
-    `/assign ${notice.reference} <telegram id> — give it an owner`,
+    notice.reference,
+    notice.owner === null ? 'Nobody owns it yet' : `Owner: ${notice.owner}`,
   ].join('\n');
 
   return {
@@ -382,6 +375,25 @@ export async function notifyUrgentConfirmed(
       chatId,
       text,
       purpose: 'notice that a case was confirmed urgent',
+      /**
+       * The second button is D8, and this is the message it belongs on.
+       *
+       * These are the people told that one person raised a case above every
+       * other case in the country, alone. Giving them the news without giving
+       * them a way to disagree is what makes oversight decorative.
+       */
+      keyboard: [
+        [
+          {
+            text: '📂 Open case',
+            callback_data: encodeCallback(CALLBACK.CASE_OPEN, notice.reference),
+          },
+          {
+            text: '↩️ Not urgent',
+            callback_data: encodeCallback(CALLBACK.URGENT_UNMARK, notice.reference),
+          },
+        ],
+      ],
     })),
     alerts: [],
   };

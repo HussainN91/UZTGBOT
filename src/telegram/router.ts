@@ -62,6 +62,7 @@ import {
 } from '../teachers/dispute-notify.js';
 import { disputeDetail, forwardToSystem, openDispute, recordClaim } from '../teachers/disputes.js';
 import { settleAndAnnounce } from './dispute-actions.js';
+import { unmarkAndAnnounce } from './urgent-actions.js';
 import { privacyAcceptance, recordAcceptance } from '../teachers/privacy.js';
 import { findTeacher, teacherHasAccess } from '../teachers/repository.js';
 import { verifyIdentifier } from '../teachers/verify.js';
@@ -1112,6 +1113,16 @@ async function routeCallback(
       return confirmUrgent(db, update.chatId, first, state, deps);
 
     /**
+     * Taking an urgent marking back — D8.
+     *
+     * Re-authorised on arrival exactly as the confirm tap above is, and for the
+     * same reason: this button sits in an oversight chat indefinitely, and the
+     * person tapping it today may have been demoted since it was sent.
+     */
+    case CALLBACK.URGENT_UNMARK:
+      return unmarkUrgentTap(db, update.chatId, first, state);
+
+    /**
      * "Open this case" from a list — Part 5G.
      *
      * **It is handed to the command dispatcher as `/case <reference>`, and that
@@ -1341,6 +1352,50 @@ async function confirmUrgent(
     ],
     alerts: notice.alerts,
   };
+}
+
+/**
+ * Program and above disagreeing with an urgent marking — D8.
+ *
+ * The same four checks `confirmUrgent` makes, in the same order and for the same
+ * reasons: an active staff row with silence for a chat that has none, then the
+ * capability answered plainly for somebody who *is* staff, then the case through
+ * the scoped lookup, then the case's own state inside the write.
+ *
+ * **The capability is `case.assign`, deliberately, rather than one of its own.**
+ * It already floors at Program and it already means "override somebody else's
+ * decision about a case", which is exactly what this is. A capability per button
+ * is a second expression of a rule that already has one.
+ */
+async function unmarkUrgentTap(
+  db: Database,
+  chatId: string,
+  reference: string,
+  state: ConversationState | null,
+): Promise<RouterOutcome> {
+  const member = await findStaff(db, chatId);
+  if (member === null) {
+    await logInteraction(db, chatId, STAFF_DENIED, `urgent unmark ${reference}`, state);
+    return only(chatId, await menuReplyFor(db, chatId));
+  }
+
+  if (!can(member, CAPABILITY.CASE_ASSIGN)) {
+    await logInteraction(db, chatId, STAFF_DENIED, `urgent unmark ${reference}`, state);
+    return only(chatId, {
+      text:
+        'Taking back an urgent marking needs ' +
+        `${floorFor(CAPABILITY.CASE_ASSIGN)} rank or above.\n\nYours is ${member.role}.`,
+    });
+  }
+
+  const found = await findCase(db, scopeOf(member), reference);
+  if (found === null) {
+    return only(chatId, {
+      text: `I cannot find ${reference}, or it is outside your queue and regions.`,
+    });
+  }
+
+  return unmarkAndAnnounce(db, chatId, found.reference);
 }
 
 /**

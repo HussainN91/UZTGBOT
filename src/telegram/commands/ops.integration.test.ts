@@ -417,6 +417,119 @@ describe.skipIf(!TEST_DATABASE_URL)('operational commands', () => {
       expect(audit.rows[0]?.count).toBe(1);
     });
 
+    describe('the not urgent button — D8', () => {
+      /**
+       * The counterpart, and the reason it exists: `urgent.issue` floors at
+       * Support, so one person can raise a case above every other case in the
+       * country alone and with no second signature. The people told that happened
+       * need a way to disagree with it.
+       */
+      const confirmed = async (): Promise<string> => {
+        const reference = await askForPriority();
+        await send({
+          chatId: SUPPORT_MEMBER,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+        });
+        return reference;
+      };
+
+      it('is refused for the Support member who marked it, naming the rank', async () => {
+        // Support grants urgency; taking it back is a Program act, the same rank
+        // that may reassign somebody else's case.
+        const reference = await confirmed();
+
+        const outcome = await send({
+          chatId: SUPPORT_MEMBER,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_UNMARK, reference),
+        });
+
+        expect(outcome.messages[0]?.text ?? '').toContain('Program');
+        expect(await importanceOf(reference)).toBe('Urgent/Escalated');
+      });
+
+      it('answers a chat with no staff row with the menu, never with a refusal', async () => {
+        // The dispatcher's rule again. Confirming the button is real is itself
+        // information a stranger should not get.
+        const reference = await confirmed();
+
+        const outcome = await send({
+          chatId: TEACHER,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_UNMARK, reference),
+        });
+
+        expect(outcome.messages[0]?.text ?? '').not.toMatch(/rank|permission/i);
+        expect(await importanceOf(reference)).toBe('Urgent/Escalated');
+      });
+
+      it('is obeyed for System, and the teacher is told nothing', async () => {
+        const reference = await confirmed();
+
+        const outcome = await send({
+          chatId: SYSTEM,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_UNMARK, reference),
+        });
+
+        expect(await importanceOf(reference)).toBe('Normal/Received');
+        expect(outcome.messages[0]?.chatId).toBe(SYSTEM);
+        // D8, stated outright: they were told it had been prioritised, and they
+        // are not told it has been un-prioritised.
+        expect(outcome.messages.some((m) => m.chatId === TEACHER)).toBe(false);
+      });
+
+      it('tells the person whose decision was reversed', async () => {
+        const reference = await confirmed();
+
+        const outcome = await send({
+          chatId: SYSTEM,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_UNMARK, reference),
+        });
+
+        expect(outcome.messages.some((m) => m.chatId === SUPPORT_MEMBER)).toBe(true);
+      });
+
+      it('leaves a closed case alone and says why in plain words', async () => {
+        // The retention guard, reached through the button rather than the store.
+        const reference = await confirmed();
+        await db.execute(
+          sql`UPDATE cases SET status = 'Completed', closed_at = now() WHERE reference = ${reference}`,
+        );
+
+        const outcome = await send({
+          chatId: SYSTEM,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_UNMARK, reference),
+        });
+
+        const body = outcome.messages[0]?.text ?? '';
+        expect(body).toMatch(/closed/i);
+        expect(body).toMatch(/deleted/i);
+        // No jargon: a person reading this has never heard of a retention period.
+        expect(body).not.toMatch(/retention|importance/i);
+        expect(await importanceOf(reference)).toBe('Urgent/Completed');
+      });
+
+      it('sits on the oversight message, which is where it is any use', async () => {
+        const reference = await askForPriority();
+
+        const outcome = await send({
+          chatId: SUPPORT_MEMBER,
+          kind: 'callback',
+          text: encodeCallback(CALLBACK.URGENT_CONFIRM, reference),
+        });
+
+        const oversight = outcome.messages.find((m) => m.chatId === SYSTEM);
+        const buttons = (oversight?.keyboard ?? []).flatMap((row) =>
+          row.map((b) => b.callback_data),
+        );
+        expect(buttons).toContain(encodeCallback(CALLBACK.URGENT_UNMARK, reference));
+      });
+    });
+
     it('refuses a case nobody asked about', async () => {
       await teacherTaps(encodeCallback(CALLBACK.MENU, MENU_ACTION.CONTACT_SUPPORT));
       await teacherTaps(encodeCallback(CALLBACK.CASE_TOPIC, 'OTHER'));

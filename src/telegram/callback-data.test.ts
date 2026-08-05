@@ -67,16 +67,21 @@ describe('callback data stays inside Telegram’s 64-byte limit', () => {
    * arithmetic is asserted against the longest prefix the map actually holds,
    * built the way `allocateReference` builds it.
    */
-  it('the confirm-urgent button fits with the longest reference this bot can build', () => {
+  it('the two urgent buttons fit with the longest reference this bot can build', () => {
     const longest = Object.values(CASE_REFERENCE_PREFIX).reduce((a, b) =>
       a.length >= b.length ? a : b,
     );
     const reference = `${longest}-2026-99999`;
 
-    const emitted = encodeCallback(CALLBACK.URGENT_CONFIRM, reference);
+    // `UN` joined `UC` on 5 August 2026 and is measured beside it rather than in
+    // a test of its own, so the pair cannot drift apart.
+    for (const prefix of [CALLBACK.URGENT_CONFIRM, CALLBACK.URGENT_UNMARK] as const) {
+      const emitted = encodeCallback(prefix, reference);
 
-    expect(byteLength(emitted)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
-    expect(byteLength(emitted)).toBeLessThanOrEqual(32);
+      expect(byteLength(emitted)).toBeLessThanOrEqual(CALLBACK_DATA_MAX_BYTES);
+      expect(byteLength(emitted)).toBeLessThanOrEqual(32);
+    }
+
     // A reference has no colon in it, which is what lets it travel as one part.
     expect(reference).not.toContain(':');
   });

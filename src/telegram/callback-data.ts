@@ -100,6 +100,25 @@ export const CALLBACK = {
    */
   URGENT_CONFIRM: 'UC',
   /**
+   * "That should not have been made urgent", e.g. `UN:VISA-2026-00311` — D8.
+   *
+   * The counterpart to `UC`, and it sits on the oversight message rather than on
+   * the coordinator's. Support grants urgency and Program takes it back, which
+   * mirrors `/assign`: overriding somebody else's decision about a case is
+   * already a Program act in this system, so this reuses `case.assign` rather
+   * than inventing a capability for one button.
+   *
+   * Re-validated on tap like everything else here, and it has one refusal the
+   * others do not: a closed case is left alone, because lowering `importance`
+   * changes how long a finished case is kept and the nightly retention pass could
+   * then delete it.
+   *
+   * `UN:CONTRACT-2026-99999` is 22 bytes against the 64-byte limit, and that is
+   * the longest reference this system can build. A test measures it with a real
+   * value rather than trusting the arithmetic here.
+   */
+  URGENT_UNMARK: 'UN',
+  /**
    * "Open this case", e.g. `CO:VISA-2026-00311` — Part 5G.
    *
    * Every list command printed plain text and no buttons, so reading a case
