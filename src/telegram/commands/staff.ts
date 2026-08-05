@@ -95,7 +95,7 @@ export function whoamiText(member: StaffRecord): string {
     'You may:',
     ...describeCapabilities(capabilitiesFor(member.role)),
     '',
-    '/whoami — this message',
+    '/whoami shows this message.',
   ].join('\n');
 }
 
@@ -615,7 +615,7 @@ export const staffAdd: StaffCommand = {
           '',
           `Added by: ${describeStaff(ctx.member)}`,
           '',
-          '/whoami — everything you can do, and the commands for it',
+          '/whoami shows everything you can do, and the commands for it.',
         ]),
       ],
     );
@@ -719,7 +719,7 @@ export const staffRole: StaffCommand = {
           `Rank: ${role}`,
           `Changed by: ${describeStaff(ctx.member)}`,
           '',
-          '/whoami — everything you can do now',
+          '/whoami shows everything you can do now.',
         ]),
       ],
     );
@@ -815,7 +815,7 @@ export const staffQueue: StaffCommand = {
           `Queue: ${queue}`,
           `Changed by: ${describeStaff(ctx.member)}`,
           '',
-          '/cases — what you can see now',
+          '/cases shows what you can see now.',
         ]),
       ],
     );

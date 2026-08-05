@@ -179,7 +179,7 @@ describe.skipIf(!TEST_DATABASE_URL)('one tap on a case menu', () => {
       text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00913', 'OWN', SYSTEM),
     });
 
-    expect(outcome.messages[0]?.text).toContain('not available at your rank');
+    expect(outcome.messages[0]?.text).toContain('rank or above');
 
     const rows = await db.execute<{ owner: string | null }>(
       sql`SELECT owner FROM cases WHERE reference = 'VISA-2026-00913'`,
@@ -225,7 +225,7 @@ describe.skipIf(!TEST_DATABASE_URL)('one tap on a case menu', () => {
       text: encodeCallback(CALLBACK.CASE_ACTION, 'VISA-2026-00911', 'M', 'Critical'),
     });
 
-    expect(outcome.messages[0]?.text).not.toContain('not available at your rank');
+    expect(outcome.messages[0]?.text).not.toContain('rank or above');
     expect(outcome.messages[0]?.text).not.toContain('VISA-2026-00911');
   });
 

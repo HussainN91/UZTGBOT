@@ -147,7 +147,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       // on the rank it names rather than on that word — this test passed for the
       // wrong reason for the first minutes after the floor moved.
       expect(await run('/staff', PROGRAM)).toContain(SUPPORT_MEMBER);
-      expect(await run('/staff', SUPPORT_MEMBER)).toContain('It needs Program');
+      expect(await run('/staff', SUPPORT_MEMBER)).toContain('needs Program rank');
     });
   });
 
@@ -251,7 +251,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       expect((await findStaff(db, NEWCOMER))?.role).toBe('Support');
 
       const refused = await run(`/staff_add ${SECOND_SYSTEM} Support Visa`, SUPPORT_MEMBER);
-      expect(refused).toContain('It needs Program');
+      expect(refused).toContain('needs Program rank');
       expect(await findAnyStaff(db, SECOND_SYSTEM)).toBeNull();
     });
   });
@@ -317,7 +317,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
 
     it('is available to a Program admin, and not below', async () => {
       expect(await run(`/staff_role ${SUPPORT_MEMBER} Lead`, SUPPORT_MEMBER)).toContain(
-        'It needs Program',
+        'needs Program rank',
       );
       expect((await findStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
 
@@ -435,7 +435,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       // and the second half of this test would pass for the wrong reason.
       // Matched on the refusal's own words: the target is called "Programme
       // Lead", so a bare check for "Program" would pass on their name.
-      expect(await run(`/staff_remove ${PROGRAM}`, SUPPORT_MEMBER)).toContain('It needs Program');
+      expect(await run(`/staff_remove ${PROGRAM}`, SUPPORT_MEMBER)).toContain('needs Program rank');
       expect(await findStaff(db, PROGRAM)).not.toBeNull();
 
       expect(await run(`/staff_remove ${SUPPORT_MEMBER}`, PROGRAM)).toMatch(/deactivated/i);
@@ -640,7 +640,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
         // They can see the button, so silence would leave them tapping it.
         const body = await tapText([SUPPORT_MEMBER, 'ROLE', 'Lead'], SUPPORT_MEMBER);
 
-        expect(body).toContain('It needs Program');
+        expect(body).toContain('needs Program rank');
         expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
       });
 
@@ -696,7 +696,7 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
         text: encodeCallback(CALLBACK.STAFF_ADD, '995501', 'System', 'All'),
       });
 
-      expect(outcome.messages[0]?.text).toContain('not available at your rank');
+      expect(outcome.messages[0]?.text).toContain('rank or above');
       const rows = await db.execute(sql`SELECT 1 FROM staff WHERE telegram_id = '995501'`);
       expect(rows.rows).toHaveLength(0);
     });

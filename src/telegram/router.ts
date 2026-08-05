@@ -1267,8 +1267,8 @@ async function confirmUrgent(
     await logInteraction(db, chatId, STAFF_DENIED, `urgent confirm ${reference}`, state);
     return only(chatId, {
       text:
-        'Confirming an urgent request is not available at your rank.\n\n' +
-        `It needs ${floorFor(CAPABILITY.URGENT_ISSUE)} or above. Yours is ${member.role}.`,
+        `Making a case a priority needs ${floorFor(CAPABILITY.URGENT_ISSUE)} rank or above.` +
+        `\n\nYours is ${member.role}.`,
     });
   }
 
@@ -1277,8 +1277,7 @@ async function confirmUrgent(
     return only(chatId, {
       text:
         `I cannot find ${reference}, or it is outside your queue and regions.\n\n` +
-        'It may have been removed by the retention schedule, or your coverage may have ' +
-        'changed since this message was sent.',
+        'Your coverage may have changed since this message was sent.',
     });
   }
 

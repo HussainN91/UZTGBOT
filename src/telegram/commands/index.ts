@@ -396,14 +396,17 @@ export async function routeStaffWriting(
  * Naming the rank needed turns "you may not" into "ask a System member", which
  * is a request somebody can make. The floor comes from the same table that
  * refused them, so the explanation cannot drift from the rule.
+ *
+ * **Shortened from five lines to three on 5 August 2026**, §7 of the quieter-bot
+ * design. The rank somebody needs is the only actionable thing in here, so it is
+ * the first thing they read rather than the third, and the sentence announcing
+ * that a refusal has happened is gone: they can see that.
  */
 function refusalText(name: string, capability: Capability, role: string): string {
   return [
-    `${name} is not available at your rank.`,
+    `${name} needs ${floorFor(capability)} rank or above.`,
     '',
-    `It needs ${floorFor(capability)} or above. Yours is ${role}.`,
-    '',
-    'Type /whoami to see everything you can do.',
+    `Yours is ${role}. Type /whoami to see what you can do.`,
   ].join('\n');
 }
 
