@@ -272,6 +272,12 @@ export async function confirmUrgentRequest(
    * every call. A sub-query in `FROM` is evaluated against the pre-update
    * snapshot, which is the only way to see the old value in one statement.
    *
+   * **`was_status` joined it on 5 August 2026 and is the same trap exactly.**
+   * This statement writes `status`, so reading the replaced value from
+   * `RETURNING` would hand back `Escalated` every time and `pre_urgent_status`
+   * would faithfully record the value it exists to remember the alternative to.
+   * The sub-select was already here; the second column is free.
+   *
    * It cannot change which rows are updated: it selects on the same reference,
    * so it yields exactly the row being written, or nothing at all for a
    * reference that does not exist — in which case the `WHERE` would have matched
@@ -286,6 +292,7 @@ export async function confirmUrgentRequest(
     UPDATE cases
     SET importance = GREATEST(importance, 'Urgent'::case_importance),
         status = 'Escalated',
+        pre_urgent_status = before.was_status,
         closed_at = NULL,
         teacher_chased_at = NULL,
         teacher_chase_count = 0,
@@ -294,7 +301,7 @@ export async function confirmUrgentRequest(
         updated_at = now(),
         last_actor = ${actor}
     FROM (
-      SELECT closed_at AS was_closed_at
+      SELECT closed_at AS was_closed_at, status AS was_status
       FROM cases WHERE reference = ${reference}
     ) AS before
     WHERE cases.reference = ${reference}

@@ -234,6 +234,26 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
   });
 
   describe('confirming', () => {
+    it('remembers the status it replaced when it escalates', async () => {
+      /**
+       * So that un-marking can put the case back where it was. Read through the
+       * `before` sub-select rather than from `RETURNING`, because this statement
+       * writes `status` itself: `RETURNING status` yields `Escalated` every time
+       * and would record the value it was meant to replace.
+       */
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await updateCase(db, filed.reference, { status: 'Under review' }, COORDINATOR);
+
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+
+      const rows = await db.execute<{ before: string | null; now: string }>(sql`
+        SELECT pre_urgent_status AS before, status AS now
+        FROM cases WHERE reference = ${filed.reference}
+      `);
+      expect(rows.rows[0]?.now).toBe('Escalated');
+      expect(rows.rows[0]?.before).toBe('Under review');
+    });
+
     it('raises importance, escalates, stamps who decided, and audits', async () => {
       const asked = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
       const outcome = await confirmUrgentRequest(db, asked.reference, COORDINATOR);
