@@ -352,6 +352,120 @@ export async function confirmUrgentRequest(
   return { kind: 'notRequested' };
 }
 
+export type UrgentUnmarked =
+  | {
+      readonly kind: 'unmarked';
+      readonly reference: string;
+      /** Where the case landed: what it was before escalation, or `Received`. */
+      readonly status: string;
+      readonly owner: string | null;
+      /** Whose decision is being reversed, so they can be told it was. */
+      readonly wasConfirmedBy: string | null;
+    }
+  /** No such case. A button from a build that no longer exists, or a purged case. */
+  | { readonly kind: 'unknown' }
+  /** Nobody ever confirmed this. A teacher's request is not a decision to undo. */
+  | { readonly kind: 'notUrgent' }
+  /** The case has ended, and lowering importance now could have it deleted. */
+  | { readonly kind: 'closed' };
+
+/**
+ * Take back a confirmed urgent marking — D8, 5 August 2026.
+ *
+ * Asked for alongside keeping the oversight message rather than instead of it.
+ * One regional coordinator can raise a case above every other case in the country
+ * with no second signature, so the people who are told it happened need a way to
+ * disagree.
+ *
+ * **It refuses a closed case, and that is a data-loss guard rather than
+ * tidiness.** Retention keys off `importance` and only ever touches a row
+ * carrying a `closed_at`. A closed case at `Urgent` is kept for
+ * `URGENT_CASE_RETENTION_DAYS`; dropping it to `Normal` moves it onto
+ * `CASE_RETENTION_DAYS`, which can put it the wrong side of the line, and the
+ * nightly pass would delete it *that night* rather than eventually. Refusing
+ * closed cases makes the whole class of accident unreachable, because an open
+ * case is never a candidate for deletion. Anybody who means it reopens the case
+ * first, which is one tap they already have.
+ *
+ * **The teacher is not told.** They were told their case had been prioritised
+ * when it was marked, so after this they still believe it is. That was the head
+ * of project's explicit instruction, and the alternative is telling a worried
+ * teacher their problem has been downgraded.
+ *
+ * The confirmation stamps are cleared rather than left set, so a case can be
+ * marked urgent again later. Sometimes it really was.
+ */
+export async function unmarkUrgent(
+  db: Database,
+  reference: string,
+  actor: string,
+): Promise<UrgentUnmarked> {
+  /**
+   * The old `pre_urgent_status` and the old `urgent_confirmed_by` both come from
+   * the `before` sub-select, for the reason written out at length in
+   * `confirmUrgentRequest`: this statement writes both columns, so `RETURNING`
+   * would hand back the values it just wrote.
+   *
+   * `::case_status` on the fallback is not decoration. A bare `'Received'` inside
+   * `COALESCE` beside an enum column leaves PostgreSQL inferring the parameter's
+   * type from its neighbours, which is the second of the three raw-SQL traps in
+   * `CLAUDE.md` and fails at the database rather than at the typechecker.
+   */
+  const updated = await db.execute<{
+    reference: string;
+    status: string;
+    owner: string | null;
+    was_confirmed_by: string | null;
+  }>(sql`
+    UPDATE cases
+    SET importance = 'Normal'::case_importance,
+        status = COALESCE(before.pre_status, 'Received'::case_status),
+        pre_urgent_status = NULL,
+        urgent_confirmed_by = NULL,
+        urgent_confirmed_at = NULL,
+        updated_at = now(),
+        last_actor = ${actor}
+    FROM (
+      SELECT pre_urgent_status AS pre_status, urgent_confirmed_by AS confirmed_by
+      FROM cases WHERE reference = ${reference}
+    ) AS before
+    WHERE cases.reference = ${reference}
+      AND cases.urgent_confirmed_at IS NOT NULL
+      AND cases.closed_at IS NULL
+    RETURNING cases.reference, cases.status, cases.owner,
+              before.confirmed_by AS was_confirmed_by
+  `);
+
+  const row = updated.rows[0];
+  if (row !== undefined) {
+    await recordAudit(db, { actor, action: 'URGENT_UNMARKED', subject: reference });
+    return {
+      kind: 'unmarked',
+      reference: row.reference,
+      status: row.status,
+      owner: row.owner,
+      wasConfirmedBy: row.was_confirmed_by,
+    };
+  }
+
+  /**
+   * The write did nothing, and the three reasons are different sentences. Read
+   * only on the failing path, exactly as `confirmUrgentRequest` does: a second
+   * tap on a button that is still sitting in somebody's chat should get an
+   * answer rather than silence, and silence is how a person taps it four times.
+   */
+  const existing = await db.execute<{ confirmed: boolean; closed: boolean }>(sql`
+    SELECT urgent_confirmed_at IS NOT NULL AS confirmed,
+           closed_at IS NOT NULL AS closed
+    FROM cases WHERE reference = ${reference}
+  `);
+
+  const found = existing.rows[0];
+  if (found === undefined) return { kind: 'unknown' };
+  if (!found.confirmed) return { kind: 'notUrgent' };
+  return { kind: 'closed' };
+}
+
 export interface PendingUrgentRequest {
   readonly reference: string;
   readonly teacherChatId: string;

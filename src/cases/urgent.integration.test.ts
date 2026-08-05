@@ -28,7 +28,12 @@ import { withChatLock } from '../conversation/lock.js';
 import { loadState, saveState } from '../conversation/state.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
-import { confirmUrgentRequest, pendingUrgentRequests, requestUrgentCase } from './urgent.js';
+import {
+  confirmUrgentRequest,
+  pendingUrgentRequests,
+  requestUrgentCase,
+  unmarkUrgent,
+} from './urgent.js';
 import { createCase, updateCase } from './service.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
@@ -412,6 +417,112 @@ describe.skipIf(!TEST_DATABASE_URL)('the urgent gate', () => {
       `);
       expect(rows.rows[0]?.chased_at).toBeNull();
       expect(rows.rows[0]?.chase_count).toBe(0);
+    });
+  });
+
+  describe('taking an urgent marking back', () => {
+    /**
+     * D8, asked for alongside keeping the oversight message: one regional
+     * coordinator can raise a case above every other case in the country with no
+     * second signature, so the people who see that happen need a way to disagree
+     * with it.
+     */
+    it('puts the case back where it was and clears the confirmation', async () => {
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await updateCase(db, filed.reference, { status: 'Under review' }, COORDINATOR);
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+
+      const outcome = await unmarkUrgent(db, filed.reference, COORDINATOR);
+
+      expect(outcome.kind).toBe('unmarked');
+      const row = await caseRow(filed.reference);
+      expect(row.status).toBe('Under review');
+      expect(row.importance).toBe('Normal');
+      expect(row.confirmed_by).toBeNull();
+    });
+
+    it('lets the case be marked urgent again afterwards', async () => {
+      // Clearing the confirmation rather than leaving it set is what makes this
+      // a correction rather than a one-way door. Sometimes it really was urgent.
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+      await unmarkUrgent(db, filed.reference, COORDINATOR);
+
+      const again = await confirmUrgentRequest(db, filed.reference, OTHER_COORDINATOR);
+
+      expect(again.kind).toBe('confirmed');
+      expect((await caseRow(filed.reference)).importance).toBe('Urgent');
+    });
+
+    it('falls back to Received for a case escalated before the column existed', async () => {
+      // Every case escalated before 5 August 2026 looks exactly like this.
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+      await db.execute(sql`
+        UPDATE cases SET pre_urgent_status = NULL WHERE reference = ${filed.reference}
+      `);
+
+      await unmarkUrgent(db, filed.reference, COORDINATOR);
+
+      expect((await caseRow(filed.reference)).status).toBe('Received');
+    });
+
+    it('refuses a closed case, because retention would delete it', async () => {
+      /**
+       * **The reason this guard exists, and it destroys data without it.**
+       *
+       * Retention keys off `importance` and only ever touches a row carrying a
+       * `closed_at`. A closed case at `Urgent` is kept for
+       * `URGENT_CASE_RETENTION_DAYS`; dropping it to `Normal` moves it onto
+       * `CASE_RETENTION_DAYS`, which can put it the wrong side of the line, and
+       * the nightly pass would delete it that night rather than eventually.
+       *
+       * Refusing closed cases makes the whole class of accident unreachable,
+       * because an open case is never a candidate for deletion. Anybody who means
+       * it can reopen the case first, which is one tap they already have.
+       */
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+      await updateCase(db, filed.reference, { status: 'Completed' }, COORDINATOR);
+
+      const outcome = await unmarkUrgent(db, filed.reference, COORDINATOR);
+
+      expect(outcome.kind).toBe('closed');
+      expect((await caseRow(filed.reference)).importance).toBe('Urgent');
+    });
+
+    it('is a no-op on a case that was asked about but never confirmed', async () => {
+      // A teacher asking must not be undoable as though it were a decision.
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+
+      expect((await unmarkUrgent(db, filed.reference, COORDINATOR)).kind).toBe('notUrgent');
+    });
+
+    it('says so for a reference that does not exist', async () => {
+      expect((await unmarkUrgent(db, 'VISA-2026-99999', COORDINATOR)).kind).toBe('unknown');
+    });
+
+    it('writes one audit row however many times it is tapped', async () => {
+      // A button sits in a chat for ever, and two people may tap the same one.
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+
+      await unmarkUrgent(db, filed.reference, COORDINATOR);
+      await unmarkUrgent(db, filed.reference, OTHER_COORDINATOR);
+
+      const rows = await db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM audit_log WHERE action = 'URGENT_UNMARKED'`,
+      );
+      expect(Number(rows.rows[0]?.n)).toBe(1);
+    });
+
+    it('leaves the case open, so the end-date invariant still holds', async () => {
+      const filed = await requestUrgentCase(db, { chatId: CHAT, detail: DETAIL });
+      await confirmUrgentRequest(db, filed.reference, COORDINATOR);
+
+      await unmarkUrgent(db, filed.reference, COORDINATOR);
+
+      expect(await openCasesWithAnEndDate()).toEqual([]);
     });
   });
 
