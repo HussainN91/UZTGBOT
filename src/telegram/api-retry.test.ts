@@ -92,6 +92,85 @@ describe('withRetry', () => {
     expect(slept).toEqual([250, 500]);
   });
 
+  /**
+   * A retry that works used to leave no trace whatsoever.
+   *
+   * That is the shape of the slowness teachers were reporting: the call stalls,
+   * the second attempt succeeds, the teacher waits fifteen seconds and the bot
+   * records a perfectly ordinary reply. The invisible case was the common one.
+   */
+  it('reports each retry it makes, with the attempt that failed', async () => {
+    const retries: number[] = [];
+    const call = vi.fn(async () => {
+      throw new Error('stalled');
+    });
+
+    await expect(
+      withRetry(call, { attempts: 3, backoffMs: 10 }, always, noSleep, (attempt) => {
+        retries.push(attempt);
+      }),
+    ).rejects.toThrow('stalled');
+
+    // Two reports for three attempts: the third has nothing after it to try.
+    expect(retries).toEqual([1, 2]);
+  });
+
+  it('reports nothing when the call succeeds first time', async () => {
+    const onRetry = vi.fn();
+
+    await withRetry(async () => 'ok', { attempts: 3, backoffMs: 10 }, always, noSleep, onRetry);
+
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it('does not report a retry it is not going to make', async () => {
+    // A refusal from Telegram is not retried, so nothing should claim it was.
+    const onRetry = vi.fn();
+    const call = async (): Promise<never> => {
+      throw new Error('Telegram said no');
+    };
+
+    await expect(
+      withRetry(call, { attempts: 3, backoffMs: 10 }, never, noSleep, onRetry),
+    ).rejects.toThrow('Telegram said no');
+
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it('hands the reporter the error that caused the retry', async () => {
+    const seen: unknown[] = [];
+    const boom = new Error('stalled');
+    let calls = 0;
+    const call = async (): Promise<string> => {
+      calls += 1;
+      if (calls === 1) throw boom;
+      return 'ok';
+    };
+
+    await withRetry(call, { attempts: 3, backoffMs: 10 }, always, noSleep, (_attempt, err) => {
+      seen.push(err);
+    });
+
+    expect(seen).toEqual([boom]);
+  });
+
+  it('does not let a failing reporter break the retry', async () => {
+    // Instrumentation does not get to break the thing it is watching.
+    let calls = 0;
+    const call = async (): Promise<string> => {
+      calls += 1;
+      if (calls === 1) throw new Error('stalled');
+      return 'ok';
+    };
+    const onRetry = (): never => {
+      throw new Error('the log is broken');
+    };
+
+    await expect(
+      withRetry(call, { attempts: 3, backoffMs: 10 }, always, noSleep, onRetry),
+    ).resolves.toBe('ok');
+  });
+
   it('runs exactly once when only one attempt is allowed', async () => {
     const call = vi.fn(async () => {
       throw new Error('nope');

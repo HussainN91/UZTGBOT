@@ -15,6 +15,8 @@
  */
 import { Bot, HttpError, type Api, type Context } from 'grammy';
 import {
+  SLOW_TELEGRAM_CALL_MS,
+  SLOW_UPDATE_MS,
   TELEGRAM_API_ATTEMPTS,
   TELEGRAM_API_BACKOFF_MS,
   TELEGRAM_TIMEOUT_SECONDS,
@@ -29,6 +31,7 @@ import type { TelegramLookup } from '../staff/repository.js';
 import { telegramAlerter } from './alerter.js';
 import { verdictForChat } from './chat-gate.js';
 import { withRetry } from './api-retry.js';
+import { timed } from './timing.js';
 import { claimUpdate, releaseUpdate } from './dedup.js';
 import type { InboundUpdate, RouterOutcome } from './router.js';
 import { route } from './router.js';
@@ -72,10 +75,39 @@ function configuredBot(): Bot {
 
   bot.api.config.use(async (prev, method, payload, signal) =>
     withRetry(
-      () => prev(method, payload, signal),
+      /**
+       * Each *attempt* is timed, not the sequence.
+       *
+       * A stall followed by a fast retry and a stall followed by a fast retry
+       * followed by another stall are the same total from outside and different
+       * things to fix. Timing inside the retry is what tells them apart, and it
+       * is the only place the individual attempt exists.
+       */
+      () =>
+        timed(
+          () => prev(method, payload, signal),
+          Date.now,
+          (ms, outcome) => {
+            if (ms < SLOW_TELEGRAM_CALL_MS && outcome === 'ok') return;
+            log.warn(
+              { method, ms, outcome },
+              'slow Telegram call — the path to Telegram, not the bot',
+            );
+          },
+        ),
       { attempts: TELEGRAM_API_ATTEMPTS, backoffMs: TELEGRAM_API_BACKOFF_MS },
       (err) => err instanceof HttpError,
       (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      /**
+       * A retry that *works* used to leave no trace at all, which made the
+       * commonest form of the reported slowness the invisible one: the teacher
+       * waits fifteen seconds and the bot records an ordinary reply.
+       */
+      (attempt, err) =>
+        log.warn(
+          { method, attempt, reason: err instanceof Error ? err.message : String(err) },
+          'Telegram call did not arrive; trying again',
+        ),
     ),
   );
 
@@ -281,6 +313,31 @@ export function createBot(): Bot {
   };
 
   /**
+   * One line per update, saying where the time went.
+   *
+   * **This is the number this system did not have.** On 5 August 2026 the web
+   * process had written four lines in forty-eight hours, every one of them a
+   * start-up message, while answering teachers throughout. So a teacher
+   * reporting an eleven-second wait could not be answered with anything but a
+   * theory: the delay might have been Telegram reaching us, the database, our own
+   * handling, or the reply going back out, and nothing distinguished them.
+   *
+   * Three numbers do. `decideMs` is everything up to and including the commit —
+   * ours, and fixable here. `sendMs` is Telegram — not ours, and the thing to
+   * take to the provider. `totalMs` is what the teacher actually waited.
+   *
+   * Deliberately at `info` for every update rather than only the slow ones,
+   * because the healthy ones are the baseline that makes a slow one legible; the
+   * threshold only decides whether it is raised to `warn` so it can be found
+   * without reading everything. No teacher's words are in it — the kind of
+   * update, never its text.
+   */
+  const reportTiming = (fields: Record<string, unknown> & { totalMs: number }): void => {
+    const line = fields.totalMs >= SLOW_UPDATE_MS ? log.warn.bind(log) : log.info.bind(log);
+    line(fields, 'update handled');
+  };
+
+  /**
    * A teacher's message that failed to process used to vanish.
    *
    * The claim is taken before the work and committed on its own; the work runs
@@ -301,11 +358,36 @@ export function createBot(): Bot {
    * The release comes first and is itself wrapped, because a release that throws
    * must not stop the alarm — an unreleased claim with an alarm raised is a
    * person looking at it, and an unraised alarm is nobody.
+   *
+   * ---
+   *
+   * **`stampedAt` is when Telegram stamped the message**, in milliseconds, when
+   * it said. It is the number that turned out to matter most. On 5 August 2026
+   * `getWebhookInfo` reported `Connection timed out` against this server, and the
+   * next update in Caddy's log arrived eight seconds later — a wait the bot's own
+   * records showed as a perfectly healthy 300ms reply, because the whole delay
+   * happened before the message reached us. Timing only our own handling would
+   * have measured the one part that was working.
+   *
+   * `message.date` is Telegram's own timestamp in whole seconds, so this is
+   * accurate to about a second — useless for shaving milliseconds and entirely
+   * sufficient for telling four seconds of waiting from four hundred.
+   *
+   * Only messages carry a usable one. A callback query's `message.date` is when
+   * the *button* was sent, which may be days ago, so it is deliberately not
+   * reported rather than reported wrongly.
    */
-  const run = async (ctx: Context, update: InboundUpdate): Promise<void> => {
+  const run = async (
+    ctx: Context,
+    update: InboundUpdate,
+    stampedAt?: number,
+  ): Promise<void> => {
     if (!gate(ctx)) return;
 
     const updateId = ctx.update.update_id;
+    const startedAt = Date.now();
+    const inbound =
+      stampedAt === undefined ? {} : { inboundLagMs: Math.max(0, startedAt - stampedAt) };
 
     let outcome;
     try {
@@ -366,6 +448,21 @@ export function createBot(): Bot {
       } as const;
 
       log.error({ err, updateId, claim }, 'handling an update failed');
+      /**
+       * Timed on the way out too. An update that failed after thirty seconds and
+       * one that failed instantly are different faults, and the slow one is the
+       * one that matches what teachers are reporting.
+       */
+      reportTiming({
+        updateId,
+        kind: update.kind,
+        chatId: update.chatId,
+        outcome: 'failed',
+        ...inbound,
+        decideMs: Date.now() - startedAt,
+        sendMs: 0,
+        totalMs: Date.now() - startedAt,
+      });
       await alerter.send({
         severity: 'critical',
         title: 'A message could not be handled',
@@ -381,7 +478,29 @@ export function createBot(): Bot {
       return;
     }
 
+    const decidedAt = Date.now();
     if (outcome !== null) await deliver(ctx.api, alerter, outcome);
+
+    /**
+     * `duplicate` is worth its own line rather than being filtered out.
+     *
+     * Telegram redelivers an update it believes was not acknowledged, and being
+     * slow to acknowledge is exactly how that happens. So a rise in duplicates
+     * is not noise about the dedup working — it is the slowness reporting itself
+     * from the other side, and it is the one signal here that does not depend on
+     * a teacher thinking to complain.
+     */
+    reportTiming({
+      updateId,
+      kind: update.kind,
+      chatId: update.chatId,
+      outcome: outcome === null ? 'duplicate' : 'handled',
+      messages: outcome?.messages.length ?? 0,
+      ...inbound,
+      decideMs: decidedAt - startedAt,
+      sendMs: Date.now() - decidedAt,
+      totalMs: Date.now() - startedAt,
+    });
   };
 
   /**
@@ -438,11 +557,16 @@ export function createBot(): Bot {
    * gives the same ordering guarantee and keeps one path.
    */
   bot.on('message', async (ctx) => {
-    await run(ctx, {
-      chatId: String(ctx.chat.id),
-      kind: 'text',
-      text: stripBotMention(ctx.message.text ?? ''),
-    });
+    await run(
+      ctx,
+      {
+        chatId: String(ctx.chat.id),
+        kind: 'text',
+        text: stripBotMention(ctx.message.text ?? ''),
+      },
+      // Telegram's own stamp, in whole seconds. See the note on `run`.
+      ctx.message.date * 1_000,
+    );
   });
 
   return bot;

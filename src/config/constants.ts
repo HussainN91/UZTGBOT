@@ -495,6 +495,32 @@ export const TELEGRAM_API_ATTEMPTS = 3;
 export const TELEGRAM_API_BACKOFF_MS = 500;
 
 /**
+ * How slow one Telegram call has to be before it is written to the log.
+ *
+ * A threshold rather than logging every call, because the bot makes several per
+ * reply and a line for each would bury the ones that matter in the noise —
+ * the container's log is capped at 50MB and rolls.
+ *
+ * One second is roughly three and a half times the p90 measured on the live
+ * server (287ms on 3 August, 274ms on 5 August), so a healthy call never
+ * appears here, and it is comfortably below anything a person waiting would call
+ * slow. The two calls in a hundred that exceeded a second on 5 August are
+ * exactly the population worth watching.
+ */
+export const SLOW_TELEGRAM_CALL_MS = 1_000;
+
+/**
+ * How slow one whole update — receive, decide, commit, reply — has to be before
+ * it is flagged rather than merely recorded.
+ *
+ * Every update gets a timing line regardless; this only decides whether it is
+ * written at warning level so it can be found without reading everything. Three
+ * seconds is well past any healthy reply and well short of the eleven seconds
+ * teachers have reported.
+ */
+export const SLOW_UPDATE_MS = 3_000;
+
+/**
  * How long the per-recipient delivery rows of a finished announcement are kept.
  *
  * A constant rather than a settings key, deliberately (D33). It governs

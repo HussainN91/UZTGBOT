@@ -42,12 +42,24 @@ export interface RetryPolicy {
  *
  * `sleep` is injected for the same reason the predicate is: a test that waits
  * real seconds is a test somebody eventually deletes.
+ *
+ * `onRetry` is optional and exists because a retry that *works* used to leave no
+ * trace at all. A stalled call that succeeded on the second attempt cost a
+ * teacher fifteen seconds and was recorded nowhere, so the commonest form of the
+ * slowness people were reporting was also the invisible one. It is a callback
+ * rather than a log line for the same reason the sleep is injected: nothing in
+ * this file may reach for the network, the clock or the logger.
+ *
+ * It is called after the decision to retry and before the wait, so a run that
+ * has given up does not claim it is trying again. A reporter that throws is
+ * swallowed — instrumentation does not get to break the thing it is watching.
  */
 export async function withRetry<T>(
   call: () => Promise<T>,
   policy: RetryPolicy,
   shouldRetry: (err: unknown) => boolean,
   sleep: (ms: number) => Promise<void>,
+  onRetry?: (attempt: number, err: unknown) => void,
 ): Promise<T> {
   let wait = policy.backoffMs;
   let last: unknown;
@@ -65,6 +77,12 @@ export async function withRetry<T>(
        * has already given up, and the caller is usually a teacher waiting.
        */
       if (attempt === policy.attempts || !shouldRetry(err)) break;
+
+      try {
+        onRetry?.(attempt, err);
+      } catch {
+        // Deliberately silent; see the note on `onRetry` above.
+      }
 
       await sleep(wait);
       wait *= 2;
