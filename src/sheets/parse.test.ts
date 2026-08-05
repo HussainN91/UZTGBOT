@@ -586,6 +586,64 @@ describe('finding the teacher’s email column', () => {
       expect(message).toContain('LEAVE_RESPONSES');
     }
   });
+
+  /**
+   * MoPSE's Accommodation and Reimbursement sheets, verbatim on 6 August 2026.
+   * B and D are the SAME STRING — Google's "Collect email addresses" adds B, and
+   * the form asks the question again as D. No heading can pick between them, and
+   * D is the one the teacher typed.
+   */
+  const DUPLICATE = ['Timestamp', 'Email Address', 'Full Name', 'Email Address'];
+
+  it('resolves a column letter when two headings are identical', () => {
+    expect(findEmailColumn('TAB', DUPLICATE, 'D')).toBe(3);
+    expect(findEmailColumn('TAB', DUPLICATE, 'B')).toBe(1);
+    expect(findEmailColumn('TAB', DUPLICATE, 'A')).toBe(0);
+  });
+
+  it('accepts a lowercase letter and surrounding space', () => {
+    expect(findEmailColumn('TAB', DUPLICATE, ' d ')).toBe(3);
+  });
+
+  it('resolves a two-letter column', () => {
+    const wide = Array.from({ length: 30 }, (_, i) => `Q${i}`);
+    // AA is the 27th column, index 26.
+    expect(findEmailColumn('TAB', wide, 'AA')).toBe(26);
+  });
+
+  /**
+   * A heading always wins. Naming a real column can never be overridden by a
+   * coincidence of spelling, which is what makes the letter form safe to add.
+   */
+  it('prefers a real heading over reading the same text as a letter', () => {
+    expect(findEmailColumn('TAB', ['Timestamp', 'D', 'Email Address'], 'D')).toBe(1);
+  });
+
+  it('refuses a letter past the end of the header, naming the width', () => {
+    try {
+      findEmailColumn('ACCOM_RESPONSES', DUPLICATE, 'Z');
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toContain('Z');
+      expect(message).toContain('ACCOM_RESPONSES');
+      expect(message).toContain('4');
+    }
+  });
+
+  /**
+   * Not a letter and not a heading is the ordinary mistake, and the message must
+   * not start talking about columns the operator never mentioned.
+   */
+  it('still reports an unmatched heading as an unmatched heading', () => {
+    try {
+      findEmailColumn('TAB', DUPLICATE, 'E-mail');
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect((err as Error).message).toContain('E-mail');
+      expect((err as Error).message).toContain('EMAIL_COLUMN');
+    }
+  });
 });
 
 describe('reading form submissions', () => {

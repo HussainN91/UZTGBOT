@@ -306,12 +306,20 @@ export class EmailColumnError extends Error {
     readonly wanted?: string,
     /** Every heading in the tab, so the sheet's owner can see what to name. */
     readonly headings?: readonly string[],
+    /** Set when `wanted` was a valid column letter beyond the tab's width. */
+    readonly why?: 'past-end',
   ) {
     super(
       wanted !== undefined
-        ? `The "${tab}" tab has no column called "${wanted}", which is what EMAIL_COLUMN names for ` +
-          `this form. Its columns are: ${(headings ?? []).map((h) => `"${h.trim()}"`).join(', ')}. ` +
-          `Correct EMAIL_COLUMN on the FORMS tab, or rename the question to match. Nothing was filed.`
+        ? why === 'past-end'
+          ? `EMAIL_COLUMN for this form is "${wanted}", but the "${tab}" tab only has ` +
+            `${(headings ?? []).length} columns, so there is no such column. Count the columns ` +
+            `along the top of the responses sheet and use the letter of the one holding the ` +
+            `teacher's own email address. Nothing was filed.`
+          : `The "${tab}" tab has no column called "${wanted}", which is what EMAIL_COLUMN names ` +
+            `for this form. Its columns are: ${(headings ?? []).map((h) => `"${h.trim()}"`).join(', ')}. ` +
+            `Correct EMAIL_COLUMN on the FORMS tab — either the exact heading, or a column letter ` +
+            `such as D. Nothing was filed.`
         : matches.length === 0
           ? `The "${tab}" tab has no column whose heading contains "email", so no submission in it ` +
             `can be matched to a teacher. Add an email question to the form — its title must contain ` +
@@ -324,6 +332,22 @@ export class EmailColumnError extends Error {
     );
     this.name = 'EmailColumnError';
   }
+}
+
+/**
+ * `A` → 0, `B` → 1, `AA` → 26. Null when the text is not a column reference.
+ *
+ * Spreadsheet columns are what a person reading the sheet actually sees along
+ * the top, which is why the letter form is the one offered rather than a number:
+ * "the fourth column" and "column D" are the same fact, and only one of them is
+ * printed on the screen they are looking at.
+ */
+function columnLetterToIndex(value: string): number | null {
+  const text = value.trim().toUpperCase();
+  if (!/^[A-Z]{1,2}$/.test(text)) return null;
+  let index = 0;
+  for (const ch of text) index = index * 26 + (ch.charCodeAt(0) - 64);
+  return index - 1;
 }
 
 /**
@@ -341,6 +365,12 @@ export class EmailColumnError extends Error {
  * mistake this whole module avoids: the person who owns the sheet cannot correct
  * a rule they cannot see, and here the rule decides whose documents get filed.
  *
+ * A name that matches no heading is then read as a **column letter**, which is
+ * the one inference this function makes and is spelled out in the runbook rather
+ * than left to be discovered. It exists because two of MoPSE's live forms have
+ * two columns with the identical heading, so on those forms there is no name to
+ * give.
+ *
  * With no name, the old behaviour is unchanged: exactly one heading containing
  * the letters `email`, and a refusal otherwise. So no sheet that works today
  * changes meaning, and `EmailColumnError` goes on refusing to guess — which was
@@ -353,9 +383,35 @@ export function findEmailColumn(
 ): number {
   if (named !== null && named.trim() !== '') {
     const wanted = named.trim();
-    const at = header.findIndex((h) => h.trim() === wanted);
-    if (at === -1) throw new EmailColumnError(tab, [], wanted, header);
-    return at;
+
+    /**
+     * A heading is tried first and always wins.
+     *
+     * That order is the whole safety of the letter form: a tab with a column
+     * genuinely headed "D" resolves to that column, so naming a real heading can
+     * never be silently overridden by a coincidence of spelling. The letter is
+     * only ever reached when nothing in the tab is called that.
+     */
+    const byHeading = header.findIndex((h) => h.trim() === wanted);
+    if (byHeading !== -1) return byHeading;
+
+    /**
+     * Then the letter, which exists because two of MoPSE's three live forms have
+     * two columns headed exactly `Email Address`. Google's "Collect email
+     * addresses" setting adds one and the form asks the question again as
+     * another, so the headings are the same string and no name can pick between
+     * them. The teacher's own answer is the second, and a letter is the only
+     * thing that says so.
+     */
+    const byLetter = columnLetterToIndex(wanted);
+    if (byLetter !== null) {
+      if (byLetter >= header.length) {
+        throw new EmailColumnError(tab, [], wanted, header, 'past-end');
+      }
+      return byLetter;
+    }
+
+    throw new EmailColumnError(tab, [], wanted, header);
   }
 
   const matches: string[] = [];
