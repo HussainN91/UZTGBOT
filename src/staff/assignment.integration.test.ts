@@ -29,6 +29,8 @@ const OTHER_QUEUE = '996003';
 const OTHER_REGION = '996004';
 const SYSTEM = '996005';
 const OBSERVER = '996006';
+const PROGRAM = '996007';
+const LEAD = '996008';
 
 const TEACHER = '996101';
 
@@ -164,6 +166,70 @@ describe.skipIf(!TEST_DATABASE_URL)('choosing who owns a new case', () => {
       await givenStaff(OTHER_REGION, 'Support', 'Visa', ['Samarkand']);
 
       expect(await forVisaInTashkent()).toBeNull();
+    });
+  });
+
+  describe('the rank preference — D3, 5 August 2026', () => {
+    /**
+     * The head of project took the Program admin and the System member out of
+     * the rotation, in their words because the Program admin is *"the MoPSE
+     * employee that doesn't wanna be bothered with IT stuff"*. Both keep the
+     * ability to own a case: `/assign` still works on them, and a case given
+     * that way behaves like any other.
+     *
+     * The fallback below is what lets "every case has an owner" be stated with
+     * no exception. It is not expected to fire in this ministry, because a
+     * Support member covers every category in every region.
+     */
+    it('gives it to a Support member while a Program member sits idle', async () => {
+      // Under the plain fewest-open rule she won every time, precisely because
+      // nobody had given her anything yet.
+      await givenStaff(BUSY, 'Support', 'Visa', ['Tashkent']);
+      await givenStaff(PROGRAM, 'Program', 'Visa', ['Tashkent']);
+      await givenCases(BUSY, 3);
+
+      expect(await forVisaInTashkent()).toBe(BUSY);
+    });
+
+    it('gives it to a Lead as readily as to a Support member', async () => {
+      // One tier, not two. A Lead works cases.
+      await givenStaff(LEAD, 'Lead', 'Visa', ['Tashkent']);
+      await givenStaff(PROGRAM, 'Program', 'Visa', ['Tashkent']);
+
+      expect(await forVisaInTashkent()).toBe(LEAD);
+    });
+
+    it('falls back to Program when nobody below it covers the case', async () => {
+      await givenStaff(PROGRAM, 'Program', 'Visa', ['Tashkent']);
+
+      expect(await forVisaInTashkent()).toBe(PROGRAM);
+    });
+
+    it('falls all the way to System when nobody else is active at all', async () => {
+      // A System member whose queue and region genuinely reach the case is not a
+      // bypass row, so this tier is real rather than a restatement of the trap
+      // the block above guards.
+      await givenStaff(SYSTEM, 'System', 'Visa', ['Tashkent']);
+
+      expect(await forVisaInTashkent()).toBe(SYSTEM);
+    });
+
+    it('prefers the rank before the load, never the other way about', async () => {
+      // The sharpest version of the rule: the Support member has nine open cases
+      // and the Program admin none, and the Support member still gets it.
+      await givenStaff(BUSY, 'Support', 'Visa', ['Tashkent']);
+      await givenStaff(PROGRAM, 'Program', 'Visa', ['Tashkent']);
+      await givenCases(BUSY, 9);
+
+      expect(await forVisaInTashkent()).toBe(BUSY);
+    });
+
+    it('still picks the least loaded inside the tier it settles on', async () => {
+      await givenStaff(BUSY, 'Support', 'Visa', ['Tashkent']);
+      await givenStaff(IDLE, 'Lead', 'Visa', ['Tashkent']);
+      await givenCases(BUSY, 2);
+
+      expect(await forVisaInTashkent()).toBe(IDLE);
     });
   });
 

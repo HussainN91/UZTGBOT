@@ -17,11 +17,39 @@
  * answer down.
  */
 import { inArray, sql } from 'drizzle-orm';
-import { cases } from '../db/schema.js';
+import { type StaffRole, cases } from '../db/schema.js';
 import { OPEN_CASE_STATUSES } from '../db/schema.js';
 import type { Database } from '../db/index.js';
 import { CAPABILITY } from './roles.js';
 import { staffWorking } from './recipients.js';
+
+/**
+ * The ranks a new case is offered to, best first — D3, 5 August 2026.
+ *
+ * The head of project asked for the Program admin and the System member to leave
+ * the rotation and keep the ability to own a case. Both halves matter: `/assign`
+ * still works on either of them, and a case given that way appears in `/mycases`
+ * and behaves exactly like any other. What stops is being handed one uninvited,
+ * which is what was filling a phone that did not want filling.
+ *
+ * **A rank rule rather than a switch on the staff row.** Nothing has to be
+ * configured, so nothing can be left unconfigured, and the fallback is what lets
+ * "every case has an owner" be stated with no exception: a tier may be empty, but
+ * the chain cannot run out while any staff member covers the case at all.
+ *
+ * In this ministry the first tier always wins, because a Support member covers
+ * every category in every region. The rest of the chain is a guarantee rather
+ * than a path anybody expects to take.
+ *
+ * If a second Program admin is ever hired who *does* work cases, this becomes a
+ * per-person "takes new cases" column on the staff row and this constant goes
+ * away. There is no reason to build that now.
+ */
+const RANK_PREFERENCE: readonly (readonly StaffRole[])[] = [
+  ['Support', 'Lead'],
+  ['Program'],
+  ['System'],
+];
 
 export interface OwnerQuery {
   /** The case's category, which decides the queue. */
@@ -75,8 +103,23 @@ export async function chooseOwner(db: Database, query: OwnerQuery): Promise<stri
     region: query.region,
     capability: CAPABILITY.CASE_UPDATE,
   });
-  const candidates = working.map((c) => c.telegramId);
 
+  if (working.length === 0) return null;
+
+  /**
+   * The first tier with anybody in it, and nobody from a lower one.
+   *
+   * Walked in order rather than sorted, so a Program member never competes with
+   * a Support member on load at all. Merging the tiers and ranking by seniority
+   * would behave identically until two people tie, and then it would quietly
+   * hand the case upward — which is the exact thing D3 removes.
+   */
+  const tier =
+    RANK_PREFERENCE.map((ranks) => working.filter((c) => ranks.includes(c.role))).find(
+      (found) => found.length > 0,
+    ) ?? [];
+
+  const candidates = tier.map((c) => c.telegramId);
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0] ?? null;
 
