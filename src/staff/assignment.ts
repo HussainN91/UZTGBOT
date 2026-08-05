@@ -70,11 +70,12 @@ interface Load {
  * own one.
  */
 export async function chooseOwner(db: Database, query: OwnerQuery): Promise<string | null> {
-  const candidates = await staffWorking(db, {
+  const working = await staffWorking(db, {
     category: query.category,
     region: query.region,
     capability: CAPABILITY.CASE_UPDATE,
   });
+  const candidates = working.map((c) => c.telegramId);
 
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0] ?? null;

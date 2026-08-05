@@ -18,7 +18,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { CASE_CATEGORY } from '../config/constants.js';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
-import { regionalRecipients, staffCovering } from './recipients.js';
+import { regionalRecipients, staffCovering, staffWorking } from './recipients.js';
 import { CAPABILITY } from './roles.js';
 
 const TEST_DATABASE_URL = process.env['TEST_DATABASE_URL'];
@@ -153,6 +153,39 @@ describe.skipIf(!TEST_DATABASE_URL)('who gets told about a region', () => {
 
       expect(first).toEqual(second);
       expect(first).toEqual([...first].sort());
+    });
+  });
+
+  describe('staffWorking', () => {
+    it('reports the rank beside each candidate, so the assigner can prefer one', async () => {
+      /**
+       * D3, 5 August 2026. The assigner has to tell a Support member from a
+       * Program one, and it must read that from the same query that decided who
+       * covers the case. Going back to the staff table for the rank would be a
+       * second answer to a question that already has one, and the two would
+       * eventually disagree about somebody who was demoted between the queries.
+       */
+      const working = await staffWorking(db, {
+        capability: CAPABILITY.CASE_UPDATE,
+        category: CASE_CATEGORY.VISA,
+        region: 'Tashkent',
+      });
+
+      expect(working).toContainEqual({ telegramId: SUPPORT_TASHKENT, role: 'Support' });
+      expect(working.every((candidate) => candidate.role === 'Support')).toBe(true);
+    });
+
+    it('still leaves out a System member who is only there through the bypass', async () => {
+      // The property this function exists for, restated now that it returns a
+      // richer row: being able to see every case is not being the person who
+      // works it. `SYSTEM_NARROW` holds no queue and covers Nukus.
+      const working = await staffWorking(db, {
+        capability: CAPABILITY.CASE_UPDATE,
+        category: CASE_CATEGORY.VISA,
+        region: 'Tashkent',
+      });
+
+      expect(working.map((candidate) => candidate.telegramId)).not.toContain(SYSTEM_NARROW);
     });
   });
 

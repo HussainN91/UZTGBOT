@@ -30,7 +30,7 @@
  */
 import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
-import { staff } from '../db/schema.js';
+import { type StaffRole, staff } from '../db/schema.js';
 import { queuesCovering } from './queues.js';
 import { type Capability, rolesHolding } from './roles.js';
 
@@ -117,8 +117,15 @@ export async function staffCovering(db: Database, query: RecipientQuery): Promis
  * The bypass flag is read from `coveringRows` rather than recomputed, so this
  * cannot drift from what "System" means to the rest of the file.
  */
-export async function staffWorking(db: Database, query: RecipientQuery): Promise<string[]> {
-  return (await coveringRows(db, query)).filter((r) => !r.bypassed).map((r) => r.telegramId);
+export interface WorkingCandidate {
+  readonly telegramId: string;
+  readonly role: StaffRole;
+}
+
+export async function staffWorking(db: Database, query: RecipientQuery): Promise<WorkingCandidate[]> {
+  return (await coveringRows(db, query))
+    .filter((r) => !r.bypassed)
+    .map((r) => ({ telegramId: r.telegramId, role: r.role }));
 }
 
 interface CoveringRow {
@@ -131,6 +138,19 @@ interface CoveringRow {
    * means. See `regionalRecipients`.
    */
   readonly bypassed: boolean;
+  /**
+   * Their rank, carried for the assigner rather than for authorisation.
+   *
+   * `chooseOwner` offers a case to Support and Lead before Program and System
+   * (D3), which it cannot decide without this. Read from the same row that
+   * answered "does this person cover the case", because asking the staff table a
+   * second time is how two answers to one question start disagreeing about
+   * somebody who was demoted in between.
+   *
+   * Nothing here authorises anything on the strength of it. The capability check
+   * is still `rolesHolding`, in the `WHERE`.
+   */
+  readonly role: StaffRole;
 }
 
 async function coveringRows(db: Database, query: RecipientQuery): Promise<CoveringRow[]> {
@@ -157,12 +177,13 @@ async function coveringRows(db: Database, query: RecipientQuery): Promise<Coveri
        * warning that is not true.
        */
       bypassed: sql<boolean>`(${eq(staff.role, 'System')} AND NOT (${covers}))`,
+      role: staff.role,
     })
     .from(staff)
     .where(and(eq(staff.active, true), inArray(staff.role, roles), or(eq(staff.role, 'System'), covers)))
     .orderBy(asc(staff.telegramId));
 
-  return rows.map((r) => ({ telegramId: r.telegramId, bypassed: r.bypassed }));
+  return rows.map((r) => ({ telegramId: r.telegramId, bypassed: r.bypassed, role: r.role }));
 }
 
 export interface RegionalRecipients {
