@@ -345,7 +345,14 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
 
       expect(firstText(outcome)).toContain('Signed in');
       expect(outcome.messages[1]?.chatId).toBe(CHAT);
-      expect(outcome.messages[1]?.text).toContain('Security notice');
+      /**
+       * The prior holder is told, and what they are told stopped opening with
+       * "⚠️ Security notice" on 5 August 2026. This asserts the substance rather
+       * than the heading: their account, signed in from somewhere else. The
+       * alarm moved to the button, which is the only part of it a teacher acts
+       * on.
+       */
+      expect(outcome.messages[1]?.text).toMatch(/signed in to your teacher account/i);
       expect(outcome.alerts[0]?.title).toContain('more than one chat');
     });
 
@@ -573,7 +580,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
        * bank. The question is remembered so the scoping is not a dead end.
        */
       const asked = await text('how long does a visa take');
-      expect(firstText(asked)).toContain('which of these is it about');
+      expect(firstText(asked)).toMatch(/which of these is it about/i);
       const state = await loadState(db, CHAT);
       expect(state?.kind === 'AwaitingQuestionTopic' && state.query).toBe(
         'how long does a visa take',
@@ -606,7 +613,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
     it('offers the topic list rather than guessing when nothing matches', async () => {
       await text('what is the capital of France');
       const outcome = await tap(encodeCallback(CALLBACK.QUERY_TOPIC, 'VISA'));
-      expect(firstText(outcome)).toContain("couldn't match that");
+      expect(firstText(outcome)).toMatch(/could not match that/i);
       expect(firstText(outcome)).not.toContain('fourteen working days');
     });
 
@@ -937,7 +944,7 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
       );
 
       const outcome = await text('how long does a visa take');
-      expect(firstText(outcome)).toContain('which of these is it about');
+      expect(firstText(outcome)).toMatch(/which of these is it about/i);
       const rows = await db.execute(sql`SELECT reference FROM cases`);
       expect(rows.rows).toHaveLength(0);
     });

@@ -847,7 +847,7 @@ async function retryCaseDetail(
   if (attempts >= MAX_CASE_DETAIL_ATTEMPTS) {
     await clearState(db, chatId);
     return only(chatId, {
-      text: `${because}\n\nLet us start again — tap Main Menu. ` +
+      text: `${because}\n\nLet us start again: tap Main Menu. ` +
         `If this keeps happening, contact ${deps.supportContact}.`,
       keyboard: backToMenuKeyboard(),
     });
@@ -896,7 +896,7 @@ async function handleUrgentDetail(
       return only(chatId, {
         text:
           'I still have not got any text.\n\n' +
-          'Let us start again — tap Main Menu, then Ask for Priority. If it is easier to ' +
+          'Let us start again: tap Main Menu, then Ask for Priority. If it is easier to ' +
           `speak to somebody, contact ${deps.supportContact}.`,
         keyboard: backToMenuKeyboard(),
       });
@@ -1077,7 +1077,7 @@ async function routeCallback(
       await confirmRegion(db, update.chatId);
       return only(update.chatId, {
         text:
-          'Thank you — nothing has changed, and we will not ask again for a while.\n\n' +
+          'Thank you. Nothing has changed, and we will not ask again for a while.\n\n' +
           'If you do move, tap Contact Support and tell us.',
         keyboard: backToMenuKeyboard(),
       });
@@ -1093,8 +1093,8 @@ async function routeCallback(
       return only(update.chatId, {
         text:
           'Thank you for telling us. One of our staff will check it and update your record.\n\n' +
-          'Nothing you need to do — and if you have an urgent problem in the meantime, ' +
-          'use Contact Support as usual.',
+          'There is nothing you need to do. If you have an urgent problem in the ' +
+          'meantime, use Contact Support as usual.',
         keyboard: backToMenuKeyboard(),
       });
     }
@@ -1449,9 +1449,9 @@ async function claimDispute(
 
   const thanks: Reply = {
     text:
-      '✅ Thank you — that is recorded.\n\n'
-      + 'A member of Ministry staff will look at both accounts and decide. You do not '
-      + 'need to do anything else, and you are not locked out while they look.\n\n'
+      '✅ Thank you, that is recorded.\n\n'
+      + 'Ministry staff will look at both accounts and decide. There is nothing else '
+      + 'for you to do, and you stay signed in while they look.\n\n'
       + `If anything changes, contact ${deps.supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };
@@ -1951,7 +1951,7 @@ async function chooseDocForm(
     return {
       text:
         'That form is no longer available.\n\n' +
-        'It may have been replaced — open Submit Documents again for the current list.',
+        'It may have been replaced. Open Submit Documents again for the current list.',
       keyboard: backToMenuKeyboard(),
     };
   }
@@ -1967,8 +1967,8 @@ async function chooseDocForm(
         `${form.buttonText}\n\n` +
         `${form.prepare}\n\n` +
         `${form.url}\n\n` +
-        '⚠️ The form asks for your email. Use the same address you signed in here ' +
-        'with — that is how we know the documents are yours.\n\n' +
+        'The form asks for your email. Use the same address you signed in here ' +
+        'with, so we can tell the documents are yours.\n\n' +
         'Now tell us what you need, and we will open a case for you.',
       keyboard: backToMenuKeyboard(),
     };
@@ -1978,8 +1978,8 @@ async function chooseDocForm(
     text:
       `${form.buttonText}\n\n` +
       `${form.url}\n\n` +
-      '⚠️ The form asks for your email. Use the same address you signed in here ' +
-      'with — that is how we know the documents are yours.\n\n' +
+      'The form asks for your email. Use the same address you signed in here ' +
+      'with, so we can tell the documents are yours.\n\n' +
       'You do not need to send anything back to me. Once you submit the form, ' +
       'it reaches us on its own.',
     keyboard: backToMenuKeyboard(),

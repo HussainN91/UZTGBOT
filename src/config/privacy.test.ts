@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { PRIVACY_NOTICE_VERSION, privacyNotice } from './privacy.js';
 import type { RetentionPeriods } from './retention.js';
@@ -77,6 +77,44 @@ describe('the privacy notice', () => {
    */
   it('hangs nothing important off a dash', () => {
     expect(privacyNotice(CONTACT, SET)).not.toContain('—');
+  });
+
+  /**
+   * A budget, because length is the whole reason this notice was rewritten.
+   *
+   * A MoPSE employee reported the bot as overwhelming, with too much writing.
+   * Measured on 5 August 2026, this notice was 1,524 characters and it is shown
+   * three times: inside the sign-in prompt, on `/privacy`, and again when a
+   * retention period moves. Those three messages were 4,913 of the 10,202
+   * characters the bot says to a teacher, and the first is the second message a
+   * new teacher ever sees.
+   *
+   * **The number is the point, and no other test in this file can hold it.**
+   * Every one above asserts that a promise is still *present*, so all of them
+   * stay green while the notice grows back one careful clause at a time. That is
+   * exactly how it reached 1,524 in the first place: four rewrites, each adding
+   * a sentence that was worth adding on its own.
+   *
+   * **Both retention states are asserted, and that is not symmetry for its own
+   * sake.** The first run of this test failed at 1,401 against a 1,400 budget,
+   * on the *unset* periods rather than the real ones: "until the Ministry sets a
+   * period", rendered three times, is longer than three numbers of days. So the
+   * longest this notice can ever be is the state the system sits in between a
+   * deploy and the runbook's settings insert, which is also the state nobody
+   * reads while checking their wording. Measured after the trim: 1,294 with the
+   * periods set, 1,370 without.
+   *
+   * **1,400, against 1,524 before the rewrite.** The cut is 230 characters and
+   * no more, because what is left is eight separate promises in sentences that
+   * are already short. A budget of 1,000 could only be met by dropping one of
+   * them, and a test that can only be satisfied by breaking a legal statement is
+   * worse than no test. The room above 1,370 is for a promise the Ministry
+   * genuinely has to add. Anything past it is a decision somebody should have to
+   * make deliberately, which is what failing here forces.
+   */
+  it('stays inside its length budget, in every retention state', () => {
+    expect(privacyNotice(CONTACT, SET).length).toBeLessThanOrEqual(1_400);
+    expect(privacyNotice(CONTACT, INDEFINITE).length).toBeLessThanOrEqual(1_400);
   });
 });
 

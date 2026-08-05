@@ -75,10 +75,10 @@ export function regionCheckReply(region: string): Reply {
     text: [
       `📍 We have you in ${region}.`,
       '',
-      'This is how we decide which of our staff sees your case, so it is worth ' +
-        'keeping right — if it is wrong, an urgent case could go to the wrong region.',
+      'Your region decides which of our staff sees your case, so it is worth ' +
+        'keeping right.',
       '',
-      'Is it still correct? Nothing changes automatically: if you have moved, one ' +
+      'Is it still correct? Nothing changes automatically. If you have moved, one ' +
         'of our staff will check and update it.',
     ].join('\n'),
     keyboard: regionCheckKeyboard(),
@@ -120,7 +120,6 @@ export function signInPromptReply(supportContact: string, periods: RetentionPeri
     text:
       'Enter your email address. Use the one you were recruited with.\n\n' +
       'Sending it means you have read the privacy notice below.\n\n' +
-      '— — —\n\n' +
       privacyNotice(supportContact, periods),
   };
 }
@@ -171,10 +170,8 @@ export function reconsentReply(
     text: [
       '📋 We have set how long your information is kept.',
       '',
-      'The notice you agreed to said we would tell you when this was decided, and',
-      'ask you to read it again. This is that. Nothing about your cases has changed.',
-      '',
-      '— — —',
+      'You were told this would be decided later, and that we would ask you to read',
+      'the notice again. Nothing about your cases has changed.',
       '',
       privacyNotice(supportContact, periods),
     ].join('\n'),
@@ -213,8 +210,8 @@ export function regionManagerReply(
         '',
         `For anything about your recruitment or your placement, contact ${supportContact}.`,
         '',
-        'To open a case that our staff will track and answer, use Contact Support —',
-        'that is the route that gets you a reference number.',
+        'To open a case our staff will track and answer, use Contact Support. That is',
+        'the route that gets you a reference number.',
       ].join('\n'),
       keyboard: backToMenuKeyboard(),
     };
@@ -228,11 +225,10 @@ export function regionManagerReply(
       '',
       manager.telegramUsername === null
         ? `${named} covers your region.`
-        : `${named} covers your region — @${manager.telegramUsername}`,
+        : `${named} covers your region: @${manager.telegramUsername}`,
       '',
-      'Please use Contact Support for anything that needs answering properly.',
-      'A message sent directly has no case number, is not tracked, and nobody else',
-      'can pick it up if they are away.',
+      'Use Contact Support for anything that needs a proper answer. That gives you a',
+      'case number, and somebody else can pick it up if they are away.',
       '',
       `For anything else, contact ${supportContact}.`,
     ].join('\n'),
@@ -260,9 +256,9 @@ export function helpReply(supportContact: string, staffSection: string | null = 
     text:
       'This bot answers common questions and opens support cases for teachers ' +
       'recruited by the Ministry.\n\n' +
-      '/start — the main menu\n' +
-      '/privacy — what data is held about you\n' +
-      '/help — this message\n\n' +
+      '/start opens the main menu\n' +
+      '/privacy shows what we hold about you\n' +
+      '/help shows this message\n\n' +
       (staffSection === null ? '' : `${staffSection}\n\n`) +
       `If you need a person, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),

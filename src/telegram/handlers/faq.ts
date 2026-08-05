@@ -63,7 +63,7 @@ export async function topicListingReply(
     return {
       text:
         `${topic.emoji} ${topic.label}\n\n` +
-        'There are no approved answers under this topic yet. ' +
+        'There are no answers under this topic yet. ' +
         'Contact Support and a person will help.',
       keyboard: topicListingKeyboard([], topic.code, 1).keyboard,
     };
@@ -99,7 +99,7 @@ export async function answerReply(
      */
     return {
       text:
-        'That answer is no longer available — it may have been updated or withdrawn.\n\n' +
+        'That answer is no longer available. It may have been updated or withdrawn.\n\n' +
         'Please pick another question, or contact support.',
       keyboard: mainMenuKeyboard(access),
     };
@@ -142,7 +142,7 @@ export async function questionReply(
     return {
       text: match.lowConfidence
         ? 'I am not certain I understood that. Did you mean one of these?'
-        : 'I found a few things that might match — pick the closest one:',
+        : 'I found a few things that might match. Pick the closest one:',
       keyboard: built.keyboard,
       skipped: built.skipped,
     };
@@ -156,7 +156,7 @@ export async function questionReply(
   const built = topicListingKeyboard(rows, topic.code, 1);
   return {
     text:
-      "I couldn't match that to an approved answer. " +
+      'I could not match that to an answer. ' +
       'Did you mean one of these, or tap Contact Support to reach a person:',
     keyboard: built.keyboard,
     skipped: built.skipped,
@@ -176,7 +176,7 @@ export async function questionReply(
 export function questionWithoutTopicReply(): Reply {
   return {
     text:
-      'I can look that up — which of these is it about?\n\n' +
+      'I can look that up. Which of these is it about?\n\n' +
       'Tap a topic and I will answer the question you just asked, or tap ' +
       'Contact Support to reach a person.',
     keyboard: questionTopicKeyboard(),

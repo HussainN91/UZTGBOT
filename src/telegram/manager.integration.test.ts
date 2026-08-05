@@ -250,12 +250,23 @@ describe.skipIf(!TEST_DATABASE_URL)('the manager a teacher is shown', () => {
        * R34, and the only control there is. A teacher who messages a manager
        * directly leaves no reference, no queue, no owner, no promised date and
        * no retention rule, and nothing technical can route that backwards.
+       *
+       * **The matcher moved on 5 August 2026 and the property did not.** The
+       * message used to earn its keep by listing what a direct message lacks:
+       * no case number, not tracked, nobody to pick it up. Phase two turned that
+       * around to say what Contact Support gives instead, because fifteen of the
+       * bot's twenty-four teacher messages were telling teachers what was *not*
+       * happening and the stack of them is what read as overwhelming.
+       *
+       * So the reason a teacher is given has to survive, in whichever direction
+       * it is put: the message names Contact Support, and names the case number
+       * as the thing that route gets them.
        */
       await setRegionOverride(db, TEACHER, 'Bukhara', SYSTEM);
       const body = await asks();
 
       expect(body).toContain('Contact Support');
-      expect(body).toMatch(/no case number|not tracked/i);
+      expect(body).toMatch(/case number/i);
     });
 
     it('answers a chat that has never signed in, rather than gating it', async () => {

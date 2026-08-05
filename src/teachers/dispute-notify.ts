@@ -78,33 +78,40 @@ export interface DisputeOpenedNotice {
  * and the second one is the one that leads somewhere.
  */
 export function disputeOpenedMessages(notice: DisputeOpenedNotice): DisputeNotification {
+  /**
+   * **This message does not open with an alarm, and that is the change.**
+   *
+   * It said "⚠️ Security notice" until 5 August 2026, and it is the one message
+   * in this bot that arrives at somebody who has just done nothing at all. The
+   * likeliest reason for it to be sent is that the teacher bought a phone. A
+   * heading borrowed from a bank fraud alert, on a message whose most probable
+   * cause is a new handset, is exactly the shape a MoPSE employee had in mind
+   * when she called this bot threatening.
+   *
+   * The benign reading therefore goes first and the alarm goes with the button,
+   * which is where it is earned: tapping it is what a teacher does when the
+   * answer really is "not me".
+   */
   const priorText = [
-    '⚠️ Security notice',
+    '📱 Someone has signed in to your teacher account from a different Telegram account.',
     '',
-    'Your teacher account has just been used to sign in from another Telegram',
-    'account.',
+    'If that was you, on a new phone, nothing is wrong and you can ignore this.',
     '',
-    'If that was you — a new phone, for instance — nothing is wrong and you can',
-    'ignore this.',
-    '',
-    'If it was not you, tap below. A member of Ministry staff will look at both',
-    'accounts and decide. You are not locked out, and nothing you have done is',
-    'affected while they look.',
+    'If it was not you, tap below. Ministry staff will look at both accounts and',
+    'decide. You stay signed in while they do, and your cases are not affected.',
     '',
     `You can also contact ${notice.supportContact}.`,
   ].join('\n');
 
   const newText = [
-    '⚠️ Someone else is already signed in with this account',
+    '👥 Another account is also signed in as this teacher.',
     '',
-    'You are signed in and everything works as normal — this does not block you.',
+    'You are signed in and everything works as normal.',
     '',
-    'Another Telegram account is also signed in as this teacher. If you have just',
-    'changed phone or number, that will be your old account, and tapping below',
-    'tells our staff so.',
+    'If you have just changed phone or number, that other account will be your old',
+    'one, and tapping below tells our staff so.',
     '',
-    'A member of Ministry staff decides which account stays. Nothing you tap here',
-    'settles it.',
+    'Ministry staff decide which account stays.',
     '',
     `Questions: ${notice.supportContact}.`,
   ].join('\n');

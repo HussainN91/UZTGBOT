@@ -29,7 +29,7 @@ export function caseDetailPromptReply(categoryLabel: string): Reply {
     text:
       `${categoryLabel}\n\n` +
       'Please describe the problem in one message. Include anything that would ' +
-      'help someone act on it — dates, names of documents, what you have already tried.',
+      'help someone act on it: dates, names of documents, what you have already tried.',
   };
 }
 
@@ -39,8 +39,8 @@ export function caseFiledReply(reference: string): Reply {
     text:
       '✅ Your case has been opened.\n\n' +
       `Reference: ${reference}\n\n` +
-      'Keep this reference — you can quote it to anyone helping you. ' +
-      'Use Check My Case to see progress.',
+      'Keep this reference: you can quote it to anyone helping you. ' +
+      'Check My Case shows progress.',
     keyboard: backToMenuKeyboard(),
   };
 }
@@ -51,14 +51,22 @@ export function caseFiledReply(reference: string): Reply {
  * Said plainly rather than silently returning the old reference: a teacher who
  * taps twice and sees "opened" twice will reasonably believe there are two
  * cases, and will chase both.
+ *
+ * **It no longer says "your message has not been lost", because it is.** On this
+ * path `createCase` returns the existing reference before writing anything, so
+ * the words the teacher just typed are discarded. The claim was written when the
+ * worry was a teacher believing the tap did nothing, and it answered that worry
+ * with something untrue. Whether the text should instead be appended, the way
+ * the priority path appends it, is a behaviour question and not one a wording
+ * pass gets to decide.
  */
 export function caseDeduplicatedReply(reference: string): Reply {
   return {
     text:
       'You already have an open case about this.\n\n' +
       `Reference: ${reference}\n\n` +
-      'Your message has not been lost — rather than opening a second case, ' +
-      'please reply to whoever contacts you about this one.',
+      'Rather than opening a second case, please reply to whoever contacts you ' +
+      'about this one.',
     keyboard: backToMenuKeyboard(),
   };
 }

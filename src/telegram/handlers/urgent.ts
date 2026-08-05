@@ -38,9 +38,9 @@ export function urgentDetailPromptReply(): Reply {
   return {
     text:
       '⏫ Ask for priority\n\n' +
-      'Describe the problem in one message — what has happened, what you need, and ' +
-      'why it cannot wait its turn. Include a date if something is fixed, like an ' +
-      'appointment or a flight.\n\n' +
+      'Describe the problem in one message: what has happened, what you need, and ' +
+      'why it cannot wait its turn. Include any fixed date, like an appointment or ' +
+      'a flight.\n\n' +
       'A regional coordinator reads it and decides whether it moves ahead of the ' +
       'other open cases.',
     keyboard: backToMenuKeyboard(),
@@ -58,13 +58,13 @@ export function urgentDetailPromptReply(): Reply {
 export function urgentRequestedReply(reference: string, supportContact: string): Reply {
   return {
     text:
-      '✅ Your case has been opened, and your request for priority has been passed on.\n\n' +
+      '✅ Case opened, and your request for priority has been passed on.\n\n' +
       `Reference: ${reference}\n\n` +
-      'A regional coordinator will look at it and decide whether it moves ahead of ' +
-      'the other open cases. Until they do, it is being worked in the ordinary way — ' +
-      'it has not been forgotten and you do not need to send it again.\n\n' +
-      'Keep this reference. Use Check My Case to see progress.\n\n' +
-      `If you cannot reach anybody and it cannot wait, contact ${supportContact}.`,
+      'A regional coordinator will decide whether it moves ahead of the other open ' +
+      'cases. Until then it is being worked in the ordinary way, so there is no ' +
+      'need to send it again.\n\n' +
+      'Keep the reference. Check My Case shows progress.\n\n' +
+      `If it cannot wait, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };
 }
@@ -82,10 +82,10 @@ export function urgentAppendedReply(reference: string, supportContact: string): 
       '✅ Added to the case you already have, and your request for priority has been ' +
       'passed on.\n\n' +
       `Reference: ${reference}\n\n` +
-      'You already had an open case, so rather than opening a second one, what you ' +
-      'have just written has been added to it. A regional coordinator will decide ' +
-      'whether it moves ahead of the other open cases.\n\n' +
-      `If you cannot reach anybody and it cannot wait, contact ${supportContact}.`,
+      'Rather than opening a second case, what you have just written was added to ' +
+      'this one. A regional coordinator will decide whether it moves ahead of the ' +
+      'other open cases.\n\n' +
+      `If it cannot wait, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };
 }
@@ -102,9 +102,9 @@ export function urgentAlreadyReply(reference: string, supportContact: string): R
     text:
       '✅ This case is already being treated as a priority.\n\n' +
       `Reference: ${reference}\n\n` +
-      'What you have just written has been added to it. Nobody needs to be asked ' +
-      'again — it is already ahead of the ordinary queue.\n\n' +
-      `If you cannot reach anybody and it cannot wait, contact ${supportContact}.`,
+      'What you have just written was added to it. Nobody needs asking again. It is ' +
+      'already ahead of the ordinary queue.\n\n' +
+      `If it cannot wait, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };
 }
@@ -122,9 +122,9 @@ export function urgentStillPendingReply(reference: string, supportContact: strin
       '✅ Added to your case. Your earlier request for priority is still with a ' +
       'regional coordinator.\n\n' +
       `Reference: ${reference}\n\n` +
-      'Nobody has decided yet. Asking again does not move it along, and what you ' +
-      'have just written has been added to the case either way.\n\n' +
-      `If you cannot reach anybody and it cannot wait, contact ${supportContact}.`,
+      'Nobody has decided yet. Asking again does not move it along, though what you ' +
+      'write is added to the case either way.\n\n' +
+      `If it cannot wait, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };
 }
@@ -135,9 +135,8 @@ export function urgentGrantedReply(reference: string, supportContact: string): R
     text:
       '⏫ Your case has been marked urgent.\n\n' +
       `Reference: ${reference}\n\n` +
-      'A regional coordinator agreed it should come ahead of the other open cases. ' +
-      'It is now with the support team as a priority.\n\n' +
-      `If anything changes, use Check My Case, or contact ${supportContact}.`,
+      'A regional coordinator agreed it should come ahead of the other open cases.\n\n' +
+      `Check My Case shows where it stands. If anything changes, contact ${supportContact}.`,
     keyboard: backToMenuKeyboard(),
   };
 }

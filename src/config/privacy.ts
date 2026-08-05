@@ -77,8 +77,32 @@ import type { RetentionPeriods } from './retention.js';
  * It cost a round of re-acceptance from every teacher who had already signed in,
  * and it was done in the same pass as the sign-in prompt rather than separately
  * for exactly that reason. Eight teachers on the day; 1,800 after launch.
+ *
+ * `2026-08-05.1` is the quieter bot, phase two. **Nothing it promises changed**
+ * — every item, purpose, period, disclosure and route below is the one that was
+ * there on 3 August. What changed is how much of it there is.
+ *
+ * A MoPSE employee reported that the bot felt overwhelming, with too much
+ * writing. Measured on 5 August 2026, this notice was **1,524 characters and it
+ * is shown three times**: inside the sign-in prompt, on `/privacy`, and again
+ * whenever a period moves. Those three messages were 4,913 of the 10,202
+ * characters this bot says to a teacher — just under half of everything, and the
+ * first of them is the second message a new teacher ever sees.
+ *
+ * So the headings lost their prepositions, the sentences that restated the
+ * heading went, and "please read this before you sign in" went with them: the
+ * prompt above it already says that, in the sentence that makes sending an
+ * address the acknowledgement.
+ *
+ * **The notice still travels inside the sign-in prompt** rather than behind a
+ * link or a second tap. That property is why the wording had to shrink instead:
+ * a teacher must not be able to reach the email box without the notice having
+ * been in front of them, and the answer to a long message a teacher has to see
+ * is a shorter message, never a hidden one.
+ *
+ * The fourth re-acceptance round, and the last cheap one. Four teachers today.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-08-03.1';
+export const PRIVACY_NOTICE_VERSION = '2026-08-05.1';
 
 /**
  * One line of the retention paragraph.
@@ -90,7 +114,7 @@ export const PRIVACY_NOTICE_VERSION = '2026-08-03.1';
  */
 function keptFor(what: string, days: number | null): string {
   return days === null
-    ? `• ${what}: kept until the Ministry sets a period.`
+    ? `• ${what}: until the Ministry sets a period.`
     : `• ${what}: ${days} days.`;
 }
 
@@ -105,11 +129,11 @@ function keptFor(what: string, days: number | null): string {
  */
 export function retentionParagraph(periods: RetentionPeriods): string[] {
   return [
-    'A case stays while it is open, however long that takes. Once it is finished:',
+    'An open case is kept until it is finished. After that:',
     keptFor('cases', periods.caseDays),
     keptFor('cases treated as urgent', periods.urgentCaseDays),
-    keptFor('the messages you send', periods.messageDays),
-    'When a case is deleted, everything written about it goes with it.',
+    keptFor('your messages', periods.messageDays),
+    'Deleting a case deletes everything written about it.',
   ];
 }
 
@@ -127,8 +151,6 @@ export function retentionParagraph(periods: RetentionPeriods): string[] {
 export function privacyNotice(supportContact: string, periods: RetentionPeriods): string {
   return [
     '🔒 Privacy notice',
-    '',
-    'Please read this before you sign in.',
     '',
     /**
      * "What we keep", not "What is held" — and the same change runs through
@@ -159,13 +181,13 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * the correction — that we do *not* hold a Telegram name — as an aside, and
      * it is the part a teacher is most likely to have assumed wrongly.
      */
-    '• Your Telegram chat id. We do not keep your Telegram display name. The name we hold for you is the one on the Ministry’s recruitment records.',
-    '• The messages you send to this bot, and the cases you open.',
+    '• Your Telegram chat id. We do not keep your Telegram display name. The name we hold comes from the Ministry’s recruitment records.',
+    '• Your messages and your cases.',
     '',
-    'What we use it for',
-    'To confirm you are a teacher the Ministry recruited, and to answer the cases you raise. Nothing else.',
+    'What it is for',
+    'Checking you are a teacher the Ministry recruited, and answering your cases. Nothing else.',
     '',
-    'Who can see it',
+    'Who sees it',
     'Ministry support staff working on your case. We do not share it outside the Ministry. It is held on a server in Uzbekistan.',
     /**
      * A blank line that did not need to be here before. Both paragraphs were
@@ -193,9 +215,9 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * reviewer is actually shown is each account's chat id, when it first
      * appeared, and when it was last active — so the notice says that.
      */
-    'If someone else tries to sign in as you, our staff see each account’s Telegram chat id, when it first appeared and when it was last used. That is how they decide which account is yours.',
+    'If someone else tries to sign in as you, staff see each account’s chat id, when it first appeared and when it was last used. That is how they decide which is yours.',
     '',
-    'How long we keep it',
+    'How long',
     ...retentionParagraph(periods),
     '',
     /**
@@ -207,7 +229,7 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * decision about access — but "nearly" is not a thing to leave in a legal
      * statement, and naming it costs eleven words.
      */
-    'We keep a permanent record of the decisions our staff make about your access, including any dispute over who an account belongs to. That record does not include your messages. It is there so we can always say who did what.',
+    'We keep a permanent record of decisions about your access, including any dispute over who an account belongs to. It holds none of your messages. It is there so we can always say who did what.',
     '',
     'Asking what we hold, or asking us to delete it',
     /**
@@ -228,9 +250,9 @@ export function privacyNotice(supportContact: string, periods: RetentionPeriods)
      * forgotten. `supportContact` is validated at start-up and cannot be a
      * placeholder, so the second line is always a route that exists.
      */
-    'Contact your regional admin: the staff member responsible for the region you work in.',
+    'Contact your regional admin, the staff member for the region you work in.',
     `If you do not know who that is, contact ${supportContact}.`,
     '',
-    `You can read this notice at any time with /privacy. All times are ${TIMEZONE}.`,
+    `/privacy shows this again at any time. All times are ${TIMEZONE}.`,
   ].join('\n');
 }

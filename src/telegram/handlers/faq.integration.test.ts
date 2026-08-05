@@ -94,7 +94,12 @@ describe.skipIf(!TEST_DATABASE_URL)('FAQ handlers', () => {
 
     it('says so plainly when a topic has no approved answers yet', async () => {
       const reply = await topicListingReply(db, 'LIVING', SIGNED_IN);
-      expect(reply.text).toContain('no approved answers');
+      /**
+       * "approved" left the teacher-facing wording on 5 August 2026. It is the
+       * ministry's word for a row a content owner has signed off, and it means
+       * nothing to a teacher who only wants to know whether there is an answer.
+       */
+      expect(reply.text).toMatch(/no answers under this topic/i);
       expect(payloads(reply)).toContain('MENU:CONTACT_SUPPORT');
     });
 
@@ -147,7 +152,7 @@ describe.skipIf(!TEST_DATABASE_URL)('FAQ handlers', () => {
       await insert('VISA-001', 10, ['passport']);
       await insert('VISA-002', 20, ['passport']);
       const reply = await questionReply(db, 'VISA', 'passport', SIGNED_IN);
-      expect(reply.text).toContain('pick the closest one');
+      expect(reply.text).toMatch(/pick the closest one/i);
       expect(payloads(reply)).toContain('ANS:VISA-001');
       expect(payloads(reply)).toContain('ANS:VISA-002');
     });
@@ -155,7 +160,7 @@ describe.skipIf(!TEST_DATABASE_URL)('FAQ handlers', () => {
     it('offers a person rather than a guess when nothing matches', async () => {
       await insert('VISA-001', 10, ['passport']);
       const reply = await questionReply(db, 'VISA', 'bicycle repairs', SIGNED_IN);
-      expect(reply.text).toContain("couldn't match");
+      expect(reply.text).toMatch(/could not match/i);
       expect(payloads(reply)).toContain('MENU:CONTACT_SUPPORT');
     });
 
