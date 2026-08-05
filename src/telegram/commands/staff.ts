@@ -632,8 +632,16 @@ export const staffAdd: StaffCommand = {
  * which the plan does not say and which is the same hole.** D13 makes the first
  * System row a hand-written INSERT precisely because there is no way back from
  * having none — and demoting the only System member to Program empties the rank
- * exactly as deactivating them does, with the same recovery: SSH and SQL. A
- * guard on one of the two doors is not a guard.
+ * exactly as deactivating them does. A guard on one of the two doors is not a
+ * guard.
+ *
+ * **Kept, and its reasoning changed, on 5 August 2026** when `staff.manage`
+ * dropped to `Program`. The recovery is no longer necessarily a database
+ * session: a Program member can now put somebody back at System. What the
+ * guard still buys is that the four System-only powers — resolving an identity
+ * dispute, anonymising a teacher, pausing the bot, setting retention — cannot
+ * be left held by nobody in a single tap, with nothing said. If there is also
+ * no active Program member, SSH and SQL is still the only way back.
  */
 export const staffRole: StaffCommand = {
   name: '/staff_role',
@@ -681,9 +689,9 @@ export const staffRole: StaffCommand = {
           [
             `${describeStaff(existing)} is the last active System member, so their rank was not changed.`,
             '',
-            'System is the only rank that can add staff at all. Taking it off the last',
-            'person holding it leaves nobody who can put it back, and the recovery is a',
-            'database session over the SSH tunnel.',
+            'System is the only rank that can settle an identity dispute, remove a teacher’s',
+            'details on request, pause the bot or change how long records are kept. Taking it',
+            'off the last person holding it leaves nobody who can do any of those.',
             '',
             'Add a second System member first, then change this one.',
           ].join('\n'),
@@ -851,7 +859,7 @@ export const staffRemove: StaffCommand = {
           'You cannot remove yourself.',
           '',
           'Every staff command checks for an active row, so the moment it went through',
-          'you would have no way to undo it. Ask another System member.',
+          'you would have no way to undo it. Ask somebody else who manages staff.',
         ].join('\n'),
       );
     }
@@ -873,17 +881,16 @@ export const staffRemove: StaffCommand = {
     }
 
     /**
-     * D13's rule, and it is **unreachable behind the check above** — deliberately
-     * kept anyway.
+     * D13's rule, and **it became reachable on 5 August 2026** when
+     * `staff.manage` dropped from `System` to `Program`.
      *
-     * `staff.manage` floors at System, so the caller is always an active System
-     * member. If the target is a *different* active System member there are at
-     * least two, and if it is the same one the self-check has already refused.
-     * The invariant "at least one active System member" is therefore held by the
-     * self-check alone, which is worth knowing and is not worth relying on: this
-     * branch is what catches it if the self-check is ever relaxed, if a bootstrap
-     * path is added, or if the floor for this capability ever moves. The
-     * reachable version of this hole is on `/staff_role` — see there.
+     * It was written as unreachable and kept anyway: while the caller was always
+     * a System member, deactivating the last one meant deactivating yourself,
+     * which the self-check above already refused. That reasoning named the exact
+     * thing that has now happened — *"if the floor for this capability ever
+     * moves"* — because a Program member deactivating the only System member is
+     * not deactivating themselves, and nothing above this branch stops them.
+     * The comment was the whole value of keeping it.
      */
     if (existing.role === 'System') {
       const systems = await countActiveSystem(ctx.db);
@@ -893,8 +900,8 @@ export const staffRemove: StaffCommand = {
           [
             `${describeStaff(existing)} is the last active System member, so nothing was changed.`,
             '',
-            'With nobody at System nothing can add staff, change a rank or pause the bot,',
-            'and the recovery is a hand-written INSERT over the SSH tunnel.',
+            'With nobody at System nothing can settle an identity dispute, remove a teacher’s',
+            'details on request, pause the bot or change how long records are kept.',
             '',
             'Add a second System member first.',
           ].join('\n'),
@@ -903,11 +910,17 @@ export const staffRemove: StaffCommand = {
     }
 
     /**
-     * Read under the caller's own scope, which is exact here and only here:
-     * `staff.manage` floors at System, and a System member bypasses both the
-     * queue and the region axis. Asked through the scoped query rather than with
-     * an unscoped count so that no read in this stage sidesteps the visibility
-     * predicate — the `total` is the true figure, the list itself is capped.
+     * Read under the caller's own scope, as every case read in this system is.
+     *
+     * **It was exact until 5 August 2026 and is no longer.** `staff.manage`
+     * floored at System, and a System member bypasses both the queue and the
+     * region axis, so this count was the true one. A Program member does not
+     * bypass either — a Program member holding one queue, or a few regions,
+     * sees only the departing person's cases inside it. The count is therefore
+     * a floor, and the wording below says so rather than presenting it as a
+     * total: an undercount read as a total is how somebody is deactivated with
+     * work still on them and nobody the wiser. `openCaseNote` has said "that you
+     * can see" for the same reason since stage 4.
      */
     const owned = await casesOwnedBy(ctx.db, scopeOf(ctx.member), split.chatId);
 
@@ -916,9 +929,9 @@ export const staffRemove: StaffCommand = {
 
     const caseNote =
       owned.total === 0
-        ? ['They own no open cases.']
+        ? ['They own no open cases that you can see.']
         : [
-            `They still own ${String(owned.total)} open case${owned.total === 1 ? '' : 's'}, and those have been left exactly where they are:`,
+            `They still own ${String(owned.total)} open case${owned.total === 1 ? '' : 's'} that you can see, and those have been left exactly where they are:`,
             '',
             ...owned.cases.map((c) => `  ${c.reference} — ${c.status} · ${c.category}`),
             ...(owned.cases.length < owned.total

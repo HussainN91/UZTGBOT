@@ -271,7 +271,7 @@ export async function routeCaseMenu(
 /**
  * The add-somebody flow.
  *
- * `staff.manage` floors at System and is checked here before anything is shown,
+ * `staff.manage` floors at Program and is checked here before anything is shown,
  * so somebody who guesses the payload is refused at the first step rather than
  * after choosing a rank. It is checked again inside `/staff_add` when the last
  * tap runs — the rule is enforced twice on purpose, exactly as it is for every

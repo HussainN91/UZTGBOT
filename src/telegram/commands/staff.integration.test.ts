@@ -142,8 +142,12 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       expect(body).toContain(PROGRAM);
     });
 
-    it('is not available below System', async () => {
-      expect(await run('/staff', PROGRAM)).toMatch(/rank/i);
+    it('is available to a Program admin, and not below', async () => {
+      // The list itself contains the word "rank", so a refusal must be matched
+      // on the rank it names rather than on that word — this test passed for the
+      // wrong reason for the first minutes after the floor moved.
+      expect(await run('/staff', PROGRAM)).toContain(SUPPORT_MEMBER);
+      expect(await run('/staff', SUPPORT_MEMBER)).toContain('It needs Program');
     });
   });
 
@@ -239,9 +243,16 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       expect((await findStaff(db, PROGRAM))?.role).toBe('Program');
     });
 
-    it('is not available below System', async () => {
-      expect(await run(`/staff_add ${NEWCOMER} Support Visa`, PROGRAM)).toMatch(/rank/i);
-      expect(await findAnyStaff(db, NEWCOMER)).toBeNull();
+    it('is available to a Program admin, and not below', async () => {
+      // Lowered from System to Program on 5 August 2026 at the head of
+      // project's instruction. The second half is the half that can regress
+      // quietly: a floor nobody is under is not a floor.
+      expect(await run(`/staff_add ${NEWCOMER} Support Visa`, PROGRAM)).toMatch(/is now staff/i);
+      expect((await findStaff(db, NEWCOMER))?.role).toBe('Support');
+
+      const refused = await run(`/staff_add ${SECOND_SYSTEM} Support Visa`, SUPPORT_MEMBER);
+      expect(refused).toContain('It needs Program');
+      expect(await findAnyStaff(db, SECOND_SYSTEM)).toBeNull();
     });
   });
 
@@ -304,9 +315,14 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       expect(outcome.messages[1]?.text).toContain('Lead');
     });
 
-    it('is not available below System', async () => {
-      expect(await run(`/staff_role ${SUPPORT_MEMBER} Lead`, PROGRAM)).toMatch(/rank/i);
+    it('is available to a Program admin, and not below', async () => {
+      expect(await run(`/staff_role ${SUPPORT_MEMBER} Lead`, SUPPORT_MEMBER)).toContain(
+        'It needs Program',
+      );
       expect((await findStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
+
+      await run(`/staff_role ${SUPPORT_MEMBER} Lead`, PROGRAM);
+      expect((await findStaff(db, SUPPORT_MEMBER))?.role).toBe('Lead');
     });
   });
 
@@ -331,12 +347,13 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
     });
 
     it('cannot be used to leave nobody at System — D13, whichever order it is done in', async () => {
-      // The property, tested rather than the branch, because the branch turns
-      // out to be unreachable: `staff.manage` floors at System, so the caller is
-      // always an active System member, and the only way to reach a count of one
-      // is to be that one — which the self-check refuses first. Asserted as
-      // behaviour so that a later change to either rule is caught by this test
-      // rather than by an empty staff table.
+      // The property, tested rather than the branch. It was written when the
+      // branch was unreachable — `staff.manage` floored at System, so reaching a
+      // count of one meant being that one, which the self-check refuses first —
+      // and asserted as behaviour precisely so that a change to either rule
+      // would be caught here rather than by an empty staff table. The floor
+      // moved to Program on 5 August 2026 and the branch is now live; the test
+      // below is that path.
       await addSecondSystem();
       await run(`/staff_remove ${SECOND_SYSTEM}`);
       await run(`/staff_remove ${SYSTEM}`, SYSTEM);
@@ -397,9 +414,32 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
       expect(await run('/whoami', SUPPORT_MEMBER)).not.toMatch(/signed in as staff/i);
     });
 
-    it('is not available below System', async () => {
-      expect(await run(`/staff_remove ${SUPPORT_MEMBER}`, PROGRAM)).toMatch(/rank/i);
-      expect(await findStaff(db, SUPPORT_MEMBER)).not.toBeNull();
+    it('refuses a Program admin the last active System member', async () => {
+      /**
+       * The newly reachable half of D13, live since the floor moved on 5 August
+       * 2026. A Program member deactivating the only System member is not
+       * deactivating themselves, so the self-check that used to answer first
+       * never fires, and this branch is all there is between the ministry and a
+       * bot with nobody who can settle a disputed identity or pause it.
+       */
+      const body = await run(`/staff_remove ${SYSTEM}`, PROGRAM);
+
+      expect(body).toMatch(/last active System member/i);
+      expect(await findStaff(db, SYSTEM)).not.toBeNull();
+    });
+
+    it('lets a Program admin deactivate somebody, and refuses below that', async () => {
+      // The refusal is asserted first on purpose: a deactivated member is a
+      // stranger to every staff command, so a Support member who has just been
+      // removed would be answered with the teacher menu rather than a refusal,
+      // and the second half of this test would pass for the wrong reason.
+      // Matched on the refusal's own words: the target is called "Programme
+      // Lead", so a bare check for "Program" would pass on their name.
+      expect(await run(`/staff_remove ${PROGRAM}`, SUPPORT_MEMBER)).toContain('It needs Program');
+      expect(await findStaff(db, PROGRAM)).not.toBeNull();
+
+      expect(await run(`/staff_remove ${SUPPORT_MEMBER}`, PROGRAM)).toMatch(/deactivated/i);
+      expect(await findStaff(db, SUPPORT_MEMBER)).toBeNull();
     });
   });
 
@@ -588,11 +628,19 @@ describe.skipIf(!TEST_DATABASE_URL)('managing staff', () => {
         expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
       });
 
-      it('tells a Program admin plainly that this needs System', async () => {
-        // They can see the button, so silence would leave them tapping it.
-        const body = await tapText([SUPPORT_MEMBER, 'ROLE', 'Lead'], PROGRAM);
+      it('lets a Program admin change a rank through the button', async () => {
+        // Program held staff.manage from 5 August 2026, and the buttons inherit
+        // it because they run the typed command rather than a copy of it.
+        await tapText([SUPPORT_MEMBER, 'ROLE', 'Lead'], PROGRAM);
 
-        expect(body).toMatch(/System/);
+        expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Lead');
+      });
+
+      it('tells a Support member plainly that this needs Program', async () => {
+        // They can see the button, so silence would leave them tapping it.
+        const body = await tapText([SUPPORT_MEMBER, 'ROLE', 'Lead'], SUPPORT_MEMBER);
+
+        expect(body).toContain('It needs Program');
         expect((await findAnyStaff(db, SUPPORT_MEMBER))?.role).toBe('Support');
       });
 

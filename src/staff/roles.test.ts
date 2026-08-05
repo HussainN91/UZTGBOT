@@ -69,7 +69,27 @@ describe('the capability table', () => {
 
   it('names every capability in the ladder order, so /whoami can list them', () => {
     expect(capabilitiesFor('Program')).toContain('announce');
-    expect(capabilitiesFor('Program')).not.toContain('staff.manage');
+    expect(capabilitiesFor('Program')).not.toContain('maintenance');
+  });
+
+  it('lets a Program member run the team, and nothing irreversible', () => {
+    /**
+     * Lowered from `System` on 5 August 2026 at the head of project's
+     * instruction: a Program member hires, promotes and demotes exactly as a
+     * System member does.
+     *
+     * The second half is the half worth asserting. Four capabilities stay at
+     * System — settling a disputed identity, anonymising a teacher, pausing the
+     * bot and setting retention — and they are the irreversible ones. Written
+     * out because "Program can manage staff" is the sort of grant that gets
+     * widened later by somebody reading only the first line.
+     */
+    expect(can({ role: 'Lead', active: true }, 'staff.manage')).toBe(false);
+    expect(can({ role: 'Program', active: true }, 'staff.manage')).toBe(true);
+
+    for (const capability of ['dispute.resolve', 'teacher.forget', 'maintenance'] as const) {
+      expect(can({ role: 'Program', active: true }, capability)).toBe(false);
+    }
   });
 
   it('gives each rank everything the rank below it has', () => {

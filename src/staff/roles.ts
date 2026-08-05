@@ -111,7 +111,26 @@ const FLOOR: Readonly<Record<Capability, StaffRole>> = {
   'teacher.forget': 'System',
   'dispute.review': 'Support',
   'dispute.resolve': 'System',
-  'staff.manage': 'System',
+  /**
+   * Adding staff, and setting a rank, queue or regions — lowered from `System`
+   * to `Program` on 5 August 2026 at the head of project's instruction: a
+   * Program member is to hire, promote and demote exactly as a System member
+   * does.
+   *
+   * **It is a real grant of authority and not only a convenience**, because
+   * `/staff_role` has never limited the rank a caller may hand out: a Program
+   * member can now promote somebody — including themselves — to `System`, and
+   * so reach the four things still floored there. That was accepted knowingly.
+   * The rank ladder is a statement about who is trusted, not a containment
+   * boundary, and the alternative — a rule that you may not grant above your
+   * own rank — would be a second authorization rule living outside this table,
+   * which is the drift D7 exists to prevent.
+   *
+   * What stays at `System`: resolving an identity dispute, anonymising a
+   * teacher, pausing the bot and setting retention. Those are the irreversible
+   * ones, and none of them is what "run the team" means.
+   */
+  'staff.manage': 'Program',
   maintenance: 'System',
   announce: 'Program',
   export: 'Program',
