@@ -58,8 +58,28 @@ export const QUEUE_FOR_CATEGORY: Readonly<Record<CaseCategory, Queue>> = {
   [CASE_CATEGORY.TRAVEL]: QUEUE.TRAVEL,
   [CASE_CATEGORY.CONTRACT]: QUEUE.CONTRACT,
   [CASE_CATEGORY.ACCOMMODATION]: QUEUE.ACCOMMODATION,
-  [CASE_CATEGORY.SUBMIT_DOCS]: QUEUE.ALL,
-  [CASE_CATEGORY.CONTACT_SUPPORT]: QUEUE.ALL,
+  /**
+   * Both moved from `All` to `Accommodation` on 5 August 2026, D6.
+   *
+   * **`All` was right, and then its premise went away.** An uncategorised case
+   * reaching nobody is the failure the new-case alert exists to catch, so before
+   * anything gave a case an owner, sending it to every queue was the safe answer.
+   * Automatic assignment removed that risk: every case is given to somebody the
+   * moment it is filed, so an unclassified one cannot go unworked whoever can see
+   * it.
+   *
+   * What was left was the cost. `Contact Support` is what a teacher picks when
+   * they have not classified their problem, which is often, and routing it to all
+   * five queues meant showing every staff member every unclassified problem in
+   * the country. A MoPSE employee described the result as overwhelming, and this
+   * is the largest single share of it.
+   *
+   * Accommodation is the desk that takes general questions in this ministry.
+   * Anybody whose queue is `All` still sees these, which on this team is most
+   * people, so the narrowing removes noise rather than sight.
+   */
+  [CASE_CATEGORY.SUBMIT_DOCS]: QUEUE.ACCOMMODATION,
+  [CASE_CATEGORY.CONTACT_SUPPORT]: QUEUE.ACCOMMODATION,
 };
 
 /**

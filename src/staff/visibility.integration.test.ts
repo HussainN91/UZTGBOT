@@ -159,11 +159,32 @@ describe.skipIf(!TEST_DATABASE_URL)('the visibility predicate', () => {
       expect(await visibleCaseReferences(db, scope({ queue: QUEUE.VISA }))).toContain(VISA_REF);
     });
 
-    it('shows an uncategorised case to every queue', async () => {
-      // Contact Support routes to All: it is by definition the case nobody has
-      // classified, and it is exactly what goes unworked.
+    it('keeps an uncategorised case away from a specialist queue', async () => {
+      /**
+       * **The reverse of what this test asserted until 5 August 2026**, D6.
+       *
+       * Contact Support routed to `All` because it is by definition the case
+       * nobody has classified, and an unclassified case going unworked is the
+       * thing this system exists to prevent. Automatic assignment now gives every
+       * case an owner when it is filed, so it cannot go unworked, and the old
+       * routing was putting every unclassified problem in the country in front of
+       * every staff member.
+       */
       await seedCase('SUPPORT-2026-00001', CASE_CATEGORY.CONTACT_SUPPORT);
-      expect(await visibleCaseReferences(db, scope({ queue: QUEUE.VISA }))).toContain(
+      expect(await visibleCaseReferences(db, scope({ queue: QUEUE.VISA }))).not.toContain(
+        'SUPPORT-2026-00001',
+      );
+    });
+
+    it('shows an uncategorised case to Accommodation, and to anybody covering everything', async () => {
+      // The other half of D6. What the specialist stopped seeing has to land
+      // somewhere, and it lands on the general desk.
+      await seedCase('SUPPORT-2026-00001', CASE_CATEGORY.CONTACT_SUPPORT);
+
+      expect(await visibleCaseReferences(db, scope({ queue: QUEUE.ACCOMMODATION }))).toContain(
+        'SUPPORT-2026-00001',
+      );
+      expect(await visibleCaseReferences(db, scope({ queue: QUEUE.ALL }))).toContain(
         'SUPPORT-2026-00001',
       );
     });
