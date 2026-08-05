@@ -577,6 +577,20 @@ export const cases = pgTable(
     urgentConfirmedBy: chatId('urgent_confirmed_by'),
     urgentConfirmedAt: tsz('urgent_confirmed_at'),
     /**
+     * The status this case held before a confirmed request moved it to
+     * `Escalated`, or null when it was never escalated.
+     *
+     * Written so that un-marking can put the case back where it was rather than
+     * somewhere plausible. A case sitting at `Under review` when a coordinator
+     * escalated it should return to `Under review`; without this column the only
+     * honest answer available is `Received`, which throws away real progress and
+     * reads to staff as the case having been reset.
+     *
+     * Null on every case escalated before this column existed, which is why the
+     * restore coalesces to `Received` rather than trusting it.
+     */
+    preUrgentStatus: caseStatusEnum('pre_urgent_status'),
+    /**
      * The form area this case was raised in, or null for a case raised any other
      * way. Not a foreign key to `form_links`: an area MoPSE retires must not take
      * the cases raised under it with it, and `form_submissions` already keeps its
