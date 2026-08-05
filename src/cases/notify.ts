@@ -49,6 +49,20 @@ export interface NewCaseNotice {
   readonly reference: string;
   readonly category: string;
   readonly teacherChatId: string;
+  /**
+   * The staff member this case was given to, or null when nobody covers it.
+   *
+   * **Passed in rather than worked out here, and that is the change of 5 August
+   * 2026 (D1).** This function used to ask `staffCovering` who could work the
+   * case and write to all of them, up to twenty. On a four-person team that was
+   * three or four phones for one teacher's problem, and the MoPSE employee using
+   * the bot reported the result as overwhelming.
+   *
+   * The owner is decided once, by `chooseOwner`, inside `createCase`. Working out
+   * a recipient list here as well would be a second answer to a question that
+   * already has one, and the two would drift the first time either rule moved.
+   */
+  readonly owner: string | null;
 }
 
 export interface NotificationOutcome {
@@ -86,19 +100,23 @@ export async function notifyNewCase(
    */
   const region = await regionFor(db, notice.teacherChatId);
 
-  const actors = await staffCovering(db, {
-    capability: CAPABILITY.CASE_UPDATE,
-    category: notice.category,
-    region,
-  });
-
-  if (actors.length === 0) {
+  if (notice.owner === null) {
     /**
-     * Only computed when there is a problem, because it is only ever used to
-     * word the alarm. "Nobody at all covers this" and "people cover it who may
-     * only look at it" are different failures with different fixes — one needs a
-     * staff member, the other needs a rank — and an alarm that cannot tell them
-     * apart makes the reader do the diagnosis at three in the morning.
+     * Nobody covers this queue and region, so there is nobody to write to.
+     *
+     * **The alarm goes to the operations chat and to no individual**, which is
+     * D5 carried out. The head of project's rule is that somebody always covers
+     * every region, so reaching this branch means a staff row is wrong rather
+     * than that the bot is working as intended. The people who can fix a staffing
+     * hole are in that chat. A caseworker cannot, and the old wording of this
+     * warning, delivered to their phone, is a large part of what a MoPSE employee
+     * described as threatening.
+     *
+     * The watcher count is still computed, and still only on this branch,
+     * because it is the difference between two fixes. "Nobody at all covers this"
+     * needs a person hired; "people cover it who may only look" needs somebody's
+     * rank raised. An alarm that cannot tell them apart makes its reader do the
+     * diagnosis at three in the morning.
      */
     const watchers = await staffCovering(db, {
       capability: CAPABILITY.CASE_VIEW,
@@ -109,7 +127,6 @@ export async function notifyNewCase(
     return { messages: [], alerts: [unworkableAlert(notice, region, watchers.length)] };
   }
 
-  const chosen = actors.slice(0, NEW_CASE_NOTIFY_CAP);
   const facts = await caseFacts(db, notice.reference);
 
   /**
@@ -118,22 +135,31 @@ export async function notifyNewCase(
    * `Escalated`, which is what puts it in `/urgent`.
    */
   await markCaseReceived(db, notice.reference);
-  await logFanOut(db, notice.reference, 'STAFF_NOTIFIED_NEW', chosen.length, actors.length);
+  await logFanOut(db, notice.reference, 'STAFF_NOTIFIED_NEW', 1, 1);
 
-  const text = noticeText(notice, region, facts);
   return {
-    messages: chosen.map((chatId) => ({
-      chatId,
-      text,
-      /**
-       * R10. `deliver` names this in the alarm it raises when a send fails, and
-       * before `purpose` existed it called every message after the first "a
-       * notice about somebody else's action (a duplicate sign-in)". A staff
-       * notification that failed to arrive would have been reported as the
-       * wrong thing entirely.
-       */
-      purpose: 'a new case notification',
-    })),
+    messages: [
+      {
+        chatId: notice.owner,
+        text: noticeText(notice, region, facts),
+        /**
+         * R10. `deliver` names this in the alarm it raises when a send fails, and
+         * before `purpose` existed it called every message after the first "a
+         * notice about somebody else's action (a duplicate sign-in)". A staff
+         * notification that failed to arrive would have been reported as the
+         * wrong thing entirely.
+         */
+        purpose: 'a new case notification',
+        keyboard: [
+          [
+            {
+              text: `📂 Open ${notice.reference}`,
+              callback_data: encodeCallback(CALLBACK.CASE_OPEN, notice.reference),
+            },
+          ],
+        ],
+      },
+    ],
     alerts: [],
   };
 }
@@ -147,6 +173,8 @@ export interface UrgentRequestNotice {
   readonly teacherChatId: string;
   /** False when the request landed on a case the teacher already had open. */
   readonly isNew: boolean;
+  /** The case's owner. See `NewCaseNotice.owner`, which carries the argument. */
+  readonly owner: string | null;
 }
 
 /**
@@ -269,6 +297,7 @@ export async function notifyUrgentRequestOnCase(
     reference: notice.reference,
     category: notice.category,
     teacherChatId: notice.teacherChatId,
+    owner: notice.owner,
   });
 
   const told = new Set(request.messages.map((m) => m.chatId));
@@ -430,7 +459,7 @@ async function caseFacts(db: Database, reference: string): Promise<CaseFacts> {
     button_text: string | null;
     awaiting_form: boolean;
   }>(sql`
-    SELECT to_char(c.created_at AT TIME ZONE ${TIMEZONE}, 'DD Mon YYYY, HH24:MI') AS filed_at,
+    SELECT to_char(c.created_at AT TIME ZONE ${TIMEZONE}, 'DD Mon, HH24:MI') AS filed_at,
            c.form_type AS form_type,
            f.button_text AS button_text,
            c.awaiting_form AS awaiting_form
@@ -451,19 +480,26 @@ async function caseFacts(db: Database, reference: string): Promise<CaseFacts> {
 }
 
 /**
- * What a staff member sees on their phone.
+ * What the owner sees on their phone.
  *
- * No detail, no teacher name, no chat id. The two command lines are the point of
- * the message: the recipient can read the case or take it without typing a
- * reference from memory.
+ * Three lines and a button, down from seven lines ending in two typed commands.
+ * Nothing was thrown away: what came out is behind the button, which opens the
+ * case exactly as tapping it in `/cases` does.
+ *
+ * **"for you" is only sayable because of D1.** While this went to everybody who
+ * could work the case it had to be impersonal. One recipient lets the message say
+ * whose case it is, which is the most useful word in it.
+ *
+ * The reference sits on the button rather than in the body, so it is there when
+ * it is wanted and costs no line. No detail, no teacher name, no chat id, and no
+ * em dash: §7 of the design, and the reason this rewrite exists.
  */
 function noticeText(notice: NewCaseNotice, region: string | null, facts: CaseFacts): string {
   return [
-    `🆕 New case — ${notice.reference}`,
+    '🆕 New case for you',
     '',
-    `Category: ${notice.category}`,
-    `Region: ${region ?? 'not recorded'}`,
-    `Filed: ${facts.filedAt} (Tashkent)`,
+    [notice.category, region ?? 'region not recorded'].join(' · '),
+    facts.filedAt,
     /**
      * One line, and only for a case raised in a form area.
      *
@@ -477,12 +513,9 @@ function noticeText(notice: NewCaseNotice, region: string | null, facts: CaseFac
       ? []
       : [
           facts.area.awaitingForm
-            ? `📄 ${facts.area.label} — the form has not arrived yet. The teacher was given the link.`
-            : `📄 ${facts.area.label} — the form has been submitted.`,
+            ? `📄 ${facts.area.label}, not sent yet`
+            : `📄 ${facts.area.label}, sent`,
         ]),
-    '',
-    `/case ${notice.reference} — read it, including what the teacher wrote`,
-    `/assign ${notice.reference} <telegram id> — give it an owner`,
   ].join('\n');
 }
 

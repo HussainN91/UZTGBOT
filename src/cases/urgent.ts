@@ -56,6 +56,15 @@ export interface UrgentRequestResult {
   /** False when an open case in this category already existed and was appended to. */
   readonly isNew: boolean;
   /**
+   * The case's owner, or null when nobody covers it.
+   *
+   * Carried out of `createCase` rather than looked up again, for the reason
+   * `CreateCaseResult.owner` gives: from 5 August 2026 the priority request is
+   * written to the owner alone (D1), and there must be exactly one answer in the
+   * system to the question of who that is.
+   */
+  readonly owner: string | null;
+  /**
    * The case was already `Urgent` or `Critical` before this arrived.
    *
    * The teacher's words are still appended — they are new information about a
@@ -148,6 +157,7 @@ export async function requestUrgentCase(
   return {
     reference: result.reference,
     isNew: result.isNew,
+    owner: result.owner,
     alreadyUrgent: row?.already_urgent === true,
     /**
      * Only meaningful when the case is not already urgent. A confirmed case has

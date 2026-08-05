@@ -800,6 +800,7 @@ async function fileTypedCase(
           reference: result.reference,
           category: filing.category,
           teacherChatId: chatId,
+          owner: result.owner,
         })
       : NO_NOTIFICATION;
 
@@ -937,6 +938,7 @@ async function handleUrgentDetail(
       category: URGENT_CASE_CATEGORY,
       teacherChatId: chatId,
       isNew: result.isNew,
+      owner: result.owner,
     });
 
     return withNotice(

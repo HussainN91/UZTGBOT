@@ -55,7 +55,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
   const fileAndNotify = async (
     chatId: string,
     category: string,
-  ): Promise<{ reference: string; outcome: NotificationOutcome }> =>
+  ): Promise<{ reference: string; owner: string | null; outcome: NotificationOutcome }> =>
     withChatLock(db, chatId, async (tx) => {
       const created = await createCase(tx, {
         chatId,
@@ -66,8 +66,9 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
         reference: created.reference,
         category,
         teacherChatId: chatId,
+        owner: created.owner,
       });
-      return { reference: created.reference, outcome };
+      return { reference: created.reference, owner: created.owner, outcome };
     });
 
   const statusOf = async (reference: string): Promise<string> => {
@@ -120,65 +121,78 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
   });
 
   describe('who is told', () => {
-    it('tells the staff who can see the case, and nobody else', async () => {
+    /**
+     * **This block asserted a fan-out until 5 August 2026 and now asserts its
+     * opposite** — D1. A new case reached everybody whose queue and region
+     * covered it, capped at twenty. On a four-person ministry team that was three
+     * or four phones for one teacher's problem, and the MoPSE employee using it
+     * described the result as overwhelming and threatening.
+     *
+     * The questions the old tests asked have not gone away, they have moved.
+     * "Who may work this case" is the assigner's question now and
+     * `assignment.integration.test.ts` asks it there. What belongs here is
+     * narrower: does exactly one person hear, and is it the right one.
+     */
+    it('writes to the owner and to nobody else', async () => {
+      const { outcome, owner } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
+
+      expect(owner).toBe(VISA_SUPPORT_TASHKENT);
+      expect(outcome.messages).toHaveLength(1);
+      expect(outcome.messages[0]?.chatId).toBe(VISA_SUPPORT_TASHKENT);
+    });
+
+    it('does not tell a System member, who is no longer in the rotation', async () => {
+      /**
+       * **The reverse of what this file asserted until 5 August 2026**, and the
+       * bypass it tested is untouched. A System member still *sees* every case in
+       * the country, which `visibility.integration.test.ts` proves. Being able to
+       * see everything was never a reason to be paged about each thing, and D2
+       * says so: they see everything and are told almost nothing.
+       */
+      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
+
+      expect(outcome.messages.map((m) => m.chatId)).not.toContain(SYSTEM_NARROW);
+    });
+
+    it('tells neither an Observer nor a deactivated member, who can never own one', async () => {
+      // R14 still holds and is structural now rather than filtered: the assigner
+      // cannot choose either of them, so neither can be the single recipient.
       const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
       const told = outcome.messages.map((m) => m.chatId);
 
-      expect(told).toContain(VISA_SUPPORT_TASHKENT);
-      // Right queue, wrong region.
-      expect(told).not.toContain(VISA_SUPPORT_SAMARKAND);
-      // Right region, wrong queue.
-      expect(told).not.toContain(ACCOM_SUPPORT_EVERYWHERE);
+      expect(told).not.toContain(OBSERVER_EVERYTHING);
+      expect(told).not.toContain(DEACTIVATED_SUPPORT);
     });
 
-    it('does not notify an Observer, who could not act on it', async () => {
-      // R14. `case.view` is not the same question as "should this person be
-      // paged". An observer notified about every case that arrives is being
-      // paged about work they are not permitted to do.
-      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
+    it('still reaches a person when the teacher’s region is unknown', async () => {
+      // D10, and the property most likely to break. A teacher with no region on
+      // either the override or the roster must still reach somebody. What keeps
+      // that true is now the assigner rather than a wide fan-out, so it is worth
+      // asserting from this end as well.
+      const { outcome, owner } = await fileAndNotify(NOWHERE_TEACHER, CASE_CATEGORY.VISA);
 
-      expect(outcome.messages.map((m) => m.chatId)).not.toContain(OBSERVER_EVERYTHING);
+      expect(owner).not.toBeNull();
+      expect(outcome.messages).toHaveLength(1);
     });
 
-    it('never notifies a deactivated member', async () => {
-      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
-
-      expect(outcome.messages.map((m) => m.chatId)).not.toContain(DEACTIVATED_SUPPORT);
-    });
-
-    it('tells a System member whatever their queue and region say', async () => {
-      // The bypass in the visibility rule, and it has to hold here too: a System
-      // member with a queue of None and one unrelated region still covers
-      // everything (AdminCommands.gs:290-294).
-      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
-
-      expect(outcome.messages.map((m) => m.chatId)).toContain(SYSTEM_NARROW);
-    });
-
-    it('hides a case from nobody when the teacher’s region is unknown', async () => {
-      // D10, and the property most likely to break: a teacher with no region on
-      // either the override or the roster must reach every region-scoped staff
-      // member, or they file cases nobody sees and nobody finds out.
-      const { outcome } = await fileAndNotify(NOWHERE_TEACHER, CASE_CATEGORY.VISA);
-      const told = outcome.messages.map((m) => m.chatId);
-
-      expect(told).toContain(VISA_SUPPORT_TASHKENT);
-      expect(told).toContain(VISA_SUPPORT_SAMARKAND);
-    });
-
-    it('sends an uncategorised case to every queue', async () => {
-      // Contact Support is by definition the case that has not been classified.
-      // Routing it to a specialist would be guessing.
+    it('sends an uncategorised case to the general desk', async () => {
+      // D6 as a person feels it. Contact Support belongs to Accommodation now,
+      // so the one person told is the one who covers that.
       const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.CONTACT_SUPPORT);
-      const told = outcome.messages.map((m) => m.chatId);
 
-      expect(told).toContain(VISA_SUPPORT_TASHKENT);
-      expect(told).toContain(ACCOM_SUPPORT_EVERYWHERE);
+      expect(outcome.messages).toHaveLength(1);
+      expect(outcome.messages[0]?.chatId).toBe(ACCOM_SUPPORT_EVERYWHERE);
     });
 
-    it('caps the recipients', async () => {
-      // R9. `deliver` sends sequentially inside the webhook request, which is
-      // configured with a 25-second timeout and onTimeout: 'return'.
+    it('writes one message however many people cover the case', async () => {
+      /**
+       * What the recipient cap used to guard, asserted from the other side.
+       *
+       * R9's reasoning was that `deliver` sends sequentially inside a webhook
+       * request with a 25-second timeout, so twenty-five sends could exhaust it.
+       * One send cannot. The cap still exists and still applies to the two urgent
+       * messages, which do go to more than one person.
+       */
       const extra = Array.from({ length: NEW_CASE_NOTIFY_CAP + 5 }, (_, i) => 993000 + i);
       for (const id of extra) {
         await db.execute(sql`
@@ -189,7 +203,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
 
       const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
 
-      expect(outcome.messages).toHaveLength(NEW_CASE_NOTIFY_CAP);
+      expect(outcome.messages).toHaveLength(1);
     });
   });
 
@@ -205,14 +219,40 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       expect(outcome.messages.every((m) => !m.text.includes('locks'))).toBe(true);
     });
 
-    it('carries the reference, the category and a way to open the case', async () => {
+    it('says three lines, and carries the case on a button', async () => {
+      /**
+       * Seven lines became three. The two it used to end with were instructions
+       * to type `/case` and `/assign` with a nineteen-character reference in
+       * them, which is what a message looked like before anything could be
+       * tapped.
+       */
       const { reference, outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
       const body = outcome.messages[0]?.text ?? '';
 
-      expect(body).toContain(reference);
+      expect(body).toContain('New case for you');
       expect(body).toContain(CASE_CATEGORY.VISA);
-      expect(body).toContain(`/case ${reference}`);
-      expect(body).toContain(`/assign ${reference}`);
+      expect(body).toContain('Tashkent');
+      expect(body).not.toContain(`/case ${reference}`);
+      expect(body).not.toContain(`/assign ${reference}`);
+      expect(body.split('\n').filter((line) => line.trim() !== '')).toHaveLength(3);
+
+      expect(outcome.messages[0]?.keyboard?.[0]?.[0]?.callback_data).toBe(`CO:${reference}`);
+    });
+
+    it('says "for you", which it could not say when it went to everybody', async () => {
+      // The single most useful word in the message, and it is only sayable
+      // because exactly one person receives it now.
+      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
+
+      expect(outcome.messages[0]?.text).toContain('for you');
+    });
+
+    it('has no em dash in it', async () => {
+      // §7 of the design. The humanizer bans them outright, and they are most of
+      // what made these messages read like a machine explaining itself.
+      const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.VISA);
+
+      expect(outcome.messages[0]?.text).not.toContain('—');
     });
 
     it('says what every message is, so a failed send names the right thing', async () => {
@@ -302,6 +342,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
           reference,
           category: CASE_CATEGORY.TRAVEL,
           teacherChatId: TASHKENT_TEACHER,
+          owner: VISA_SUPPORT_TASHKENT,
         }),
       );
 
@@ -337,6 +378,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
           category: CASE_CATEGORY.CONTACT_SUPPORT,
           teacherChatId: TASHKENT_TEACHER,
           isNew: asked.isNew,
+          owner: asked.owner,
         });
       });
 
@@ -450,6 +492,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
           reference: created.reference,
           category,
           teacherChatId: ACCOM_TEACHER_CHAT,
+          owner: created.owner,
         });
       });
 
@@ -466,7 +509,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
       const body = notices.messages[0]?.text ?? '';
 
       expect(body).toContain('Reimbursement');
-      expect(body).toMatch(/form has not arrived/i);
+      expect(body).toMatch(/not sent yet/i);
     });
 
     it('says the form is in once the submission has been filed against the case', async () => {
@@ -485,18 +528,19 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
           reference: created.reference,
           category: CASE_CATEGORY.ACCOMMODATION,
           teacherChatId: ACCOM_TEACHER_CHAT,
+          owner: created.owner,
         });
       });
 
       const body = notices.messages[0]?.text ?? '';
-      expect(body).toMatch(/form has been submitted/i);
-      expect(body).not.toMatch(/has not arrived/i);
+      expect(body).toMatch(/Reimbursement, sent/i);
+      expect(body).not.toMatch(/not sent yet/i);
     });
 
     it('says nothing about paperwork on a case raised any other way', async () => {
       const { outcome } = await fileAndNotify(TASHKENT_TEACHER, CASE_CATEGORY.ACCOMMODATION);
       const body = outcome.messages[0]?.text ?? '';
-      expect(body).not.toMatch(/📄|form has not arrived|form has been submitted/);
+      expect(body).not.toMatch(/📄|not sent yet|, sent/);
     });
 
     /**
@@ -511,7 +555,7 @@ describe.skipIf(!TEST_DATABASE_URL)('new-case notification', () => {
 
       expect(notices.messages.length).toBeGreaterThan(0);
       expect(body).toContain('GONE_AWAY');
-      expect(body).toMatch(/form has not arrived/i);
+      expect(body).toMatch(/not sent yet/i);
     });
   });
 });
