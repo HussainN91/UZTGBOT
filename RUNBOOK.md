@@ -456,9 +456,10 @@ Any change to these settings is picked up within a minute.
 
 ## 2.5 The first System member, which is one line of SQL on purpose
 
-**There is no command for this, and there is not meant to be one.** Every staff
-command in the bot requires System rank to run, so the very first System row
-cannot possibly come from inside the bot itself.
+**There is no command for this, and there is not meant to be one.** Adding staff
+requires Program rank or above, and a rank can only be given by somebody who
+already has one, so the very first row cannot possibly come from inside the bot
+itself.
 
 Run this over the SSH tunnel, before anything else:
 
@@ -510,7 +511,7 @@ caught by a person instead.
 |---|---|---|
 | **The three retention periods** | The insert in §2.4, or the `/retention` command | Nothing is ever deleted. The privacy notice tells teachers their records are kept until the Ministry sets a period, which by then is perfectly true |
 | **The regions each staff member covers** | `/staff_add` at the time they are added, or **`/staff_region <chat id> <regions>`** at any point afterwards | This is the one that gives a wrong-looking answer instead of no answer. It is explained immediately below |
-| **The two System members** | §2.5 | Nobody can add staff, set a retention period, remove a teacher, or take an export |
+| **The two System members** | §2.5 | Nobody can set a retention period, pause the bot, remove a teacher on request, or settle a disputed account. Adding staff moved to Program rank on 5 August 2026, so that one alone would survive |
 | **The operations chat** | `.env`, before the first deployment | Every alarm described in this document goes nowhere at all |
 | **The support contact address** | `.env` | Teachers are shown a blank space where an address should be |
 | **Each staff member's Telegram handle** | The `/username` command, run by that person for themselves | Teachers asking who covers their region are shown a name and the support address, with nothing to tap through to. This is a reduced service and not a fault |

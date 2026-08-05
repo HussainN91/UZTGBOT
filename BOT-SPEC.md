@@ -612,7 +612,7 @@ was the only thing that ever set an owner.
 | `urgent.issue` — `/urgent_pending`, the confirm-urgent button | | ✅ | ✅ | ✅ | ✅ |
 | `teacher.region` — `/region` `/regions` | | | ✅ | ✅ | ✅ |
 | `teacher.revoke` — `/revoke` `/restore` | | | | ✅ | ✅ |
-| `staff.manage` — `/staff` `/staff_add` `/staff_role` **`/staff_queue`** `/staff_region` `/staff_remove`, and the staff menu buttons | | | | | ✅ |
+| `staff.manage` — `/staff` `/staff_add` `/staff_role` **`/staff_queue`** `/staff_region` `/staff_remove`, and the staff menu buttons | | | | ✅ | ✅ |
 | `maintenance` — `/maintenance` `/retention` | | | | | ✅ |
 | `teacher.forget` — `/forget` | | | | | ✅ |
 | `announce` — `/announce` `/announce_send` `/announce_cancel` `/announcements` | | | | ✅ | ✅ |
@@ -625,6 +625,21 @@ may publish their own Telegram handle and nobody may publish anybody else's, whi
 is a rule about *whose row* rather than about rank. It is therefore listed in
 `/help` directly, because a command with no capability has no row in the table
 above to be described from.
+
+**`staff.manage` floors at Program, lowered from System on 5 August 2026** at the
+head of project's instruction: a Program member hires, promotes, demotes and
+deactivates exactly as a System member does, through the commands and through the
+staff menu buttons alike.
+
+It is worth being plain about what that includes. `/staff_role` has never limited
+which rank a caller may hand out, so **a Program member can promote somebody —
+including themselves — to System**, and through that reach the four capabilities
+still floored there. That was accepted knowingly rather than overlooked: the rank
+ladder says who is trusted, and a "you may not grant above your own rank" rule
+would be a second authorization rule living outside the one table the gates read.
+
+The four that stay at System are the ones with no undo: settling a disputed
+identity, anonymising a teacher, pausing the bot, and setting retention.
 
 **`teacher.forget` floors at System, one rank above `teacher.revoke`.** Revoking
 is reversible — that is the whole argument for `/restore` — and this has no undo
@@ -1937,7 +1952,7 @@ busiest — which is when you most want to read them back.
 | Audit honesty | A command that changed nothing writes nothing. `/restore` on a teacher who was never revoked, `/maintenance on` when it is already on, and `/revoke` on somebody already revoked all say so and leave no row — an audit trail with entries for events that did not happen is worse than a short one |
 | Staff free text | Any message beginning with `/` is logged as its command word and first argument only, so internal case notes and replies are not copied into the interaction log (§5.2) |
 | Impersonation visibility | A second chat verifying an already-held identifier alerts the operations chat, every System member and the prior holder — detected, not blocked |
-| Self-service privilege escalation | None. A revoked teacher cannot sign in again to undo it (§5.1); the first System member is a hand-written database row (§6.3); and no command grants a rank above the caller's own reach, because managing staff at all requires the highest rank |
+| Self-service privilege escalation | A revoked teacher cannot sign in again to undo it (§5.1), and the first staff row is a hand-written database row (§6.3), so nobody reaches the ladder from outside it. **Movement up the ladder from inside it is not prevented**, and stopped being on 5 August 2026 when `staff.manage` moved to Program: a Program member can promote themselves to System. Two ranks now hold that, rather than one. It is a deliberate grant of trust to a named person, recorded in §6.1, and every use of it writes an audit row |
 | Permission-boundary bypass | The `staff` table is the access boundary, and it is inside the database rather than in a shared spreadsheet — so granting yourself staff access now requires server access, not edit access to a document. The spreadsheet is read-only to the bot and holds only the roster and the answer bank; nothing about permissions is reachable from it |
 | Bulk exfiltration | Deferred with the commands themselves (§16). When they arrive, `export` and `announce` are already permissions rather than a new model |
 
