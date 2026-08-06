@@ -750,14 +750,18 @@ async function handleFormComplaint(
   }
 
   /**
-   * An empty `CATEGORY` means `Contact Support` — the general queue, which is
-   * where a complaint with no area of its own belongs.
+   * A category this build does not recognise falls back to the general queue
+   * rather than refusing. `parseFormsTab` rejects an unknown category with its
+   * row number, so one should never reach the database; if a rollback ever
+   * leaves an older build reading a newer sheet, filing the teacher's words
+   * somewhere a person will read them beats losing them.
    *
-   * A value the build does not recognise falls back to the same place rather
-   * than refusing. `parseFormsTab` rejects an unknown category with its row
-   * number, so one should never reach the database; if a rollback ever leaves an
-   * older build reading a newer sheet, filing the teacher's words somewhere a
-   * person will read them beats losing them.
+   * A **null** category almost cannot arrive here — since 6 August 2026
+   * `chooseDocForm` only saves this state for a form that has one. The one way
+   * it still can is a sync that blanks `CATEGORY` between the tap and the
+   * teacher's message, and that is handled the same way rather than asserted,
+   * because a crash on the path that files a complaint is a worse answer than
+   * filing it under Contact Support.
    */
   const known = Object.values(CASE_CATEGORY) as string[];
   const category: CaseCategory =
@@ -1922,14 +1926,14 @@ async function submitDocsReply(db: Database, deps: RouterDeps): Promise<Reply> {
  * message before the teacher leaves Telegram, and matching the submission back
  * to a person depends entirely on their typing the address the roster holds.
  *
- * **A form with `PREPARE` set is a form area, and it asks for a message.** The
+ * **A form with a `CATEGORY` is a form area, and it asks for a message.** The
  * teacher is shown what to gather, then the link, then a request to say what they
  * need — and what they type opens a case. That is the whole of "a complaint and
  * its paperwork, together": before this, a teacher with a problem could submit
  * documents or describe the problem, and nothing joined the two.
  *
- * A form with no `PREPARE` behaves exactly as it always did, which is what keeps
- * plain document forms unchanged.
+ * A form with no `CATEGORY` behaves exactly as a plain document form always did:
+ * it hands over the link and expects nothing back.
  */
 async function chooseDocForm(
   db: Database,
@@ -1956,30 +1960,53 @@ async function chooseDocForm(
     };
   }
 
-  if (form.prepare !== null) {
+  /**
+   * Everything both kinds of form say, written once.
+   *
+   * `PREPARE` is in here rather than in the asking branch because it now means
+   * only "what to have ready", and a form that wants nothing back can still be
+   * worth arriving prepared for — Medical Leave is exactly that. The two were
+   * one cell until 6 August 2026, and until then a form could not both tell a
+   * teacher what to bring and stay out of their chat.
+   */
+  const preamble =
+    `${form.buttonText}\n\n` +
+    (form.prepare === null ? '' : `${form.prepare}\n\n`) +
+    `${form.url}\n\n` +
+    'The form asks for your email. Use the same address you signed in here ' +
+    'with, so we can tell the documents are yours.\n\n';
+
+  /**
+   * **A category is what makes a form a place to complain**, not the presence of
+   * preparation notes.
+   *
+   * Keying it off `PREPARE` conflated two unrelated things: what a teacher
+   * should bring, and whether they are asked to describe a problem. Medical
+   * Leave is where that broke — it should say what to have ready and should not
+   * invite a teacher to type their medical situation into a chat message, where
+   * it becomes case text rather than staying inside the form in Google.
+   *
+   * `category` is the right switch because a form with nowhere to file a
+   * complaint has no business asking for one, so "does it ask?" and "where does
+   * it go?" are the same question and cannot drift apart. A separate column
+   * beside `CATEGORY` would permit "ask for a message, file it nowhere", and a
+   * cell that can be set to a meaningless combination eventually is.
+   */
+  if (form.category !== null) {
     await saveState(db, chatId, {
       kind: 'AwaitingFormComplaint',
       formType: form.type,
       attempts: 0,
     });
     return {
-      text:
-        `${form.buttonText}\n\n` +
-        `${form.prepare}\n\n` +
-        `${form.url}\n\n` +
-        'The form asks for your email. Use the same address you signed in here ' +
-        'with, so we can tell the documents are yours.\n\n' +
-        'Now tell us what you need, and we will open a case for you.',
+      text: preamble + 'Now tell us what you need, and we will open a case for you.',
       keyboard: backToMenuKeyboard(),
     };
   }
 
   return {
     text:
-      `${form.buttonText}\n\n` +
-      `${form.url}\n\n` +
-      'The form asks for your email. Use the same address you signed in here ' +
-      'with, so we can tell the documents are yours.\n\n' +
+      preamble +
       'You do not need to send anything back to me. Once you submit the form, ' +
       'it reaches us on its own.',
     keyboard: backToMenuKeyboard(),

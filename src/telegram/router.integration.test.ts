@@ -961,12 +961,25 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
   describe('a complaint and its paperwork, together', () => {
     const REIMBURSE = encodeCallback(CALLBACK.DOC_TYPE, 'REIMBURSE');
 
-    /** A form area. `PREPARE` is what makes it one. */
-    const publishArea = async (prepare: string | null = 'Have your receipts ready as one PDF.'): Promise<void> => {
+    /**
+     * A form area. `CATEGORY` is what makes it one — a form with somewhere to
+     * file a complaint is a form that asks for one, and `PREPARE` is only ever
+     * what to have ready.
+     *
+     * Both cells are overridable and independently so, because since 6 August
+     * 2026 they answer two unrelated questions and all four of their
+     * combinations are reachable from a sheet MoPSE can edit.
+     */
+    const publishArea = async (
+      overrides: { readonly category?: string | null; readonly prepare?: string | null } = {},
+    ): Promise<void> => {
+      const category = overrides.category === undefined ? 'Travel and Arrival' : overrides.category;
+      const prepare =
+        overrides.prepare === undefined ? 'Have your receipts ready as one PDF.' : overrides.prepare;
       await db.execute(sql`
         INSERT INTO form_links (type, sheet_row, button_text, url, category, prepare, active)
         VALUES ('REIMBURSE', 1, 'Reimbursement', 'https://forms.gle/abc',
-                'Travel and Arrival', ${prepare}, true)
+                ${category}, ${prepare}, true)
       `);
     };
 
@@ -996,37 +1009,73 @@ describe.skipIf(!TEST_DATABASE_URL)('the router', () => {
     });
 
     /**
-     * An empty `CATEGORY` means Contact Support — the general queue, which is
-     * where Holiday Leave and Medical Leave are meant to land. It is the whole
-     * of decision 3: a button with a name of its own and no new category behind
-     * it.
+     * Medical Leave: notes but no prompt. Typing medical detail into a chat
+     * message stores it as case text, where the form keeps it in Google — so this
+     * form tells teachers what to bring and then gets out of the way.
      */
-    it('files under Contact Support when the area names no category', async () => {
+    it('shows the notes without asking for a message when there is no category', async () => {
       await verify();
       await db.execute(sql`
         INSERT INTO form_links (type, sheet_row, button_text, url, prepare, active)
-        VALUES ('HOLIDAY', 1, 'Holiday Leave', 'https://forms.gle/h',
-                'Have your dates ready.', true)
+        VALUES ('MEDICAL', 1, 'Medical Leave', 'https://forms.gle/m',
+                'Have your dates and any medical documents ready.', true)
       `);
 
-      await tap(encodeCallback(CALLBACK.DOC_TYPE, 'HOLIDAY'));
-      await text('my head teacher will not approve three days in October');
+      const shown = await tap(encodeCallback(CALLBACK.DOC_TYPE, 'MEDICAL'));
+      expect(firstText(shown)).toContain('Have your dates and any medical documents ready.');
+      expect(firstText(shown)).toContain('forms.gle');
+      expect(firstText(shown)).not.toContain('tell us what you need');
 
-      const rows = await db.execute<{ category: string; form_type: string }>(
-        sql`SELECT category, form_type FROM cases`,
-      );
-      expect(rows.rows[0]?.category).toBe('Contact Support');
-      expect(rows.rows[0]?.form_type).toBe('HOLIDAY');
+      /**
+       * Asserted against the stored state, not only the wording: nothing is
+       * waiting for a message, so nothing can swallow one.
+       */
+      expect(await loadState(db, CHAT)).toBeNull();
+
+      /**
+       * And the next thing they type is handled as it would have been if they
+       * had never opened the form — the FAQ takes the question and remembers it
+       * while asking which topic it belongs to. It does not become case text.
+       */
+      const after = await text('how long does a visa take');
+      expect(firstText(after)).not.toContain('has been opened');
+      expect(firstText(after)).toMatch(/which of these is it about/i);
+      expect((await db.execute(sql`SELECT reference FROM cases`)).rows).toHaveLength(0);
+      const state = await loadState(db, CHAT);
+      expect(state?.kind).toBe('AwaitingQuestionTopic');
     });
 
     /**
-     * A plain document form is untouched. It has no `PREPARE`, so it says what
-     * it always said and captures nothing the teacher types next — which is what
-     * keeps this feature from changing Submit Documents for everybody.
+     * And a category with no notes still asks. The two cells are independent now,
+     * so all four combinations have to behave, not just the two we happen to use.
+     */
+    it('asks for a message when there is a category but no notes', async () => {
+      await verify();
+      await db.execute(sql`
+        INSERT INTO form_links (type, sheet_row, button_text, url, category, active)
+        VALUES ('ACCOM', 1, 'Accommodation', 'https://forms.gle/a', 'Accommodation', true)
+      `);
+
+      const shown = await tap(encodeCallback(CALLBACK.DOC_TYPE, 'ACCOM'));
+      expect(firstText(shown)).toContain('tell us what you need');
+
+      await text('the boiler has not worked since I arrived');
+      const rows = await db.execute<{ category: string; form_type: string }>(
+        sql`SELECT category, form_type FROM cases`,
+      );
+      expect(rows.rows[0]?.category).toBe('Accommodation');
+      expect(rows.rows[0]?.form_type).toBe('ACCOM');
+    });
+
+    /**
+     * A plain document form is untouched. It has neither cell filled in, so it
+     * says what it always said and captures nothing the teacher types next —
+     * which is what keeps this feature from changing Submit Documents for
+     * everybody.
      */
     it('leaves a form with no paperwork message exactly as it was', async () => {
       await verify();
-      await publishArea(null);
+      await publishArea({ category: null, prepare: null });
 
       const shown = await tap(REIMBURSE);
       expect(firstText(shown)).toContain('You do not need to send anything back to me');
