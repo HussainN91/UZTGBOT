@@ -438,6 +438,43 @@ describe('the three columns that make a form an area', () => {
     expect(result.rejections[0]?.reason).toContain('Dentistry');
     expect(result.rejections[0]?.reason).toContain('Travel and Arrival');
   });
+
+  /**
+   * The fourth optional column, added 6 August 2026. `HEADER` and `row()` are
+   * deliberately left at eight columns and extended per-test, so every test
+   * above goes on proving that a sheet written before this column existed still
+   * parses without it.
+   */
+  it('reads the spreadsheet a form’s answers live in', () => {
+    const header = [...HEADER, 'RESPONSES_SHEET_ID'];
+    const result = parseFormsTab([header, [...row(), 'SHEET_ABC']]);
+    expect(result.rows[0]?.responsesSheetId).toBe('SHEET_ABC');
+  });
+
+  /**
+   * ⚠️ Blank must become null and not the empty string. `spreadsheetValuesUrl`
+   * chooses the configured spreadsheet with `??`, which treats "" as a real
+   * answer — so an empty cell surviving as "" would build a request against a
+   * spreadsheet with no id rather than falling back to the main one.
+   */
+  it('treats a blank spreadsheet id as “the main one”', () => {
+    const header = [...HEADER, 'RESPONSES_SHEET_ID'];
+    const result = parseFormsTab([header, [...row(), '']]);
+    expect(result.rows[0]?.responsesSheetId).toBeNull();
+  });
+
+  /** And a cell holding nothing but spaces is the same thing to a person. */
+  it('treats a whitespace-only spreadsheet id as “the main one”', () => {
+    const header = [...HEADER, 'RESPONSES_SHEET_ID'];
+    const result = parseFormsTab([header, [...row(), '   ']]);
+    expect(result.rows[0]?.responsesSheetId).toBeNull();
+  });
+
+  it('does not require the column to exist at all', () => {
+    const result = parseFormsTab([HEADER, row()]);
+    expect(result.rejections).toHaveLength(0);
+    expect(result.rows[0]?.responsesSheetId).toBeNull();
+  });
 });
 
 describe('finding the email column in a form responses tab', () => {

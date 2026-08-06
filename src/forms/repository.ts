@@ -25,6 +25,16 @@ export interface FormLink {
   readonly prepare: string | null;
   /** The exact heading of the teacher's own email column in the responses tab. */
   readonly emailColumn: string | null;
+  /**
+   * The spreadsheet this form's answers are in, or null for the configured one.
+   *
+   * Google makes a new spreadsheet for each form it links to Sheets, so a form
+   * keeping its answers somewhere else is the ordinary case rather than the
+   * exception. Null is the only way to say "the configured one" — the parser
+   * turns a blank cell into null precisely so that an empty string never reaches
+   * the reader, which would take it for an answer.
+   */
+  readonly responsesSheetId: string | null;
 }
 
 /**
@@ -56,6 +66,7 @@ export async function activeForms(db: Database): Promise<FormLink[]> {
       category: formLinks.category,
       prepare: formLinks.prepare,
       emailColumn: formLinks.emailColumn,
+      responsesSheetId: formLinks.responsesSheetId,
     })
     .from(formLinks)
     .where(eq(formLinks.active, true))
@@ -80,6 +91,7 @@ export async function activeFormByType(db: Database, type: string): Promise<Form
       category: formLinks.category,
       prepare: formLinks.prepare,
       emailColumn: formLinks.emailColumn,
+      responsesSheetId: formLinks.responsesSheetId,
     })
     .from(formLinks)
     .where(and(eq(formLinks.type, type), eq(formLinks.active, true)))
@@ -115,6 +127,7 @@ export async function formsWithResponses(db: Database): Promise<FormWithResponse
       category: formLinks.category,
       prepare: formLinks.prepare,
       emailColumn: formLinks.emailColumn,
+      responsesSheetId: formLinks.responsesSheetId,
       responsesTab: formLinks.responsesTab,
     })
     .from(formLinks)

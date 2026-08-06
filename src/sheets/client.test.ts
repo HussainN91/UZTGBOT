@@ -35,6 +35,34 @@ describe('which spreadsheet a tab is read from', () => {
     expect(url).not.toMatch(/values\/Form Responses/);
   });
 
+  /**
+   * ⚠️ The one that `??` gets wrong on its own.
+   *
+   * `override ?? configuredId` falls back only on null and undefined, so an
+   * empty string is an answer somebody meant and the request goes out against a
+   * spreadsheet with no id — a 404 for every form that has it, rather than the
+   * main spreadsheet that was intended.
+   *
+   * `parseFormsTab` already turns a blank cell into null, so nothing that comes
+   * through the sheet arrives here empty. This is the second line, and it is
+   * here rather than only in the parser because this function is what would be
+   * wrong: anything reaching it by another route — a row edited straight into
+   * the database, a caller written later — gets the same answer.
+   */
+  it('falls back to the configured spreadsheet when the id is blank', () => {
+    for (const blank of ['', '   ']) {
+      const url = spreadsheetValuesUrl(MAIN, blank, 'Form Responses 1');
+      expect(url).toContain('/spreadsheets/MAIN_SHEET_ID/');
+    }
+  });
+
+  /** And surrounding space on a real id is trimmed rather than encoded into it. */
+  it('trims a spreadsheet id that arrived with space around it', () => {
+    const url = spreadsheetValuesUrl(MAIN, '  FORM_SHEET_ID  ', 'FAQ');
+    expect(url).toContain('/spreadsheets/FORM_SHEET_ID/');
+    expect(url).not.toContain('%20');
+  });
+
   it('keeps the render options that stop a locale rewriting values', () => {
     const url = spreadsheetValuesUrl(MAIN, null, 'FAQ');
     expect(url).toContain('valueRenderOption=UNFORMATTED_VALUE');

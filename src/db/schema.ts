@@ -321,6 +321,17 @@ export const formLinks = pgTable(
     prepare: text('prepare'),
     /** Which column of the response tab holds the teacher's own address. */
     emailColumn: text('email_column'),
+    /**
+     * The spreadsheet this form's answers are in, or null for the configured
+     * one. Google creates a new spreadsheet per form by default, so this is the
+     * ordinary case rather than the exception.
+     *
+     * **Null rather than an empty string when it is not set**, and the parser is
+     * what guarantees that. The reader falls back to the configured spreadsheet
+     * with `??`, which would take `''` for an answer and go looking for a
+     * spreadsheet whose id is nothing.
+     */
+    responsesSheetId: text('responses_sheet_id'),
     active: boolean('active').notNull().default(true),
     /** When the sync last saw this row in the sheet. */
     syncedAt: tsz('synced_at').notNull().defaultNow(),

@@ -106,6 +106,21 @@ export interface FormRow {
   readonly prepare: string | null;
   /** The exact heading of the teacher's own email column. See `findEmailColumn`. */
   readonly emailColumn: string | null;
+  /**
+   * The spreadsheet this form's answers are in, or null for the configured one.
+   *
+   * It exists because Google's default when linking a form to Sheets is a **new**
+   * spreadsheet, so "put the responses in the same file as the FAQ" is a rule
+   * that fights the tool and loses — it already lost once, as a response tab that
+   * alarmed every ten minutes for weeks. The bot reads where the answers are.
+   *
+   * **Null and never the empty string**, which is the reason the normalisation
+   * below is not decoration. `spreadsheetValuesUrl` picks the configured
+   * spreadsheet with `??`, and `??` treats `''` as an answer somebody meant — so
+   * a blank cell surviving as `''` would build a request against a spreadsheet
+   * with no id at all rather than falling back to the main one.
+   */
+  readonly responsesSheetId: string | null;
 }
 
 const FAQ_COLUMNS = [
@@ -548,6 +563,7 @@ export function parseFormsTab(raw: readonly string[][]): ParseResult<FormRow> {
     const category = cell(raw_row, headers.get('CATEGORY'));
     const prepare = cell(raw_row, headers.get('PREPARE'));
     const emailColumn = cell(raw_row, headers.get('EMAIL_COLUMN'));
+    const responsesSheetId = cell(raw_row, headers.get('RESPONSES_SHEET_ID'));
 
     /**
      * A category nobody has is rejected with its row number rather than filed
@@ -581,6 +597,7 @@ export function parseFormsTab(raw: readonly string[][]): ParseResult<FormRow> {
       category: category === '' ? null : category,
       prepare: prepare === '' ? null : prepare,
       emailColumn: emailColumn === '' ? null : emailColumn,
+      responsesSheetId: responsesSheetId === '' ? null : responsesSheetId,
     });
   }
 

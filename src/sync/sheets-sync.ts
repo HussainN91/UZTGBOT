@@ -226,6 +226,7 @@ export async function syncForms(
                 category: r.category,
                 prepare: r.prepare,
                 emailColumn: r.emailColumn,
+                responsesSheetId: r.responsesSheetId,
                 active: r.active,
                 syncedAt: runStart,
               })),
@@ -240,6 +241,15 @@ export async function syncForms(
                 category: sql`excluded.category`,
                 prepare: sql`excluded.prepare`,
                 emailColumn: sql`excluded.email_column`,
+                /**
+                 * Every column above appears twice on purpose — once in
+                 * `values`, once here. A column added to only the first is set
+                 * when the row is first inserted and never changed again, so
+                 * MoPSE edits the cell, the sheet and the database disagree
+                 * from then on, and nothing reports it. There is an integration
+                 * test that syncs twice for exactly this reason.
+                 */
+                responsesSheetId: sql`excluded.responses_sheet_id`,
                 active: sql`excluded.active`,
                 syncedAt: sql`excluded.synced_at`,
               },

@@ -58,6 +58,38 @@ function readerReturning(tabs: Record<string, string[][]>): SheetReader {
   };
 }
 
+/**
+ * A reader that answers on `(spreadsheetId, tab)` rather than tab alone, so a
+ * form pointed at the wrong spreadsheet is a miss rather than a silent hit.
+ *
+ * `readerReturning` above cannot show any of this: it ignores the second
+ * argument entirely, so a form reading from the wrong file would still find its
+ * tab and the test would pass while the bot read somebody else's spreadsheet.
+ * `MAIN` stands for the configured spreadsheet — the one a form that names none
+ * of its own falls back to.
+ *
+ * It also keeps every `spreadsheetId` it was handed. A test can then assert what
+ * the reader was actually asked for rather than only what came back, which is
+ * the difference between "the fallback worked" and "the fallback worked for the
+ * reason we think it did" — an empty string reaching here would miss its tab and
+ * fail the test, but it would fail it looking like a missing tab.
+ */
+function readerForSheets(
+  sheets: Record<string, Record<string, string[][]>>,
+): SheetReader & { readonly asked: (string | null | undefined)[] } {
+  const asked: (string | null | undefined)[] = [];
+  return {
+    asked,
+    readTab: async (tab: string, spreadsheetId?: string | null) => {
+      asked.push(spreadsheetId);
+      const key = spreadsheetId ?? 'MAIN';
+      const found = sheets[key]?.[tab];
+      if (found === undefined) throw new Error(`no tab "${tab}" in spreadsheet ${key}`);
+      return found;
+    },
+  };
+}
+
 function collectingAlerter(): Alerter & { alerts: Alert[] } {
   const alerts: Alert[] = [];
   return { alerts, send: async (alert: Alert) => void alerts.push(alert) };
@@ -177,6 +209,49 @@ describe.skipIf(!TEST_DATABASE_URL)('documents against a real database', () => {
       expect(rows[0]?.category).toBe('Accommodation');
       expect(rows[0]?.prepare).toBe('Receipts and your lease.');
       expect(rows[0]?.emailColumn).toBe('Email address');
+    });
+
+    /**
+     * ⚠️ Both halves of the upsert, in one test, because only one of them can be
+     * omitted quietly. A `values(...)` mapping with no matching entry in
+     * `onConflictDoUpdate` sets the column on the very first sync and never
+     * again — so MoPSE moves a form to a different spreadsheet, the sheet says
+     * one thing, the bot goes on reading the other, and nothing anywhere reports
+     * a problem. The second `syncForms` call is what catches it.
+     */
+    it('carries the spreadsheet id in, and changes it when the sheet changes', async () => {
+      const header = ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'RESPONSES_SHEET_ID'];
+      const before = ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', 'FIRST_SHEET'];
+      const after = ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', 'SECOND_SHEET'];
+
+      await syncForms(db, readerReturning({ FORMS: [header, before] }));
+      expect((await db.select().from(schema.formLinks))[0]?.responsesSheetId).toBe('FIRST_SHEET');
+
+      await syncForms(db, readerReturning({ FORMS: [header, after] }));
+      const rows = await db.select().from(schema.formLinks);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.responsesSheetId).toBe('SECOND_SHEET');
+    });
+
+    /**
+     * ⚠️ The empty-string trap, held at the database rather than only in the
+     * parser. The reader falls back to the configured spreadsheet with `??`,
+     * which takes `''` for a real answer — so a cell somebody cleared out must
+     * arrive here as NULL, not as nothing-shaped text. This also proves the
+     * column can be emptied again after being set, which is the `excluded.` half
+     * of the upsert doing its work.
+     */
+    it('stores a blank spreadsheet id as nothing at all', async () => {
+      const header = ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'RESPONSES_SHEET_ID'];
+      await syncForms(db, readerReturning({
+        FORMS: [header, ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', 'THEIR_SHEET']],
+      }));
+      await syncForms(db, readerReturning({
+        FORMS: [header, ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', '   ']],
+      }));
+
+      const rows = await db.select().from(schema.formLinks);
+      expect(rows[0]?.responsesSheetId).toBeNull();
     });
 
     it('records the run so an operator can see what happened', async () => {
@@ -494,6 +569,152 @@ describe.skipIf(!TEST_DATABASE_URL)('documents against a real database', () => {
       );
       expect(report.filed).toBe(0);
       expect(report.formsRead).toBe(0);
+    });
+
+    it('reads a form’s answers from the spreadsheet its row names', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'RESPONSES_SHEET_ID', 'EMAIL_COLUMN'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', 'THEIR_SHEET', 'D'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+
+      const report = await syncFormResponses(
+        db,
+        readerForSheets({
+          THEIR_SHEET: {
+            'Form Responses 1': [
+              ['Timestamp', 'Email Address', 'Full Name', 'Email Address'],
+              ['t', 'personal@gmail.com', 'A Teacher', 'a@example.com'],
+            ],
+          },
+        }),
+      );
+
+      expect(report.filed).toBe(1);
+      const cases = await db.select().from(schema.cases);
+      expect(cases[0]?.teacherChatId).toBe('950001');
+    });
+
+    /**
+     * The other half: a form with no spreadsheet id still reads from the
+     * configured one, so nothing that works today changes meaning.
+     */
+    it('still reads from the main spreadsheet when no id is given', async () => {
+      await syncForms(db, readerReturning({ FORMS: [FORMS_HEADER, formRow('PASSPORT')] }));
+      await signedInTeacher('950001', 'a@example.com');
+
+      const report = await syncFormResponses(
+        db,
+        readerForSheets({
+          MAIN: { PASSPORT_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] },
+        }),
+      );
+      expect(report.filed).toBe(1);
+    });
+
+    /**
+     * ⚠️ And a form whose cell was filled in and then cleared reads from the
+     * main spreadsheet too — the empty-string trap carried the whole way from a
+     * blank cell to the request that gets built. If `''` survived anywhere along
+     * that path the reader would be handed `''`, `??` would keep it, and this
+     * would look for a spreadsheet called nothing rather than falling back.
+     */
+    it('reads from the main spreadsheet when the id cell is blank', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'RESPONSES_SHEET_ID'],
+            ['PASSPORT', 'Passport', FORM_URL, 'PASSPORT_RESPONSES', 'TRUE', '   '],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+
+      const reader = readerForSheets({
+        MAIN: { PASSPORT_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] },
+      });
+      const report = await syncFormResponses(db, reader);
+
+      expect(report.filed).toBe(1);
+      /**
+       * Named rather than inferred from the filing above: the reader must have
+       * been handed nothing at all, not the empty string. Both would fail this
+       * test, but only this line says which one went wrong.
+       */
+      expect(reader.asked).toEqual([null]);
+    });
+
+    /**
+     * D41 through the new path: one form pointed at a spreadsheet the bot cannot
+     * read must not hold back everybody else's documents.
+     */
+    it('keeps filing the other forms when one spreadsheet cannot be read', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'RESPONSES_SHEET_ID'],
+            ['PASSPORT', 'Passport', 'https://forms.gle/p', 'PASSPORT_RESPONSES', 'TRUE', ''],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', 'WRONG_ID'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+      const alerter = collectingAlerter();
+
+      const report = await syncFormResponses(
+        db,
+        readerForSheets({
+          MAIN: { PASSPORT_RESPONSES: [RESPONSES_HEADER, submission('a@example.com')] },
+        }),
+        { alerter },
+      );
+
+      expect(report.filed).toBe(1);
+      expect(alerter.alerts.some((a) => a.title.includes('could not be read'))).toBe(true);
+    });
+
+    /**
+     * ⚠️ The property the whole marker table exists for, carried through the new
+     * read path. `form_submissions` is keyed on `(form_type, sheet_row)` and says
+     * nothing about which spreadsheet the row came from — so reading the same
+     * submission from another file must still file exactly one case, or the
+     * change made above quietly turns one submission into a case every ten
+     * minutes.
+     */
+    it('files exactly one case however many times another spreadsheet is read', async () => {
+      await syncForms(
+        db,
+        readerReturning({
+          FORMS: [
+            ['TYPE', 'BUTTON_TEXT', 'URL', 'RESPONSES_TAB', 'ACTIVE', 'RESPONSES_SHEET_ID', 'EMAIL_COLUMN'],
+            ['ACCOM', 'Accommodation', 'https://forms.gle/a', 'Form Responses 1', 'TRUE', 'THEIR_SHEET', 'D'],
+          ],
+        }),
+      );
+      await signedInTeacher('950001', 'a@example.com');
+      const reader = readerForSheets({
+        THEIR_SHEET: {
+          'Form Responses 1': [
+            ['Timestamp', 'Email Address', 'Full Name', 'Email Address'],
+            ['t', 'personal@gmail.com', 'A Teacher', 'a@example.com'],
+          ],
+        },
+      });
+
+      const first = await syncFormResponses(db, reader);
+      const second = await syncFormResponses(db, reader);
+
+      expect(first.filed).toBe(1);
+      expect(second.filed).toBe(0);
+      expect(second.alreadySeen).toBe(1);
+      expect(await db.select().from(schema.cases)).toHaveLength(1);
     });
 
     /**

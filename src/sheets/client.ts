@@ -107,18 +107,43 @@ function cellToText(cell: unknown): string {
 }
 
 /**
+ * "Does this actually name a spreadsheet?", answered once.
+ *
+ * `??` alone is not that question. It falls back only on null and undefined, so
+ * an empty string is an answer somebody meant — and a form whose
+ * `RESPONSES_SHEET_ID` cell was filled in and then cleared would send every
+ * request to a spreadsheet with no id rather than to the configured one. That is
+ * a 404 for that form for ever, reported as "could not be read", with the sheet
+ * looking blank and correct to whoever goes to check it.
+ *
+ * `parseFormsTab` already turns a blank cell into null, so nothing arriving
+ * through the sheet is empty by the time it reaches here. This is the second
+ * line, and it lives here rather than only in the parser because this is the
+ * function that would be wrong: a row edited straight into the database, or a
+ * caller written a year from now, gets the same answer without having to know
+ * the rule. Both callers below go through it, so there is one expression of it
+ * rather than two that can drift.
+ */
+function namedSpreadsheet(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
  * The values URL for one tab, of one spreadsheet.
  *
  * Exported so it can be tested without credentials or a network. `override` is
- * the spreadsheet a form's own row names; null means the configured one, which
- * is what every caller but the response sync passes.
+ * the spreadsheet a form's own row names; null — or, see above, anything blank —
+ * means the configured one, which is what every caller but the response sync
+ * passes.
  */
 export function spreadsheetValuesUrl(
   configuredId: string,
   override: string | null,
   tab: string,
 ): string {
-  const sheetId = override ?? configuredId;
+  const sheetId = namedSpreadsheet(override) ?? configuredId;
   return (
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}` +
     `/values/${encodeURIComponent(tab)}` +

@@ -118,7 +118,14 @@ export async function syncFormResponses(
      * alternative is one typo silently holding back everybody's documents.
      */
     try {
-      const raw = await reader.readTab(form.responsesTab);
+      /**
+       * The spreadsheet as well as the tab, since 6 August 2026. Every one of
+       * MoPSE's live forms keeps its answers in a file Google made for it, so
+       * "the tab called X" was never enough to say where the answers are — and
+       * null here still means the configured spreadsheet, which is what every
+       * form written before this column existed says.
+       */
+      const raw = await reader.readTab(form.responsesTab, form.responsesSheetId);
       const parsed = parseResponsesTab(form.responsesTab, raw, form.emailColumn);
       rowsSeen += Math.max(raw.length - 1, 0);
       for (const r of parsed.rejections) {
