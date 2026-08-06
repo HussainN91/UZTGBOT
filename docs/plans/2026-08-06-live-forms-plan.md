@@ -21,6 +21,36 @@ Vitest against a real database.
 
 ---
 
+## ⚠️ Corrections made on 6 August 2026, before execution
+
+Three things in the plan below were checked against the code and against a later instruction from the
+head of project, and are wrong as written. **These corrections win wherever they disagree with the
+task text.**
+
+1. **The migration is `0015_form_responses_sheet`, not `0014`.** ~~`drizzle/0014_form_responses_sheet.sql`~~
+   `drizzle/0015_form_responses_sheet.sql`. `0014_pre_urgent_status` already exists and is applied on
+   the live server; reusing the number would either be skipped as already-run or collide in the
+   journal. Every mention of `0014` in task 3 and in the file-structure table means `0015`.
+
+2. **Two forms go live, not three.** The head of project's instruction on 6 August: *"accomodation,
+   and travel and visa reimbursements these are what we need atm"*. ~~Medical Leave~~ is deferred.
+   Task 7 step 2 writes **two** rows, `ACCOM` and `REIMBURSE`. The Medical Leave row, its spreadsheet
+   id and its `PREPARE` draft stay in this document for when it is wanted, and are not written to the
+   sheet now.
+
+3. **Task 3's forced sync deactivates three of three, not two of three.** Task 7 step 3's arithmetic
+   assumed `MEDICAL` was reused and would upsert. It is not being written any more, so all three
+   existing rows (`PASSPORT`, `DIPLOMA`, `MEDICAL`) deactivate at once — a 100% removal. The
+   `--force` override is still the answer and is still recorded on the sync run; only the number in
+   the explanation changes.
+
+**Task 4 is still built.** Its switch — a category, not preparation notes, is what makes a form ask
+the teacher to write — is the right rule whether or not a live form uses the quiet path today. With
+Medical Leave deferred, no production row exercises the no-category branch, so its tests are the only
+thing holding it. Say so rather than assuming the sheet will show it.
+
+---
+
 ## Before you start
 
 Read `CLAUDE.md` in full. Four rules govern every task here:
@@ -89,7 +119,7 @@ have two columns headed exactly `Email Address`, so no heading can pick between 
 - Modify: `src/sheets/parse.ts` (`findEmailColumn`, `EmailColumnError`)
 - Test: `src/sheets/parse.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `src/sheets/parse.test.ts`, inside the existing `describe('finding the teacher’s email
 column', …)` block:
@@ -154,7 +184,7 @@ column', …)` block:
   });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/sheets/parse.test.ts -t "column letter"
@@ -163,7 +193,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 Expected: FAIL — `findEmailColumn('TAB', DUPLICATE, 'D')` throws `EmailColumnError`, because `D` is
 matched as a heading and no heading reads `D`.
 
-- [ ] **Step 3: Add the letter resolution**
+- [x] **Step 3: Add the letter resolution**
 
 In `src/sheets/parse.ts`, add this above `findEmailColumn`:
 
@@ -222,7 +252,7 @@ Then replace the `named` branch inside `findEmailColumn` with:
   }
 ```
 
-- [ ] **Step 4: Extend the error message**
+- [x] **Step 4: Extend the error message**
 
 Replace `EmailColumnError`'s constructor signature and its `wanted` branch:
 
@@ -267,7 +297,7 @@ export class EmailColumnError extends Error {
 **The two messages that already existed are unchanged.** Tests assert their wording — see
 `parse.test.ts` for `Reword`, `worse than not filing them` and `RESPONSES_TAB`.
 
-- [ ] **Step 5: Run the whole file and watch it pass**
+- [x] **Step 5: Run the whole file and watch it pass**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/sheets/parse.test.ts
@@ -275,7 +305,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 
 Expected: 0 failed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/sheets/parse.ts src/sheets/parse.test.ts && git commit -m "feat: EMAIL_COLUMN can name a column by its letter"
@@ -289,7 +319,7 @@ git add src/sheets/parse.ts src/sheets/parse.test.ts && git commit -m "feat: EMA
 - Modify: `src/sheets/client.ts` (`SheetReader`, `createSheetReader`)
 - Test: `src/sheets/client.test.ts` — **create if absent**
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Check whether `src/sheets/client.test.ts` exists. If it does, add to it; if not, create it with this
 whole content. `createSheetReader` calls `fetch` and mints a JWT, so the test asserts the URL that is
@@ -341,7 +371,7 @@ describe('which spreadsheet a tab is read from', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/sheets/client.test.ts
@@ -349,7 +379,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 
 Expected: FAIL — `spreadsheetValuesUrl` does not exist.
 
-- [ ] **Step 3: Extract the URL builder and widen the interface**
+- [x] **Step 3: Extract the URL builder and widen the interface**
 
 In `src/sheets/client.ts`, add above `createSheetReader`:
 
@@ -424,9 +454,9 @@ the likeliest thing to be wrong:
         );
 ```
 
-- [ ] **Step 4: Run and watch it pass.** Whole file, 0 failed.
+- [x] **Step 4: Run and watch it pass.** Whole file, 0 failed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/sheets/client.ts src/sheets/client.test.ts && git commit -m "feat: a tab can be read from a spreadsheet other than the configured one"
@@ -442,7 +472,7 @@ git add src/sheets/client.ts src/sheets/client.test.ts && git commit -m "feat: a
 - Create: `drizzle/0014_form_responses_sheet.sql` via `drizzle-kit generate`
 - Test: `src/sheets/parse.test.ts`, `src/sync/forms.integration.test.ts`
 
-- [ ] **Step 1: Write the failing parse test**
+- [x] **Step 1: Write the failing parse test**
 
 Add to the `describe('the three columns that make a form an area', …)` block in
 `src/sheets/parse.test.ts`. That block already has an eight-column `HEADER` and a `row()` helper
@@ -469,9 +499,9 @@ existing tests in that block keep proving that the column is genuinely optional.
   });
 ```
 
-- [ ] **Step 2: Run and watch it fail.** Expected: `responsesSheetId` does not exist on `FormRow`.
+- [x] **Step 2: Run and watch it fail.** Expected: `responsesSheetId` does not exist on `FormRow`.
 
-- [ ] **Step 3: Add it to `FormRow` and the parser**
+- [x] **Step 3: Add it to `FormRow` and the parser**
 
 In `src/sheets/parse.ts`, add to `FormRow` after `emailColumn`:
 
@@ -499,9 +529,9 @@ and in the pushed row, beside the others:
       responsesSheetId: responsesSheetId === '' ? null : responsesSheetId,
 ```
 
-- [ ] **Step 4: Run and watch the parse tests pass.**
+- [x] **Step 4: Run and watch the parse tests pass.**
 
-- [ ] **Step 5: Add the database column**
+- [x] **Step 5: Add the database column**
 
 In `src/db/schema.ts`, in `formLinks`, after `emailColumn`:
 
@@ -523,7 +553,7 @@ else — drizzle has emitted a destructive `DROP TYPE` in this project once. Ren
 `drizzle/0014_form_responses_sheet.sql` and change the `tag` in `drizzle/meta/_journal.json` to
 `0014_form_responses_sheet`.
 
-- [ ] **Step 6: Carry it through the repository and the sync**
+- [x] **Step 6: Carry it through the repository and the sync**
 
 In `src/forms/repository.ts`, add to the `FormLink` interface:
 
@@ -553,7 +583,7 @@ In `src/sync/form-responses.ts`, pass it to the reader:
       const raw = await reader.readTab(form.responsesTab, form.responsesSheetId);
 ```
 
-- [ ] **Step 7: Write the failing integration test**
+- [x] **Step 7: Write the failing integration test**
 
 Add to `src/sync/forms.integration.test.ts`, inside `describe('reading submissions back', …)`. The
 `readerReturning` helper in that file takes tab names only, so add this helper beside it at the top
@@ -693,7 +723,7 @@ Then the tests:
     });
 ```
 
-- [ ] **Step 8: Run and watch them pass**
+- [x] **Step 8: Run and watch them pass**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/sync/ src/forms/ src/sheets/
@@ -701,7 +731,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 
 Expected: 0 failed.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/ drizzle/ && git commit -m "feat: a form's answers can live in their own spreadsheet"
@@ -718,7 +748,7 @@ to bring and stay out of their chat.
 - Modify: `src/telegram/router.ts` (`chooseDocForm`, ~line 1795)
 - Test: `src/telegram/router.integration.test.ts`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src/telegram/router.integration.test.ts`, inside `describe('a complaint and its paperwork,
 together', …)`, add:
@@ -776,7 +806,7 @@ together', …)`, add:
 this task reverses.** Delete it, and say so in your report — an empty `CATEGORY` no longer means
 `Contact Support`, it means "do not ask". The design's §3 carries the reasoning.
 
-- [ ] **Step 2: Run and watch them fail**
+- [x] **Step 2: Run and watch them fail**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run src/telegram/router.integration.test.ts -t "paperwork"
@@ -784,7 +814,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 
 Expected: FAIL — the Medical form has `prepare` set, so it asks for a message.
 
-- [ ] **Step 3: Key the prompt off `category`**
+- [x] **Step 3: Key the prompt off `category`**
 
 In `src/telegram/router.ts`, in `chooseDocForm`, change the branch condition and its comment:
 
@@ -837,7 +867,7 @@ And in the final `return` — the no-category path — show the notes when there
   };
 ```
 
-- [ ] **Step 4: Simplify `handleFormComplaint`**
+- [x] **Step 4: Simplify `handleFormComplaint`**
 
 The fallback to `Contact Support` for an unknown category stays — a rollback could leave an older
 build reading a newer sheet — but the "blank means Contact Support" case can no longer occur, because
@@ -865,9 +895,9 @@ a blank category means the state was never saved. Replace the category resolutio
 
 That is the code already there — confirm it, and leave it alone if so.
 
-- [ ] **Step 5: Run and watch them pass.** Whole file, 0 failed.
+- [x] **Step 5: Run and watch them pass.** Whole file, 0 failed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/telegram/router.ts src/telegram/router.integration.test.ts && git commit -m "feat: a form's category decides whether it asks the teacher to write"
@@ -879,28 +909,28 @@ git add src/telegram/router.ts src/telegram/router.integration.test.ts && git co
 
 **Files:** Modify `RUNBOOK.md` §4.18 and §4a
 
-- [ ] **Step 1: Update the FORMS column table**
+- [x] **Step 1: Update the FORMS column table**
 
 Add `RESPONSES_SHEET_ID` to the table in step 4, described as: which spreadsheet the answers are in,
 blank meaning the main one, and that Google creates a new spreadsheet per form **by default** so this
 is usually needed. Say how to find it: it is the long string in the responses spreadsheet's web
 address, between `/d/` and `/edit`.
 
-- [ ] **Step 2: Update the `EMAIL_COLUMN` guidance**
+- [x] **Step 2: Update the `EMAIL_COLUMN` guidance**
 
 Say it takes either the exact heading **or** a column letter such as `D`, that a heading wins when
 both could match, and **why the letter exists**: Google's "Collect email addresses" adds a column
 headed `Email Address` and a form that also asks the question produces a second one with the same
 name, which no heading can tell apart. Say plainly that the teacher's own answer is the later column.
 
-- [ ] **Step 3: Rewrite §4a's opening**
+- [x] **Step 3: Rewrite §4a's opening**
 
 It currently says filling in `PREPARE` is what makes a form an area. Replace with: **`CATEGORY` is
 what makes a form a place to complain.** Fill it in and the teacher is asked to describe their
 problem and a case opens; leave it blank and the form is just a link. `PREPARE` is what to gather and
 is shown either way. Remove the sentence saying a blank `CATEGORY` means `Contact Support`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add RUNBOOK.md && git commit -m "docs: the new spreadsheet column, column letters, and what makes a form ask"
@@ -912,13 +942,13 @@ git add RUNBOOK.md && git commit -m "docs: the new spreadsheet column, column le
 
 Nothing before this may claim to be done.
 
-- [ ] **Step 1: Regenerate the graph**
+- [x] **Step 1: Regenerate the graph**
 
 ```bash
 npm run deps
 ```
 
-- [ ] **Step 2: Check for strays**
+- [x] **Step 2: Check for strays**
 
 ```
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*vitest*' }
@@ -926,7 +956,7 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.Comm
 
 Expected: nothing.
 
-- [ ] **Step 3: The suite**
+- [x] **Step 3: The suite**
 
 ```
 $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx vitest run
@@ -935,7 +965,7 @@ $env:TEST_DATABASE_URL='postgres://mopse:mopse@localhost:5432/mopse_test'; npx v
 Expected: **0 failed and 0 skipped.** Hundreds of skips means `TEST_DATABASE_URL` was not set and the
 run proved nothing.
 
-- [ ] **Step 4: The other four**
+- [x] **Step 4: The other four**
 
 ```bash
 npm run typecheck
@@ -950,7 +980,7 @@ npm run lint
 npm run deps:check
 ```
 
-- [ ] **Step 5: Commit the graph if it changed, and report every number plainly.**
+- [x] **Step 5: Commit the graph if it changed, and report every number plainly.**
 
 ```bash
 git add docs/dependency-tree.md && git commit -m "docs: regenerate the dependency tree"
@@ -962,15 +992,31 @@ git add docs/dependency-tree.md && git commit -m "docs: regenerate the dependenc
 
 **Do not start this until task 6 is green.**
 
-- [ ] **Step 1: Deploy in `RUNBOOK.md` §2.1's order**
+> **⏳ Step 1 is done. Steps 2 to 5 are outstanding, and steps 2 and 3 are in that order for a
+> reason.** The deployment went out on 6 August and the live server is at `e6b11c7`. **Nothing has
+> reached a teacher yet**, because the FORMS tab is still empty and that is the head of project's own
+> action. Until the two rows are written, the ten-minutely FORMS sync keeps refusing itself — *"would
+> deactivate 3 of 3 active rows (100%)"* — which harms nothing and stops of its own accord the moment
+> they exist.
+
+- [x] **Step 1: Deploy in `RUNBOOK.md` §2.1's order** — **done 6 August 2026**
 
 Take a `pg_dump` into `~/pre-deploy-backups/` first — this carries a migration. Then pull, build,
 stop web and worker, migrate, start worker, start web. The app is at **`/home/ubuntu/UZTGBOT`**.
 
-Confirm afterwards: 15 migrations applied, four containers healthy, `/healthz` 200, and the data
-counts unchanged from before.
+Confirm afterwards: ~~15 migrations applied~~ **migrations 15 → 16 applied**, four containers
+healthy, `/healthz` 200, and the data counts unchanged from before.
 
-- [ ] **Step 2: Write the three rows into the FORMS tab**
+**What was confirmed:** backup `~/pre-deploy-backups/pre-live-forms-20260806.sql`, 771,553 bytes and
+verified complete; `form_links.responses_sheet_id` present and null on all three existing rows; four
+containers healthy; `/healthz` 200 checked four ways; the webhook at 0 pending with a `last_error`
+from the day before; every data count unchanged — 8 roster, 4 teachers, 9 cases, 4 staff, 3 forms,
+1 submission. `findEmailColumn` was then run **inside both containers** against MoPSE's real
+duplicate-heading header and returned column 3 for `'D'`, which proves the behaviour rather than
+proving a file was copied.
+
+- [ ] **⏳ OUTSTANDING — Step 2: Write the ~~three~~ two rows into the FORMS tab** *(the head of
+  project's own action; `MEDICAL` is deferred and is not written)*
 
 The head of project's FORMS tab is empty. The columns, in order:
 
@@ -1020,12 +1066,15 @@ Before you start, have these ready:
 • Your lesson compensation schedule, if your school requires one
 ```
 
-- [ ] **Step 3: One forced sync**
+- [ ] **⏳ OUTSTANDING — Step 3: One forced sync. Do not run this until step 2 is done.**
+
+**Running it against the empty tab would deactivate all three current rows and leave nothing in their
+place**, which takes Submit Documents away from teachers altogether.
 
 The three test rows (`PASSPORT`, `DIPLOMA`, `MEDICAL`) are still active in the database, and removing
-them is a 100% deactivation, which the damage limit refuses. `MEDICAL` is reused above and upserts
-rather than deactivating, so the removal is 2 of 3 — still over the 20% limit. So it needs the
-override once:
+them is a 100% deactivation, which the damage limit refuses. ~~`MEDICAL` is reused above and upserts
+rather than deactivating, so the removal is 2 of 3 — still over the 20% limit.~~ **`MEDICAL` is not
+being written any more, so it is 3 of 3 — a 100% deactivation.** So it needs the override once:
 
 ```bash
 docker compose run --rm --no-deps web node dist/scripts/sync-sheets.js --forms --force
@@ -1033,7 +1082,7 @@ docker compose run --rm --no-deps web node dist/scripts/sync-sheets.js --forms -
 
 The override is recorded on the sync run, which is the point of it.
 
-- [ ] **Step 4: Prove it end to end**
+- [ ] **⏳ OUTSTANDING — Step 4: Prove it end to end**
 
 Submit the Accommodation form yourself using a roster email that has signed in. Within ten minutes a
 case should exist under `Accommodation` with a note naming the form. Check with:
@@ -1042,7 +1091,8 @@ case should exist under `Accommodation` with a note naming the form. Check with:
 docker compose exec -T postgres psql -U mopse -d mopse -c "SELECT reference, category, form_type, awaiting_form FROM cases ORDER BY created_at DESC LIMIT 5;"
 ```
 
-- [ ] **Step 5: Take the unused key off the server**
+- [ ] **⏳ OUTSTANDING — Step 5: Take the unused key off the server** *(not confirmed done; treat as
+  still to do)*
 
 The second service account is no longer needed — the existing one reads all four spreadsheets.
 
@@ -1056,12 +1106,14 @@ Check the variable is gone and nothing else changed, then restart web and worker
 
 ### Task 8: Correct the documents
 
-- [ ] Mark `docs/plans/2026-08-06-live-forms-design.md` **✅ BUILT** with the verification numbers, in
+- [x] Mark `docs/plans/2026-08-06-live-forms-design.md` **✅ BUILT** with the verification numbers, in
   the format `2026-08-03-form-areas-design.md` uses. Strike through what changed while building.
-- [ ] Correct `BOT-SPEC.md` §10.1 — it says `PREPARE` is what makes a form an area, and says an empty
+- [x] Correct `BOT-SPEC.md` §10.1 — it says `PREPARE` is what makes a form an area, and says an empty
   `CATEGORY` means `Contact Support`. Both are now wrong. Add `RESPONSES_SHEET_ID` to §10's column
-  list and the column-letter form to its email-column paragraph.
-- [ ] **Ask before touching the artifact.**
+  list and the column-letter form to its email-column paragraph. **Six statements were corrected, in
+  §10 and §10.1 both** — the whole file was searched rather than only the two sections named.
+- [ ] **⏳ OUTSTANDING — Ask before touching the artifact.** Not touched. It is at v9 and is now
+  further out of date, and updating it is its own piece of work to be agreed first.
 
 ```bash
 git add docs/ BOT-SPEC.md && git commit -m "docs: the live forms, as built"

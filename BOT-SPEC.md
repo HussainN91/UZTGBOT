@@ -1639,12 +1639,15 @@ describe.
 
 1. Form links live in the **`FORMS` tab**, synced exactly as the roster and the
    FAQ are — a half-ready row is rejected with its row number and cannot reach a
-   teacher. Columns: `TYPE`, `BUTTON_TEXT`, `URL`, `RESPONSES_TAB`, `ACTIVE`,
-   `CATEGORY`, `PREPARE`, `EMAIL_COLUMN`. The last three are optional and are what
-   make a form an *area* — see §10.1.
+   teacher. Columns: `TYPE`, `BUTTON_TEXT`, `URL`, `RESPONSES_TAB`,
+   `RESPONSES_SHEET_ID`, `ACTIVE`, `CATEGORY`, `PREPARE`, `EMAIL_COLUMN`.
+   Everything after `URL` is optional; `CATEGORY` is the one that turns a form
+   into an *area* — see §10.1.
 2. A teacher taps **Submit Documents**, passes the sign-in and re-consent gates,
    picks a document type and is given that form's link.
-3. Every form writes its responses into a tab of the same spreadsheet. The bot
+3. Each form writes its responses into a tab of **whichever spreadsheet it is
+   linked to**, which is usually one of its own — `RESPONSES_SHEET_ID` on the
+   form's row says which, and blank means the configured spreadsheet. The bot
    reads each one and matches submissions to teachers **by the recruitment email
    the form collects**, checked against the roster.
 4. A match either **joins the complaint the teacher already opened in that area**,
@@ -1665,6 +1668,17 @@ a teacher is sent to; `RESPONSES_TAB` is where their answers land. A row with a
 the bot simply does not read the answers back. That split is deliberate: it lets
 a form be published before its plumbing is finished rather than after.
 
+**A form's answers do not have to be in the bot's own spreadsheet, and usually
+are not.** `RESPONSES_SHEET_ID` names the spreadsheet a form's responses tab
+lives in, and blank means the configured one — so every existing row keeps its
+meaning and the FAQ, the roster and the forms list are unaffected. It exists
+because **Google's default when a form is linked to Sheets is a brand new
+spreadsheet**, so the older rule of "put every form's responses in the one
+spreadsheet the bot can read" was fighting the tool and losing: all of MoPSE's
+real forms had quietly done what Google does. A wrong id fails exactly as a wrong
+`RESPONSES_TAB` does — that one form stops being read and raises a critical alert
+naming it, while every other form goes on filing.
+
 **Three things are refused rather than guessed at**, each reported with its row
 or its tab, because each would otherwise fail far from its cause:
 
@@ -1677,10 +1691,26 @@ or its tab, because each would otherwise fail far from its cause:
   not just its own row. The host is deliberately not restricted to Google.
 - A responses tab with no email column, **or more than one that nothing has
   chosen between**. With `EMAIL_COLUMN` empty the rule is that exactly one column
-  heading may contain the word "email"; with it set, that heading is the answer
-  and is matched exactly after trimming, with nothing inferred. Guessing between a
-  teacher's address and their supervisor's would file somebody's documents under
-  the wrong person, which is a silent, plausible, wrong answer.
+  heading may contain the word "email". Guessing between a teacher's address and
+  their supervisor's would file somebody's documents under the wrong person, which
+  is a silent, plausible, wrong answer.
+
+  **With `EMAIL_COLUMN` set it names the column in one of two ways, tried in this
+  order: the exact heading after trimming, and then — only if no heading matches —
+  the column's letter, such as `D`.** Nothing else is inferred. A heading is
+  always tried first and always wins, so a tab with a column genuinely headed `D`
+  resolves to that column; the letter is only ever reached when nothing in the tab
+  is called what was typed, which is what makes offering it safe. A letter past the
+  end of the header is refused with the width of the tab, not silently clamped.
+
+  **The letter exists because two headings can be the same string.** Google's
+  "Collect email addresses" setting adds a column headed `Email Address`, and a
+  form that also asks for an address as a question of its own produces a second
+  column with that identical heading — which is the state two of MoPSE's live
+  forms are in. No name can tell those apart. The one that matters is the later of
+  the two: the collected address is whatever account the teacher happened to be
+  signed into, frequently a personal one on no roster row, while their own typed
+  answer is the one further along.
 
   **All four of MoPSE's real forms have several email columns and none of them
   could be read before `EMAIL_COLUMN` existed.** Google's "Collect email
@@ -1737,7 +1767,7 @@ in.
 > written now must not carry a branch for a state that is both forbidden and
 > unreachable.
 
-### 10.1 Form areas — a complaint and its paperwork, together — 3 August 2026
+### 10.1 Form areas — a complaint and its paperwork, together — 3 August 2026, amended 6 August
 
 **A form area is a button with a name of its own that files under a case category
 the bot already has.** It is deliberately not a new category: a new category needs
@@ -1749,9 +1779,27 @@ of them without a deployment:
 
 | Column | What it does |
 |---|---|
-| `CATEGORY` | The existing case category a complaint here files under. Empty means `Contact Support` |
-| `PREPARE` | What the teacher should gather, shown above the link. **Filling this in is what makes the form an area** |
-| `EMAIL_COLUMN` | The exact heading of the teacher's own email column in the responses tab |
+| `CATEGORY` | The existing case category a complaint here files under. **Filling this in is what makes the form an area**, and what makes it ask the teacher to write. Empty means it asks for nothing and opens no case |
+| `PREPARE` | What the teacher should gather, shown above the link. Shown either way, whether or not the form asks for anything back |
+| `EMAIL_COLUMN` | Which column holds the teacher's own email address in the responses tab — its exact heading, or its column letter |
+
+> **Two of those meanings changed on 6 August 2026, and the change is worth
+> stating rather than absorbing.** Until then `PREPARE` was the switch, and an
+> empty `CATEGORY` meant `Contact Support`. One cell was therefore deciding two
+> unrelated things — what a teacher should bring, and whether they are asked to
+> describe a problem — so a form could not both tell teachers what to have ready
+> and then leave them alone. Medical Leave is exactly that form: medical detail
+> typed into a chat message becomes case text, where the same words put into the
+> form stay inside Google. **A form that wants `Contact Support` now says so in
+> the cell**; the old default existed only to give Holiday and Medical Leave
+> somewhere to land, and neither wants a case opened at all.
+
+`CATEGORY` is the switch rather than a column beside it because a form with
+nowhere to file a complaint has no business asking for one. "Does it ask?" and
+"where does it go?" are the same question, so answering it once is what stops the
+two answers drifting apart — a separate `ASKS_FOR_MESSAGE` cell would permit "ask
+for a message, file it nowhere", and a cell that can hold a meaningless
+combination eventually holds one.
 
 `CATEGORY` names a category and never a queue, because `QUEUE_FOR_CATEGORY`
 already turns one into the other and a second answer to "who works this" would
@@ -1759,16 +1807,26 @@ drift from the first. **A row naming a category this build does not have is
 rejected with its row number** and the other rows still sync — the same rule a
 misspelled FAQ topic already meets.
 
-**With `PREPARE` set, tapping the button produces one message** — the area's name,
-what to gather, the link, the email warning, and a request to say what is needed.
-What the teacher types next opens a case in that area, through `createCase`, so
-the 24-hour de-duplication, the access re-check and the new-case alert all apply
-unchanged. **The area is re-read when the message arrives, never trusted from the
-conversation state**: a form withdrawn while the teacher was typing must not still
-file under it, and they are told rather than left with silence.
+**With `CATEGORY` set, tapping the button produces one message** — the area's
+name, what to gather if `PREPARE` says anything, the link, the email note, and a
+request to say what is needed. What the teacher types next opens a case in that
+area, through `createCase`, so the 24-hour de-duplication, the access re-check and
+the new-case alert all apply unchanged. **The area is re-read when the message
+arrives, never trusted from the conversation state**: a form withdrawn while the
+teacher was typing must not still file under it, and they are told rather than
+left with silence.
 
-A form with no `PREPARE` behaves exactly as it always did, which is what keeps
-plain document forms unchanged.
+> That re-read is also why an unrecognised category falls back to the general
+> queue instead of being asserted away. A sheet sync landing between the tap and
+> the message can blank the category underneath the teacher, so a null one **can**
+> arrive on this path — and filing their words somewhere a person will read them
+> beats crashing on the one path that carries a complaint.
+
+**With `CATEGORY` blank the form is a link and nothing else.** The teacher gets
+the notes and the link, is told they need send nothing back, and the bot stays out
+of their way: no case is opened and nothing they type afterwards is captured as
+one. That is how plain document forms have always behaved, and it is unchanged for
+every one of them.
 
 **Two columns on `cases` carry it.** `form_type` is the area, and is deliberately
 **not** a foreign key to `form_links` — an area MoPSE retires must not take its
@@ -1788,11 +1846,23 @@ exists in the same area, the submission joins it — a note recording its sheet 
 `awaiting_form` cleared, and the marker written in the same transaction, so the
 idempotency that governs the create path governs the attach path identically.
 
-> **Holiday Leave and Medical Leave are buttons over `Contact Support` and are
-> therefore indistinguishable from any other Contact Support case by category
-> alone.** They carry the area tag, so they are findable, but `/cases` filters on
-> status rather than on area. "Show me every medical leave case" would need a real
+> **Any form area that files under `Contact Support` produces cases
+> indistinguishable from every other Contact Support case by category alone.**
+> They carry the area tag, so they are findable, but `/cases` filters on status
+> rather than on area. "Show me every case from this form" would need a real
 > category, which is the work this deliberately did not do.
+>
+> **This was written on 3 August about Holiday Leave and Medical Leave, and now
+> applies to neither.** Holiday Leave is deliberately not published through the
+> bot at all, and Medical Leave is drafted with a blank `CATEGORY`, so it would
+> open no case to be indistinguishable. The caution stands for whatever area is
+> pointed at `Contact Support` next.
+
+> **Two forms are live: Accommodation and Travel and Visa Reimbursement**, filing
+> under `Accommodation` and `Travel and Arrival`. Both ask the teacher to describe
+> the problem. **No live form uses the blank-`CATEGORY` path today** — Medical
+> Leave, the form that path was built for, is deferred — so that behaviour is held
+> by its tests alone rather than by anything in the sheet.
 
 ---
 
