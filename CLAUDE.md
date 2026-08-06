@@ -217,18 +217,20 @@ scrollback and is still live. Tests for a hidden control must tap it.
 the end, in one pass. Corrections to a plan are **struck through with the correction against them**,
 never written over the top — so a later reader sees what was originally decided and why it changed.
 
-### The artifact
+### There is no summary artifact, and there is not going to be one
 
-`https://claude.ai/code/artifact/64bce4b9-a63e-4dee-a883-9b0ecb457b53` — the head of project's own
-summary document. **It flows one way, from what was built to them. Never read it to get up to
-speed.** It is at v9 and badly stale. Ask before spending a session's remaining budget on it.
+A published summary document was kept until **6 August 2026** and has been **retired and deleted**.
+**Do not look for it, do not recreate it, and do not offer to.**
 
-Update it **in place** by passing that URL as `url`; never mint a new one. Favicon 🤖, keep it.
-`WebFetch` it, strip the frame wrapper, **edit the remainder rather than rewriting it**, bump the
-version in four places (sidebar, masthead eyebrow, footer "Version N", footer prose), and update the
-metrics row.
+It was the second thing to die of the same cause as the rolling handoff, retired on 1 August: it held
+nothing that was not already in the repository. Everything in it flowed one way — out of the code and
+the plans, into a restatement — so it could only ever be a copy, and a copy that is expensive to
+maintain is a copy that goes stale. It reached v9 and was three weeks behind the running system.
 
-What belongs in it, in their words: what a person can now *do*; anything that changes what a teacher
-sees; every fault found, including in already-committed code; anything that cost more than the plan
-said; and what is still waiting on MoPSE. What does not: file names, function names, task numbers as
-the subject of a sentence, or any figure nobody ran.
+In the head of project's own words: *"we have a runbook, we have git, we have github."* That is the
+whole argument. `RUNBOOK.md` is how to operate it, `BOT-SPEC.md` is what it does, the design documents
+are why, and git is what changed and when. A tenth restatement of those four helps nobody.
+
+**When a session ends, write the summary into the conversation and into the plan's own document.**
+Do not create a new status document, a new handoff, or a new artifact to hold it. See
+[[prefers-one-source-of-truth]].
