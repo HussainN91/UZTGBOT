@@ -517,7 +517,7 @@ caught by a person instead.
 | **Each staff member's Telegram handle** | The `/username` command, run by that person for themselves | Teachers asking who covers their region are shown a name and the support address, with nothing to tap through to. This is a reduced service and not a fault |
 | **The FAQ answers and the teacher roster** | The spreadsheet, synced every ten minutes | The bot can answer nothing, and nobody can sign in |
 | **The `FORMS` tab** | The spreadsheet, synced every ten minutes | Submit Documents tells every teacher that there are no document forms available at the moment. The button itself still appears |
-| **Each form's responses linked into the same spreadsheet** | §4.18, which is a procedure in its own right | Teachers can still submit. **Nothing is ever read back**, so no case is filed, nobody is chased, and no alarm sounds, because from the bot's point of view nothing has happened |
+| **Each form's responses linked to a spreadsheet, and that spreadsheet named on the `FORMS` tab** | §4.18, which is a procedure in its own right | Teachers can still submit. **Nothing is ever read back**, so no case is filed, nobody is chased, and no alarm sounds, because from the bot's point of view nothing has happened |
 | **The word "email" in each form's email question, and in no other question** | At the point the form is built. §4.18 | That form's responses are refused as a whole, and an alarm names it. **This is the one item here that does complain** |
 
 > **One group is deliberately absent from this list, and you still have to set it.**
@@ -843,6 +843,13 @@ With at least one form published (§4.18):
 4. Wait ten minutes, then run `/cases` as a staff member. A **Submit Documents**
    case must exist for that teacher, carrying a note naming the form.
 5. Check the teacher's side: **Check My Case** must show it.
+
+> **A form with a `CATEGORY` filled in behaves slightly differently at step 2**, and
+> both of the forms going live are like that. After the link, it also asks you to say
+> what you need. If you answer, that opens a case straight away under the form's own
+> area — `Accommodation`, for instance — rather than under `Submit Documents`, and
+> the submission joins that case when it arrives ten minutes later. The numbered
+> steps above describe a form whose `CATEGORY` is blank. §4a explains the difference.
 
 **Then submit the same form a second time** and wait another ten minutes. You
 must still have **one** case, now with **two** notes. A second case means the
@@ -1744,7 +1751,7 @@ work moving rather than as work disappearing.**
 
 ## 4.18 Publishing a document form, the whole procedure
 
-**Do all six steps. Steps 3 and 4 are the ones that go wrong**, and when they do
+**Do all six steps. Steps 2, 3 and 4 are the ones that go wrong**, and when they do
 the bot looks perfectly healthy while quietly reading nothing. Step 7 is not part
 of publishing a form — it is how to retire one without losing anybody's documents.
 
@@ -1775,6 +1782,12 @@ Those are the right questions to ask. **Do not reword them.** Fill in
 `EMAIL_COLUMN` instead — step 4 — and the bot will stop guessing and use the
 question you named.
 
+**And two of those columns will often carry exactly the same heading.** The one
+Google adds and the one the form asks for itself are both called `Email Address`,
+letter for letter, so there is nothing to tell them apart by name. When that
+happens, `EMAIL_COLUMN` takes the column's **letter** instead — step 4 says which
+of the two to point it at, and why it is the later one.
+
 If several questions mention email and you have *not* named one, the bot refuses
 that form's responses entirely and the operations chat says so, listing the
 headings it found. It refuses rather than guessing because filing somebody's
@@ -1783,24 +1796,44 @@ documents under their supervisor is worse than not filing them.
 **Make the email question required.** A submission with no address can never be
 matched to anybody.
 
-### 2. Send the responses to the right spreadsheet
+### 2. Link the form to a spreadsheet, and note which spreadsheet that is
 
 **This is the step that decides whether anything works.** In the form:
 
 1. Open the **Responses** tab at the top of the form editor.
 2. Click **Link to Sheets** (a green spreadsheet icon). If the form is already
-   linked to the wrong place, use the ⋮ menu → **Unlink form** first.
-3. Choose **Select existing spreadsheet**.
-4. Pick **the same spreadsheet that holds `FAQ`, `ROSTER` and `FORMS`.** Not a
-   new one, not a copy. The bot can read one spreadsheet and only one.
-5. Google adds a new tab to that spreadsheet. **Write down its exact name**, because it
-   is usually "Form Responses 1", or the form's title.
+   linked somewhere nobody can find, use the ⋮ menu → **Unlink form** first and
+   start again.
+3. **Letting Google create a new spreadsheet is perfectly fine**, and it is what
+   Google does unless you deliberately stop it. Every one of MoPSE's live forms
+   keeps its answers in a spreadsheet of its own. You may instead choose the
+   spreadsheet that holds `FAQ`, `ROSTER` and `FORMS`, and then there is one less
+   thing to fill in later — but there is no longer any reason to insist on it.
+4. **If the answers are going into a spreadsheet of their own, do these two
+   things now**, because nothing else in the procedure will remind you:
+   - **Copy that spreadsheet's id out of its web address.** It is the long run of
+     letters and numbers between `/d/` and `/edit`. It goes in
+     `RESPONSES_SHEET_ID` in step 4.
+   - **Share that spreadsheet with the account the bot reads as.** Open the main
+     spreadsheet's **Share** list, copy the address ending in
+     `.gserviceaccount.com`, and give it **Viewer** on the new spreadsheet. Without
+     that the bot cannot open the file at all, and the operations chat will tell
+     you the form could not be read.
+5. Google adds a tab to whichever spreadsheet the answers land in. **Write down its
+   exact name**, because it is usually "Form Responses 1", or the form's title.
+
+> **This rule was the opposite way round until 6 August 2026**, when the runbook
+> told you to put every form's responses into the one spreadsheet the bot could
+> read. That fought Google's own default and lost: linking a form makes a new
+> spreadsheet unless somebody remembers to override it, and all of MoPSE's real
+> forms had quietly done exactly that. The bot now reads wherever the answers
+> actually are, and you tell it where in one cell.
 
 ### 3. Note the tab's exact name
 
-Open the spreadsheet and look at the new tab along the bottom. Copy its name
-character for character, including spaces and capitals. `Form Responses 1` is not
-the same as `Form responses 1`.
+Open the spreadsheet the answers are going to and look at the new tab along the
+bottom. Copy its name character for character, including spaces and capitals.
+`Form Responses 1` is not the same as `Form responses 1`.
 
 Renaming the tab to something meaningful, such as `PASSPORT_RESPONSES`, is a good idea,
 and easier to get right later. Do it now, before step 4, not after.
@@ -1813,34 +1846,92 @@ and easier to get right later. Do it now, before step 4, not after.
 | `BUTTON_TEXT` | yes | What the teacher sees on the button. An emoji is fine, for example `🛂 Passport copy` |
 | `URL` | yes | The form's link, from **Send → 🔗** in Google Forms. Must start with `https://` |
 | `RESPONSES_TAB` | no | **The exact tab name from step 3.** These two must match perfectly |
+| `RESPONSES_SHEET_ID` | no | **Which spreadsheet the answers are in.** Blank means the same one that holds `FAQ`, `ROSTER` and `FORMS`. See below |
 | `ACTIVE` | no | `TRUE` to show it, `FALSE` to hide it. Blank means shown |
-| `CATEGORY` | no | Which area a complaint raised here is filed under. Blank means `Contact Support`. See below |
-| `PREPARE` | no | What the teacher should gather, shown above the link. **Filling this in turns the form into an area** — see below |
-| `EMAIL_COLUMN` | no | The exact heading of the question holding the teacher's own email address |
+| `CATEGORY` | no | Which area a complaint raised here is filed under. **Filling this in is what makes the form ask the teacher to describe their problem** — see §4a. Blank means it asks for nothing and opens no case |
+| `PREPARE` | no | What the teacher should gather, shown above the link. Shown whether or not the form asks for anything back |
+| `EMAIL_COLUMN` | no | Which column holds the teacher's own email address — either its exact heading, or its column letter such as `D`. See below |
 
 Leave `RESPONSES_TAB` blank if the form is not linked yet. The button still
 appears and teachers can still submit, but the bot will not read anything back
 until you fill it in.
 
-**Finding the right `EMAIL_COLUMN`.** Open the responses spreadsheet, look along
-the top row, and copy the heading of the question that asks the teacher for *their
-own* address — not the school's, not an emergency contact's. Copy it character for
-character. **Including a trailing space if there is one**, which there often is,
-because Google keeps whatever was typed when the form was built. If you get it
-wrong the operations chat tells you the heading it looked for and lists every
-heading that is actually there, so it is a one-minute fix rather than a mystery.
+**Finding the `RESPONSES_SHEET_ID`.** Open the spreadsheet the answers arrive in
+and look at its web address. Between `/d/` and `/edit` there is a long run of
+letters and numbers, of the shape
+`docs.google.com/spreadsheets/d/`**`1AbCd…9XyZ`**`/edit`. That middle part is the
+id, and you copy the whole of it into the cell — it is around forty characters and
+none of them may be left off. Leave the cell blank **only** when the answers are in
+the same spreadsheet as `FAQ`, `ROSTER` and `FORMS`. Because Google makes a new
+spreadsheet for each form unless somebody stops it, **filling this in is the
+ordinary case rather than the exception.**
+
+The id is not a secret and does not need protecting: it is what the spreadsheet is
+called, and access is granted by sharing the file, not by keeping the id quiet.
+
+**A wrong `RESPONSES_SHEET_ID` fails exactly the way a wrong `RESPONSES_TAB`
+does.** That one form stops being read, the operations chat raises a red alarm
+naming it, and every other form goes on filing normally. So a mistake here costs
+you one form rather than all of them, and the fix is one cell — but it is now one
+more cell that can be wrong in that way, so check it against the web address
+before you walk away.
+
+**Filling in `EMAIL_COLUMN`.** It accepts either of two things, and it tries them
+in this order:
+
+1. **The exact heading** of the question asking the teacher for *their own*
+   address — not the school's, not an emergency contact's. Copy it character for
+   character, **including a trailing space if there is one**, which there often is,
+   because Google keeps whatever was typed when the form was built.
+2. **The column's letter**, such as `D` — the letter printed along the very top of
+   the responses spreadsheet, above that column.
+
+A heading is always tried first, and a heading always wins. So if some column
+really is called `D`, writing `D` finds that column and not the fourth one; the
+letter is only ever reached when no column is called what you typed. That order is
+what makes the letter safe to offer at all.
+
+**Why the letter exists, because you will need it.** Google's own **Collect email
+addresses** setting adds a column headed `Email Address`. A form that also asks for
+an email address as a question of its own produces a second column with that
+identical heading. No name can tell those two apart, and **two of MoPSE's real
+forms are in exactly that state today.** The one you want is the **later** of the
+two: the collected address comes first and holds whatever Google account the
+teacher happened to be signed into, which is very often a personal address on no
+roster row, while their own typed answer is the one further along. Count the
+columns across the top row, find the one holding what the teacher typed, and put
+its letter in the cell.
+
+If you get it wrong the operations chat tells you the heading or letter it looked
+for and lists every heading that is actually there, so it is a one-minute fix
+rather than a mystery. A letter past the end of the sheet is named too, along with
+how many columns there really are.
 
 Leave `EMAIL_COLUMN` blank when only one question mentions email. Nothing changes.
 
 ### 4a. Form areas — a complaint and its paperwork together
 
-**Fill in `PREPARE` and the form stops being just a link.** The teacher is shown
+**Fill in `CATEGORY` and the form stops being just a link.** The teacher is shown
 what to gather, then the link, then asked to say what they need — and what they
-type opens a case with the paperwork attached to it when it arrives. Before this,
-a teacher with a problem could either submit documents or describe the problem,
-and nothing joined the two.
+type opens a case, filed under that area, with the paperwork attached to it when
+it arrives. Before this, a teacher with a problem could either submit documents or
+describe the problem, and nothing joined the two.
 
-`CATEGORY` decides who works it. It must be one of the areas the bot already has:
+**Leave `CATEGORY` blank and the form is a link and nothing else.** The teacher
+gets the notes and the link, is told they need send nothing back, and the bot then
+stays out of their way. No case is opened, and nothing they type afterwards is
+filed as one. That is the right setting for a form whose subject does not belong in a
+chat message: medical detail typed to the bot is stored as case text, where the
+same words put into the form itself stay inside Google.
+
+**`PREPARE` is what to have ready, and nothing else.** It is shown either way, so a
+form that wants nothing back can still tell teachers what to bring. Until 6 August
+2026 these were one cell — filling in `PREPARE` was what made a form ask — and a
+form therefore could not both prepare a teacher and then leave them alone. That is
+what changed, and it is the only thing about form areas that changed.
+
+`CATEGORY` also decides who works the case. It must be one of the areas the bot
+already has:
 
 `Visa` · `Travel and Arrival` · `Contract Signing` · `Accommodation` ·
 `Submit Documents` · `Contact Support`
@@ -1851,17 +1942,25 @@ rows still sync, so a typo costs you one form rather than all of them.
 This is the mapping we recommend, and it is yours to change in the sheet at any
 time — no developer needed:
 
-| The button says | Filed under |
-|---|---|
-| Accommodation | `Accommodation` |
-| Reimbursement | `Travel and Arrival` |
-| Holiday Leave | `Contact Support` |
-| Medical Leave | `Contact Support` |
+| The button says | `CATEGORY` | What the teacher gets |
+|---|---|---|
+| Accommodation | `Accommodation` | Asked to describe the problem, and a case opens under Accommodation |
+| Travel and Visa Reimbursement | `Travel and Arrival` | Asked to describe the problem, and a case opens under Travel and Arrival |
+| Medical Leave | *(blank)* | The notes and the link, and nothing more asked of them |
 
-Holiday Leave and Medical Leave get a button with their own name but no area of
-their own, which is deliberate: a new area needs its own queue, its own staff and
-its own reference numbers, and two of those do not exist yet. The button is what
-the teacher sees, and the filing happens quietly behind it.
+**Accommodation and Travel and Visa Reimbursement are the two forms live today.**
+Medical Leave is drafted and is not published yet, so at this moment nothing in the
+sheet actually uses the blank-category behaviour. It is written down here because it
+is what you will want the day that third form goes up, and a setting nobody has used
+yet is exactly the one worth explaining before somebody needs it. The Holiday Leave
+form exists in Google and is deliberately not published through the bot at all.
+
+**If you do want a case opened for a form with no area of its own**, write
+`Contact Support` in the cell and it goes to the general queue. It has to say so
+now: a blank cell used to mean `Contact Support` and no longer does. That default
+existed only to give Holiday Leave and Medical Leave somewhere to land, and neither
+of them wants a case opened at all — while an area of their own would need its own
+queue, its own staff and its own reference numbers, none of which exist.
 
 **Keep `PREPARE` short.** It is read on a phone, in a chat, before the teacher
 leaves for the form. The list of documents, the filename to use, and one warning
@@ -1885,9 +1984,13 @@ minutes:
 - A `Submit Documents` case should exist for that teacher, which you check with `/cases`.
 - The case should carry a note naming the form.
 
-**If nothing appears**, it is almost always step 2 or step 4: the responses went
-to a different spreadsheet, or `RESPONSES_TAB` does not match the tab name.
-Compare the two, character for character.
+**If nothing appears**, it is almost always step 2 or step 4, and there are now
+three cells to compare against what Google actually did: `RESPONSES_SHEET_ID`
+against the spreadsheet's web address, `RESPONSES_TAB` against the tab name, and
+`EMAIL_COLUMN` against the column holding the address you submitted with. Compare
+each of them character for character. If the spreadsheet was never shared with the
+account the bot reads as, the operations chat will already have said the form could
+not be read.
 
 ### 7. Retiring a form — leave the row on the sheet for a day
 
@@ -1896,7 +1999,10 @@ Compare the two, character for character.
 > the teacher and not the staff.
 >
 > **So when you stop telling teachers about a form, leave its row on the `FORMS`
-> tab for a day**, with `RESPONSES_TAB` still filled in. Set `ACTIVE` to `FALSE`
+> tab for a day**, with `RESPONSES_TAB` and `RESPONSES_SHEET_ID` both still filled
+> in. Emptying the spreadsheet id sends the bot looking in the main spreadsheet
+> instead, where that tab does not exist, so the reading stops there too — it just
+> raises an alarm on the way. Set `ACTIVE` to `FALSE`
 > if you want the button gone immediately; that hides it from teachers while the
 > bot goes on reading. Then delete the row the next day, once anything already
 > submitted has been swept up.
@@ -1962,7 +2068,7 @@ receive something not on this list, it did not come from the bot.
 |---|---|---|---|
 | `Submissions from teachers who have not signed in` | 🟠 | Their email IS on the roster, but they have never opened the bot, so there is no case to file against. **Their documents are safely submitted** | Ask each named teacher to open the bot and sign in. Nothing is lost. §4.18 |
 | `Submissions that matched no teacher` | 🟠 | The address is on no active roster row. Either they used a different address, or the roster is missing them | Check the roster for that person. If they belong there, add them; the next thing they submit will file normally. §4.18 |
-| `Form “…” could not be read` | 🔴 | One form's responses tab could not be opened, or its email question is wrong. **That form's submissions are not reaching anybody.** Every other form is unaffected | Almost always `RESPONSES_TAB` not matching the real tab name, or two questions mentioning "email". §4.18, steps 3 and 4 |
+| `Form “…” could not be read` | 🔴 | One form's responses could not be opened, or its email question is wrong. **That form's submissions are not reaching anybody.** Every other form is unaffected | Almost always one of four things: `RESPONSES_TAB` not matching the real tab name, `RESPONSES_SHEET_ID` naming a spreadsheet that does not exist, that spreadsheet never having been shared with the account the bot reads as, or two questions mentioning "email" with nothing in `EMAIL_COLUMN` to choose between them. §4.18, steps 2, 3 and 4 |
 | `Form submissions rejected` | 🟠 | Individual submissions had no email address in them | Nothing to fix in the bot. If it keeps happening, make the email question **required** in that form. §4.18 |
 | `Form responses sync failed` | 🔴 | The whole document read-back failed, not one form | §5.4, then check the operations chat for a sync alarm alongside it |
 
